@@ -10,7 +10,7 @@
 # cloth material come from the USDA. Cloth-only; rigid bundles are rejected.
 #
 # Usage:
-#   python -m newton.examples.cloth.example_palatial_twist
+#   python -m newton.examples.palatial.example_palatial_twist
 #       <converted_cloth.usda> [--gui] [--steps N] [--substeps N]
 #       [--twist-axis x|y|z] [--angular-velocity RAD_PER_SEC]
 #       [--end-time SECONDS] [--edge-thickness METERS] [--gravity 0|1]

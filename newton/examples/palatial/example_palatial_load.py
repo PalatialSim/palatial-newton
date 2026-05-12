@@ -14,7 +14,7 @@
 # cloth t-shirt.
 #
 # Usage:
-#   python -m newton.examples.cloth.example_palatial_load <converted.usda>
+#   python -m newton.examples.palatial.example_palatial_load <converted.usda>
 #       [--steps 600] [--gui] [--substeps N]
 
 from __future__ import annotations
