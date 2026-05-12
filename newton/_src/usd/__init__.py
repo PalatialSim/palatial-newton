@@ -7,6 +7,18 @@ try:
 except ImportError:
     pass
 
+#defining our APIS
+import pathlib as _pathlib
+
+from pxr import Plug as _Plug
+
+_Plug.Registry().RegisterPlugins([
+    str((_pathlib.Path(__file__).parent / "schemas_ext").absolute())
+])
+_p = _Plug.Registry().GetPluginWithName("newton_shell")
+if _p and not _p.isLoaded:
+    _p.Load()
+
 from .utils import (
     get_attribute,
     get_attributes_in_namespace,
