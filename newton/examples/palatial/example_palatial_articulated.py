@@ -271,6 +271,11 @@ def main(argv=None) -> int:
     p.add_argument("--rotate-x", type=float, default=0.0, help="Rotate asset around X (degrees)")
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
+    p.add_argument("--record-mp4", default=None,
+                   help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
+                        "and pipes frames to ffmpeg with a front-facing camera.")
+    p.add_argument("--mp4-fps", type=int, default=60,
+                   help="Output mp4 framerate (default 60)")
     p.add_argument("--use-usd-viewer", action="store_true",
                    help="Record sim to a USD file (textured playback for usdview).")
     p.add_argument("--usd-out", type=str, default=None,
@@ -311,8 +316,14 @@ def main(argv=None) -> int:
         rec_viewer = v.ViewerUSD(usd_out, fps=args.usd_fps, up_axis=args.usd_up_axis,
                                  num_frames=num_frames)
 
-    # Build the live viewer (GL window) if --gui, else a Null viewer.
-    live_viewer = v.ViewerGL(headless=False) if args.gui else v.ViewerNull()
+    # Build the live viewer. With --record-mp4 we need a GL framebuffer
+    # (headless unless --gui); otherwise GL window for --gui, else Null.
+    if args.record_mp4:
+        live_viewer = v.ViewerGL(headless=not args.gui)
+    elif args.gui:
+        live_viewer = v.ViewerGL(headless=False)
+    else:
+        live_viewer = v.ViewerNull()
 
     # Fan out to both when both are requested; otherwise just use the recorder
     # (no --gui) or just the live viewer (no --use-usd-viewer).
@@ -348,7 +359,45 @@ def main(argv=None) -> int:
                 return True
         return bool(ir)
 
-    i = 0
+    # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
+    cam_target = live_viewer if isinstance(live_viewer, v.ViewerGL) else None
+    if args.record_mp4 and cam_target is not None and hasattr(cam_target, "set_camera"):
+        import numpy as _np
+        bq = ex.state_0.body_q.numpy()[:, 0:3]
+        cx = float(bq[:, 0].mean())
+        cy = float(bq[:, 1].mean())
+        cz_mid = float((bq[:, 2].min() + bq[:, 2].max()) * 0.5)
+        ext_x = float(bq[:, 0].max() - bq[:, 0].min())
+        ext_y = float(bq[:, 1].max() - bq[:, 1].min())
+        ext_z = float(bq[:, 2].max() - bq[:, 2].min())
+        dist = max(ext_x, ext_y, ext_z, 1.0) * 2.2
+        # Z-up: camera in -Y, looking toward +Y → yaw=90, pitch=0.
+        cam_target.set_camera(wp.vec3(cx, cy - dist, cz_mid), 0.0, 90.0)
+        print(f"  front-view camera: pos=({cx:.3f},{cy - dist:.3f},{cz_mid:.3f})")
+
+    # ---- mp4 recorder (ffmpeg subprocess) ----
+    ffmpeg_proc = None
+    if args.record_mp4:
+        import subprocess, shutil
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
+        ex.render()
+        frame = cam_target.get_frame() if cam_target is not None else live_viewer.get_frame()
+        h, w, _ = frame.shape
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
+            "-i", "-",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-crf", "20", "-preset", "fast",
+            args.record_mp4,
+        ]
+        ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        ffmpeg_proc.stdin.write(frame.numpy().tobytes())
+        print(f"  recording mp4: {args.record_mp4}  size={w}x{h}  fps={args.mp4_fps}")
+
+    i = 1 if ffmpeg_proc is not None else 0
     try:
         while True:
             # Stop if the live viewer was closed (GL window X), the recorder
@@ -359,8 +408,16 @@ def main(argv=None) -> int:
                 break
             ex.step()
             ex.render()
+            if ffmpeg_proc is not None and cam_target is not None:
+                ffmpeg_proc.stdin.write(cam_target.get_frame().numpy().tobytes())
             i += 1
     finally:
+        if ffmpeg_proc is not None:
+            try:
+                ffmpeg_proc.stdin.close()
+                ffmpeg_proc.wait(timeout=30)
+            except Exception:
+                ffmpeg_proc.kill()
         try:
             viewer.close()
         except Exception:

@@ -436,6 +436,13 @@ def main(argv=None) -> int:
     p.add_argument("--rotate-x", type=float, default=0.0, help="Rotate asset around X (degrees)")
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
+
+    # mp4 recording (front-facing camera).
+    p.add_argument("--record-mp4", default=None,
+                   help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
+                        "and pipes frames to ffmpeg with a front-facing camera.")
+    p.add_argument("--mp4-fps", type=int, default=60,
+                   help="Output mp4 framerate (default 60)")
     args = p.parse_args(argv)
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
@@ -451,7 +458,12 @@ def main(argv=None) -> int:
         return out
 
     from newton import viewer as v
-    viewer = v.ViewerGL(headless=False) if args.gui else v.ViewerNull()
+    if args.record_mp4:
+        viewer = v.ViewerGL(headless=not args.gui)
+    elif args.gui:
+        viewer = v.ViewerGL(headless=False)
+    else:
+        viewer = v.ViewerNull()
 
     ex = Example(viewer, args.usd, substeps=args.substeps,
                  drop_height=args.drop_height, device=args.device,
@@ -475,19 +487,69 @@ def main(argv=None) -> int:
                  rotate_y_deg=args.rotate_y,
                  rotate_z_deg=args.rotate_z)
 
-    i = 0
+    # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
+    if args.record_mp4 and hasattr(ex.viewer, "set_camera"):
+        import numpy as _np
+        n_p = int(ex.model.particle_count)
+        if n_p > 0:
+            pq = ex.state_0.particle_q.numpy()
+        else:
+            pq = ex.state_0.body_q.numpy()[:, 0:3]
+        cx = float(pq[:, 0].mean())
+        cy = float(pq[:, 1].mean())
+        cz_mid = float((pq[:, 2].min() + pq[:, 2].max()) * 0.5)
+        ext_x = float(pq[:, 0].max() - pq[:, 0].min())
+        ext_y = float(pq[:, 1].max() - pq[:, 1].min())
+        ext_z = float(pq[:, 2].max() - pq[:, 2].min())
+        dist = max(ext_x, ext_y, ext_z, 1.0) * 2.2
+        # Z-up: camera in -Y, looking toward +Y → yaw=90, pitch=0.
+        ex.viewer.set_camera(wp.vec3(cx, cy - dist, cz_mid), 0.0, 90.0)
+        print(f"  front-view camera: pos=({cx:.3f},{cy - dist:.3f},{cz_mid:.3f})")
+
+    # ---- mp4 recorder (ffmpeg subprocess) ----
+    ffmpeg_proc = None
+    if args.record_mp4:
+        import subprocess, shutil
+        if shutil.which("ffmpeg") is None:
+            raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
+        ex.render()
+        frame = ex.viewer.get_frame()
+        h, w, _ = frame.shape
+        cmd = [
+            "ffmpeg", "-y", "-loglevel", "error",
+            "-f", "rawvideo", "-pix_fmt", "rgb24",
+            "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
+            "-i", "-",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-crf", "20", "-preset", "fast",
+            args.record_mp4,
+        ]
+        ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+        ffmpeg_proc.stdin.write(frame.numpy().tobytes())
+        print(f"  recording mp4: {args.record_mp4}  size={w}x{h}  fps={args.mp4_fps}")
+
+    i = 1 if ffmpeg_proc is not None else 0
+    use_step_count = bool(args.record_mp4) or not args.gui
     try:
         while True:
-            if args.gui:
-                if not getattr(viewer, "is_running", True):
+            if use_step_count:
+                if i >= args.steps:
                     break
             else:
-                if i >= args.steps:
+                if not getattr(viewer, "is_running", True):
                     break
             ex.step()
             ex.render()
+            if ffmpeg_proc is not None:
+                ffmpeg_proc.stdin.write(ex.viewer.get_frame().numpy().tobytes())
             i += 1
     finally:
+        if ffmpeg_proc is not None:
+            try:
+                ffmpeg_proc.stdin.close()
+                ffmpeg_proc.wait(timeout=30)
+            except Exception:
+                ffmpeg_proc.kill()
         try:
             viewer.close()
         except Exception:
