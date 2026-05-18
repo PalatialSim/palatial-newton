@@ -406,6 +406,15 @@ def main(argv=None) -> int:
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
 
+    # Optional physics JSON: overrides --cloth-particle-radius from
+    # solver.vbd_particle_self_contact_radius and --bending-ke from
+    # cloth.bend_stiffness when present.
+    p.add_argument("--physics-json", default=None,
+                   help="Path to a physics JSON. If given, "
+                        "solver.vbd_particle_self_contact_radius overrides "
+                        "--cloth-particle-radius and cloth.bend_stiffness "
+                        "overrides --bending-ke.")
+
     # Cloth tuning (only applied when bundle.body_type == "cloth").
     p.add_argument("--cloth-particle-radius", type=float, default=0.008)
     p.add_argument("--soft-contact-ke", type=float, default=100.0)
@@ -446,6 +455,23 @@ def main(argv=None) -> int:
     p.add_argument("--top-view", action="store_true",
                    help="Place camera straight above the asset looking down")
     args = p.parse_args(argv)
+
+    # Apply physics-json overrides for cloth-particle-radius and bending-ke.
+    if args.physics_json:
+        import json
+        with open(args.physics_json) as _f:
+            _phys = json.load(_f)
+        _r = _phys.get("solver", {}).get("vbd_particle_self_contact_radius")
+        if _r is not None:
+            args.cloth_particle_radius = float(_r)
+        _b = _phys.get("cloth", {}).get("bend_stiffness")
+        if _b is not None:
+            args.bending_ke = float(_b)
+        print(
+            f"  physics-json: {args.physics_json}  "
+            f"cloth_particle_radius={args.cloth_particle_radius}  "
+            f"bending_ke={args.bending_ke}"
+        )
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
         if not s:
