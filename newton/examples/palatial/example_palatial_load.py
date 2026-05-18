@@ -443,6 +443,8 @@ def main(argv=None) -> int:
                         "and pipes frames to ffmpeg with a front-facing camera.")
     p.add_argument("--mp4-fps", type=int, default=60,
                    help="Output mp4 framerate (default 60)")
+    p.add_argument("--top-view", action="store_true",
+                   help="Place camera straight above the asset looking down")
     args = p.parse_args(argv)
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
@@ -487,8 +489,24 @@ def main(argv=None) -> int:
                  rotate_y_deg=args.rotate_y,
                  rotate_z_deg=args.rotate_z)
 
+    # ---- Top-down camera (ViewerGL only) ----
+    if args.top_view and hasattr(ex.viewer, "set_camera"):
+        n_p = int(ex.model.particle_count)
+        if n_p > 0:
+            pq = ex.state_0.particle_q.numpy()
+        else:
+            pq = ex.state_0.body_q.numpy()[:, 0:3]
+        cx, cy = float(pq[:, 0].mean()), float(pq[:, 1].mean())
+        zmax = float(pq[:, 2].max())
+        ext_x = float(pq[:, 0].max() - pq[:, 0].min())
+        ext_y = float(pq[:, 1].max() - pq[:, 1].min())
+        height = zmax + max(ext_x, ext_y, 1.0) * 1.5
+        # pitch -90 looks straight down, yaw 0 keeps +Y up in image.
+        ex.viewer.set_camera(wp.vec3(cx, cy, height), -90.0, 0.0)
+        print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
+
     # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
-    if args.record_mp4 and hasattr(ex.viewer, "set_camera"):
+    elif args.record_mp4 and hasattr(ex.viewer, "set_camera"):
         import numpy as _np
         n_p = int(ex.model.particle_count)
         if n_p > 0:
