@@ -559,18 +559,32 @@ def main(argv=None) -> int:
         ex.render()
         frame = ex.viewer.get_frame()
         h, w, _ = frame.shape
+        # libx264 requires even dimensions; crop to nearest even size.
+        enc_w = w - (w % 2)
+        enc_h = h - (h % 2)
         cmd = [
             "ffmpeg", "-y", "-loglevel", "error",
             "-f", "rawvideo", "-pix_fmt", "rgb24",
-            "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
+            "-s", f"{enc_w}x{enc_h}", "-r", str(args.mp4_fps),
             "-i", "-",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-crf", "20", "-preset", "fast",
             args.record_mp4,
         ]
         ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-        ffmpeg_proc.stdin.write(frame.numpy().tobytes())
-        print(f"  recording mp4: {args.record_mp4}  size={w}x{h}  fps={args.mp4_fps}")
+        ffmpeg_proc.stdin.write(frame.numpy()[:enc_h, :enc_w, :].tobytes())
+        print(f"  recording mp4: {args.record_mp4}  size={enc_w}x{enc_h}  fps={args.mp4_fps}")
+
+    # Decimation so 1s sim == 1s video: advance physics_per_video physics frames
+    # for every mp4 frame written. With sim_fps=240 and --mp4-fps=60 → 4 steps/frame.
+    physics_per_video = (
+        max(1, int(round(float(ex.fps) / float(args.mp4_fps))))
+        if ffmpeg_proc is not None
+        else 1
+    )
+    if ffmpeg_proc is not None:
+        print(f"  physics/video decimation: {physics_per_video} sim step(s) per mp4 frame "
+              f"(sim_fps={ex.fps}, mp4_fps={args.mp4_fps})")
 
     i = 1 if ffmpeg_proc is not None else 0
     use_step_count = bool(args.record_mp4) or not args.gui
@@ -582,10 +596,11 @@ def main(argv=None) -> int:
             else:
                 if not getattr(viewer, "is_running", True):
                     break
-            ex.step()
+            for _ in range(physics_per_video):
+                ex.step()
             ex.render()
             if ffmpeg_proc is not None:
-                ffmpeg_proc.stdin.write(ex.viewer.get_frame().numpy().tobytes())
+                ffmpeg_proc.stdin.write(ex.viewer.get_frame().numpy()[:enc_h, :enc_w, :].tobytes())
             i += 1
     finally:
         if ffmpeg_proc is not None:
