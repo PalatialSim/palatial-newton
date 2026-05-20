@@ -62,6 +62,94 @@ class Example:
         self.state_1 = bundle.state_out
         self.control = bundle.control
 
+        # ---- Optional rotation of the asset around world axes (degrees) ----
+        # Runs BEFORE drop_height so the lift always ends up along world +z,
+        # regardless of which axis the user rotates around.
+        if rotate_x_deg or rotate_y_deg or rotate_z_deg:
+            import math as _math
+            import numpy as _np
+
+            def _axis_quat(axis, deg):
+                a = _math.radians(deg) * 0.5
+                s, c = _math.sin(a), _math.cos(a)
+                return _np.array([
+                    s if axis == 0 else 0.0,
+                    s if axis == 1 else 0.0,
+                    s if axis == 2 else 0.0,
+                    c,
+                ], dtype=_np.float32)
+
+            def _qmul(a, b):
+                ax, ay, az, aw = a
+                bx, by, bz, bw = b
+                return _np.array([
+                    aw*bx + ax*bw + ay*bz - az*by,
+                    aw*by - ax*bz + ay*bw + az*bx,
+                    aw*bz + ax*by - ay*bx + az*bw,
+                    aw*bw - ax*bx - ay*by - az*bz,
+                ], dtype=_np.float32)
+
+            def _qrot_vec(q, v):
+                # rotate vec3 v by quat (qx,qy,qz,qw)
+                qx, qy, qz, qw = q
+                # cross(q.xyz, v) * 2
+                t = 2.0 * _np.cross([qx, qy, qz], v)
+                return v + qw * t + _np.cross([qx, qy, qz], t)
+
+            qrot = _np.array([0.0, 0.0, 0.0, 1.0], dtype=_np.float32)
+            if rotate_x_deg: qrot = _qmul(_axis_quat(0, rotate_x_deg), qrot)
+            if rotate_y_deg: qrot = _qmul(_axis_quat(1, rotate_y_deg), qrot)
+            if rotate_z_deg: qrot = _qmul(_axis_quat(2, rotate_z_deg), qrot)
+
+            n_p = int(self.model.particle_count)
+            n_b = int(self.model.body_count)
+            n_j = int(self.model.joint_count)
+            applied_to = []
+
+            # Cloth particles: rotate each particle around origin.
+            if bundle.body_type == "cloth" and n_p > 0:
+                pq = self.state_0.particle_q.numpy().copy()
+                for i in range(pq.shape[0]):
+                    pq[i] = _qrot_vec(qrot, pq[i])
+                self.state_0.particle_q.assign(pq)
+                applied_to.append(f"particle_q×{n_p}")
+
+            # Rigid articulated: rotate FREE root joint quaternion(s).
+            elif n_j > 0:
+                free = int(newton.JointType.FREE)
+                jtypes = self.model.joint_type.numpy()
+                jq_start = self.model.joint_q_start.numpy()
+                jq = self.state_0.joint_q.numpy().copy()
+                n_rot = 0
+                for i, t in enumerate(jtypes):
+                    if int(t) == free:
+                        s = int(jq_start[i])
+                        # Rotate translation around origin too.
+                        p = _np.array([jq[s], jq[s+1], jq[s+2]], dtype=_np.float32)
+                        p = _qrot_vec(qrot, p)
+                        jq[s], jq[s+1], jq[s+2] = p
+                        cur = jq[s+3:s+7]
+                        nq = _qmul(qrot, cur)
+                        jq[s+3:s+7] = nq
+                        n_rot += 1
+                if n_rot:
+                    self.state_0.joint_q.assign(jq)
+                    applied_to.append(f"FREE root joint(s)×{n_rot}")
+
+            # Plain rigid (no joints): rotate body_q.
+            elif n_b > 0:
+                bq = self.state_0.body_q.numpy().copy()
+                for i in range(bq.shape[0]):
+                    p = _qrot_vec(qrot, bq[i, 0:3])
+                    cur = bq[i, 3:7]
+                    nq = _qmul(qrot, cur)
+                    bq[i, 0:3] = p
+                    bq[i, 3:7] = nq
+                self.state_0.body_q.assign(bq)
+                applied_to.append(f"body_q×{n_b}")
+
+            print(f"  rotate: x={rotate_x_deg} y={rotate_y_deg} z={rotate_z_deg} deg → {applied_to or 'no targets'}")
+
         # Drop height: lift the asset by drop_height meters in z.
         # For articulated assets with a floating base, world pose lives in
         # joint_q of the FREE root joint — body_q is derived from it via FK
@@ -186,92 +274,6 @@ class Example:
                             print(f"    body[{i}] mass={mi:.4f}kg  inv_mass={float(inv_m[i]):.4f}")
         except Exception as _e:
             print(f"  diag: print failed: {_e}")
-
-        # ---- Optional rotation of the asset around world axes (degrees) ----
-        if rotate_x_deg or rotate_y_deg or rotate_z_deg:
-            import math as _math
-            import numpy as _np
-
-            def _axis_quat(axis, deg):
-                a = _math.radians(deg) * 0.5
-                s, c = _math.sin(a), _math.cos(a)
-                return _np.array([
-                    s if axis == 0 else 0.0,
-                    s if axis == 1 else 0.0,
-                    s if axis == 2 else 0.0,
-                    c,
-                ], dtype=_np.float32)
-
-            def _qmul(a, b):
-                ax, ay, az, aw = a
-                bx, by, bz, bw = b
-                return _np.array([
-                    aw*bx + ax*bw + ay*bz - az*by,
-                    aw*by - ax*bz + ay*bw + az*bx,
-                    aw*bz + ax*by - ay*bx + az*bw,
-                    aw*bw - ax*bx - ay*by - az*bz,
-                ], dtype=_np.float32)
-
-            def _qrot_vec(q, v):
-                # rotate vec3 v by quat (qx,qy,qz,qw)
-                qx, qy, qz, qw = q
-                # cross(q.xyz, v) * 2
-                t = 2.0 * _np.cross([qx, qy, qz], v)
-                return v + qw * t + _np.cross([qx, qy, qz], t)
-
-            qrot = _np.array([0.0, 0.0, 0.0, 1.0], dtype=_np.float32)
-            if rotate_x_deg: qrot = _qmul(_axis_quat(0, rotate_x_deg), qrot)
-            if rotate_y_deg: qrot = _qmul(_axis_quat(1, rotate_y_deg), qrot)
-            if rotate_z_deg: qrot = _qmul(_axis_quat(2, rotate_z_deg), qrot)
-
-            n_p = int(self.model.particle_count)
-            n_b = int(self.model.body_count)
-            n_j = int(self.model.joint_count)
-            applied_to = []
-
-            # Cloth particles: rotate each particle around origin.
-            if bundle.body_type == "cloth" and n_p > 0:
-                pq = self.state_0.particle_q.numpy().copy()
-                for i in range(pq.shape[0]):
-                    pq[i] = _qrot_vec(qrot, pq[i])
-                self.state_0.particle_q.assign(pq)
-                applied_to.append(f"particle_q×{n_p}")
-
-            # Rigid articulated: rotate FREE root joint quaternion(s).
-            elif n_j > 0:
-                free = int(newton.JointType.FREE)
-                jtypes = self.model.joint_type.numpy()
-                jq_start = self.model.joint_q_start.numpy()
-                jq = self.state_0.joint_q.numpy().copy()
-                n_rot = 0
-                for i, t in enumerate(jtypes):
-                    if int(t) == free:
-                        s = int(jq_start[i])
-                        # Rotate translation around origin too.
-                        p = _np.array([jq[s], jq[s+1], jq[s+2]], dtype=_np.float32)
-                        p = _qrot_vec(qrot, p)
-                        jq[s], jq[s+1], jq[s+2] = p
-                        cur = jq[s+3:s+7]
-                        nq = _qmul(qrot, cur)
-                        jq[s+3:s+7] = nq
-                        n_rot += 1
-                if n_rot:
-                    self.state_0.joint_q.assign(jq)
-                    applied_to.append(f"FREE root joint(s)×{n_rot}")
-
-            # Plain rigid (no joints): rotate body_q.
-            elif n_b > 0:
-                bq = self.state_0.body_q.numpy().copy()
-                for i in range(bq.shape[0]):
-                    p = _qrot_vec(qrot, bq[i, 0:3])
-                    cur = bq[i, 3:7]
-                    nq = _qmul(qrot, cur)
-                    bq[i, 0:3] = p
-                    bq[i, 3:7] = nq
-                self.state_0.body_q.assign(bq)
-                applied_to.append(f"body_q×{n_b}")
-
-            print(f"  rotate: x={rotate_x_deg} y={rotate_y_deg} z={rotate_z_deg} deg → {applied_to or 'no targets'}")
 
         # ---- Sync body_q with joint_q via FK so MuJoCo/XPBD don't snap on first step ----
         if int(self.model.joint_count) > 0:
@@ -454,6 +456,10 @@ def main(argv=None) -> int:
                    help="Output mp4 framerate (default 60)")
     p.add_argument("--top-view", action="store_true",
                    help="Place camera straight above the asset looking down")
+    p.add_argument("--no-auto-camera", action="store_true",
+                   help="Skip the front-view auto-framer so the viewer keeps its default "
+                        "camera (useful when rotating the asset and you want the view "
+                        "to stay constant).")
     args = p.parse_args(argv)
 
     # Apply physics-json overrides for cloth-particle-radius and bending-ke.
@@ -467,11 +473,18 @@ def main(argv=None) -> int:
         _b = _phys.get("cloth", {}).get("bend_stiffness")
         if _b is not None:
             args.bending_ke = float(_b)
+        _s = _phys.get("sim_substeps")
+        if _s is None:
+            _s = _phys.get("solver", {}).get("sim_substeps")
+        args.substeps = int(_s) if _s is not None else 2
         print(
             f"  physics-json: {args.physics_json}  "
             f"cloth_particle_radius={args.cloth_particle_radius}  "
-            f"bending_ke={args.bending_ke}"
+            f"bending_ke={args.bending_ke}  "
+            f"substeps={args.substeps}"
         )
+    elif args.substeps is None:
+        args.substeps = 2
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
         if not s:
@@ -532,7 +545,7 @@ def main(argv=None) -> int:
         print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
 
     # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
-    elif args.record_mp4 and hasattr(ex.viewer, "set_camera"):
+    elif args.record_mp4 and not args.no_auto_camera and hasattr(ex.viewer, "set_camera"):
         import numpy as _np
         n_p = int(ex.model.particle_count)
         if n_p > 0:
