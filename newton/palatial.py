@@ -18,12 +18,22 @@ Example
 """
 
 from ._src.palatial.load import NewtonBundle, load
+from ._src.palatial.cable import (
+    extract_cable_points,
+    find_cable_centerline_prim_path,
+    find_cable_prim_path,
+    read_cable_params,
+)
 from ._src.palatial.shell import find_shell_prim_path, read_shell_params
 from ._src.palatial.cloth import find_cloth_prim_path
 
 __all__ = [
     "NewtonBundle",
     "load",
+    "extract_cable_points",
+    "find_cable_centerline_prim_path",
+    "find_cable_prim_path",
+    "read_cable_params",
     "read_shell_params",
     "find_shell_prim_path",
     "find_cloth_prim_path",

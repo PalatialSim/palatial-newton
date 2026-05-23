@@ -1,8 +1,9 @@
 #usda 1.0
 (
-    "Newton 2D-deformable (cloth/shell) USD API schemas. Sibling plugin to "
-    "newton-usd-schemas. Defines NewtonDeformableAPI, NewtonShellAPI, "
-    "NewtonShellMaterialAPI, NewtonClothAPI. See "
+    "Newton deformable USD API schemas for cloth/shell and rod/cable assets. "
+    "Sibling plugin to newton-usd-schemas. Defines NewtonDeformableAPI, "
+    "NewtonShellAPI, NewtonShellMaterialAPI, NewtonRodAPI, "
+    "NewtonRodMaterialAPI, and NewtonClothAPI. See "
     "newton_usd/shell_skill/SKILL.md for the design rationale."
 )
 
@@ -125,6 +126,104 @@ class "NewtonShellMaterialAPI" (
 
     float newton:shell:bendDamping = 0.0 (
         doc = """Bending damping. Maps to edge_kd."""
+    )
+}
+
+class "NewtonRodAPI" (
+    prepend apiSchemas = ["NewtonDeformableAPI"]
+    doc = """1D-deformable rod or cable geometry. Apply on the cable root
+    prim (Xform or Scope) and on the authored BasisCurves centerline prim.
+    Material-response attributes live on the bound Material via
+    NewtonRodMaterialAPI."""
+)
+{
+    uniform token newton:rod:frameDefinition = "parallelTransport" (
+        allowedTokens = ["parallelTransport"]
+        doc = """Frame convention used to interpret per-segment
+        orientation. The palatial rod loader expects parallel transport
+        frames."""
+    )
+
+    bool newton:rod:closed = false (
+        doc = "If true, close the rod or cable into a loop."
+    )
+
+    uniform token newton:rod:crossSectionType = "roundSolid" (
+        allowedTokens = ["roundSolid", "flatRect"]
+        doc = """Cross-section kind. roundSolid maps directly to stock
+        add_rod(); flatRect is approximated in the stock phase."""
+    )
+
+    float newton:rod:radius = 0.005 (
+        doc = "Round cable radius [m]."
+    )
+
+    float newton:rod:width = 0.01 (
+        doc = "Flat rectangular cable width [m]."
+    )
+
+    float newton:rod:thickness = 0.002 (
+        doc = "Flat rectangular cable thickness [m]."
+    )
+
+    int newton:rod:segmentCount = 16 (
+        doc = "Number of rod segments. Number of points is segmentCount + 1."
+    )
+
+    float newton:rod:length = 1.0 (
+        doc = """Centerline length [m]. Prefer authoring this on the
+        BasisCurves centerline prim."""
+    )
+}
+
+class "NewtonRodMaterialAPI" (
+    doc = """1D-deformable rod or cable material response. Apply on a
+    UsdShade.Material prim and bind it to the cable root or centerline via
+    MaterialBindingAPI."""
+)
+{
+    float newton:rod:density = 1000.0 (
+        doc = "Bulk density [kg/m^3]."
+    )
+
+    float newton:rod:stretchStiffness = 100000.0 (
+        doc = "Axial tension stiffness [N/m]."
+    )
+
+    float newton:rod:stretchDamping = 0.0 (
+        doc = "Axial tension damping."
+    )
+
+    float newton:rod:compressStiffness = 100000.0 (
+        doc = "Axial compression stiffness [N/m]."
+    )
+
+    float newton:rod:compressDamping = 0.0 (
+        doc = "Axial compression damping."
+    )
+
+    float newton:rod:bendYStiffness = 1000.0 (
+        doc = "Bend stiffness around one transverse local axis [N*m]."
+    )
+
+    float newton:rod:bendYDamping = 0.0 (
+        doc = "Bend damping around one transverse local axis."
+    )
+
+    float newton:rod:bendZStiffness = 1000.0 (
+        doc = "Bend stiffness around the other transverse local axis [N*m]."
+    )
+
+    float newton:rod:bendZDamping = 0.0 (
+        doc = "Bend damping around the other transverse local axis."
+    )
+
+    float newton:rod:torsionStiffness = 1000.0 (
+        doc = "Torsion stiffness around the local tangent axis [N*m]."
+    )
+
+    float newton:rod:torsionDamping = 0.0 (
+        doc = "Torsion damping around the local tangent axis."
     )
 }
 

@@ -6646,6 +6646,12 @@ class ModelBuilder:
         stretch_damping: float | None = None,
         bend_stiffness: float | None = None,
         bend_damping: float | None = None,
+        bend_y_stiffness: float | None = None,
+        bend_y_damping: float | None = None,
+        bend_z_stiffness: float | None = None,
+        bend_z_damping: float | None = None,
+        torsion_stiffness: float | None = None,
+        torsion_damping: float | None = None,
         closed: bool = False,
         label: str | None = None,
         wrap_in_articulation: bool = True,
@@ -6675,6 +6681,21 @@ class ModelBuilder:
                 (torque per radian). If None, defaults to 0.0.
             bend_damping: Bend/twist damping for the cable joints (applied per-joint; not length-normalized). If None,
                 defaults to 0.0.
+            bend_y_stiffness: Optional anisotropic bend stiffness around one transverse cable axis [N*m].
+                In the current stock phase, this is collapsed with ``bend_z_stiffness`` into the single isotropic
+                cable-joint angular stiffness when ``bend_stiffness`` is not provided.
+            bend_y_damping: Optional anisotropic bend damping around one transverse cable axis. In the current
+                stock phase, this contributes to the single isotropic cable-joint angular damping.
+            bend_z_stiffness: Optional anisotropic bend stiffness around the other transverse cable axis [N*m].
+                In the current stock phase, this is collapsed with ``bend_y_stiffness`` into the single isotropic
+                cable-joint angular stiffness when ``bend_stiffness`` is not provided.
+            bend_z_damping: Optional anisotropic bend damping around the other transverse cable axis. In the
+                current stock phase, this contributes to the single isotropic cable-joint angular damping.
+            torsion_stiffness: Optional torsion stiffness around the cable tangent axis [N*m]. The stock
+                ``JointType.CABLE`` path does not represent torsion separately; when it is the only authored
+                anisotropic angular stiffness, it is used as the isotropic angular stiffness fallback.
+            torsion_damping: Optional torsion damping around the cable tangent axis. In the current stock phase,
+                this contributes to the single isotropic cable-joint angular damping.
             closed: If True, connects the last segment back to the first to form a closed loop. If False,
                 creates an open chain. Note: rods require at least 2 segments.
             label: Optional label prefix for bodies, shapes, and joints.
@@ -6711,15 +6732,37 @@ class ModelBuilder:
 
         # Stretch defaults to the cable/rod axial stiffness used by VBD examples.
         stretch_stiffness = 1.0e5 if stretch_stiffness is None else stretch_stiffness
-        stretch_damping = 0.0 if stretch_damping is None else stretch_damping
 
-        # Bend defaults: 0.0 (users must explicitly set for bending resistance)
-        bend_stiffness = 0.0 if bend_stiffness is None else bend_stiffness
-        bend_damping = 0.0 if bend_damping is None else bend_damping
+        # Phase-A anisotropic collapse: stock cable joints expose one isotropic angular stiffness
+        # and damping, so we reduce richer rod material inputs deterministically.
+        if bend_stiffness is None:
+            if bend_y_stiffness is None and bend_z_stiffness is None:
+                bend_stiffness = 0.0 if torsion_stiffness is None else torsion_stiffness
+            else:
+                bend_y_value = bend_z_stiffness if bend_y_stiffness is None else bend_y_stiffness
+                bend_z_value = bend_y_stiffness if bend_z_stiffness is None else bend_z_stiffness
+                bend_stiffness = 0.5 * (bend_y_value + bend_z_value)
+        stretch_damping = max(
+            0.0 if value is None else value
+            for value in (stretch_damping, bend_y_damping, bend_z_damping, torsion_damping)
+        )
+        bend_damping = max(
+            0.0 if value is None else value
+            for value in (bend_damping, stretch_damping, bend_y_damping, bend_z_damping, torsion_damping)
+        )
 
         # Input validation
-        if stretch_stiffness < 0.0 or bend_stiffness < 0.0:
-            raise ValueError("add_rod: stretch_stiffness and bend_stiffness must be >= 0")
+        stiffness_values = {
+            "stretch_stiffness": stretch_stiffness,
+            "bend_stiffness": bend_stiffness,
+            "bend_y_stiffness": bend_y_stiffness,
+            "bend_z_stiffness": bend_z_stiffness,
+            "torsion_stiffness": torsion_stiffness,
+        }
+        negative_stiffness_names = [name for name, value in stiffness_values.items() if value is not None and value < 0.0]
+        if negative_stiffness_names:
+            names = ", ".join(negative_stiffness_names)
+            raise ValueError(f"add_rod: {names} must be >= 0")
 
         num_segments = len(positions) - 1
         if num_segments < 1:

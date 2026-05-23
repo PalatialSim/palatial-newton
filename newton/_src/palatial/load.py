@@ -37,9 +37,10 @@ from __future__ import annotations
 
 # `import newton` registers the newton_usd_schemas plugin (NewtonSceneAPI,
 # NewtonXpbdSceneAPI, ...) AND the bundled `newton_shell` plugin
-# (NewtonShellAPI, NewtonClothAPI, NewtonDeformableAPI,
-# NewtonShellMaterialAPI) via newton/_src/usd/__init__.py. Must precede
-# any pxr.Usd usage in the same process.
+# (NewtonShellAPI, NewtonClothAPI, NewtonRodAPI, NewtonDeformableAPI,
+# NewtonShellMaterialAPI, NewtonRodMaterialAPI) via
+# newton/_src/usd/__init__.py. Must precede any pxr.Usd usage in the same
+# process.
 import newton
 
 from pxr import Usd, UsdGeom
@@ -90,7 +91,7 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
 class NewtonBundle:
     """Everything needed to step the converted asset in Newton."""
     usd_path: str
-    body_type: str           # "rigid" or "cloth"
+    body_type: str           # "rigid", "cloth", or "cable"
     solver_name: str
     fps: int
     model: Any
@@ -134,11 +135,13 @@ def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
 
 
 def _detect_body_type(stage: Usd.Stage) -> str:
-    """Return 'cloth' if any prim looks cloth/shell-like, else 'rigid'.
+    """Return 'cloth' or 'cable' when present, else 'rigid'.
 
     Three positive signals (any of):
       - new schema: NewtonShellAPI / NewtonClothAPI in applied schemas
+      - new schema: NewtonRodAPI in applied schemas
       - new schema: newton:deformable:simulationIntent in {cloth, shell}
+      - new schema: newton:deformable:simulationIntent == rod
       - legacy: newton:bodyType="cloth"
     """
     for prim in stage.Traverse():
@@ -152,9 +155,15 @@ def _detect_body_type(stage: Usd.Stage) -> str:
                     applied.add(str(tok))
         if "NewtonShellAPI" in applied or "NewtonClothAPI" in applied:
             return "cloth"
+        if "NewtonRodAPI" in applied:
+            return "cable"
         a = prim.GetAttribute("newton:deformable:simulationIntent")
-        if a and a.HasAuthoredValue() and str(a.Get()) in ("cloth", "shell"):
-            return "cloth"
+        if a and a.HasAuthoredValue():
+            intent = str(a.Get())
+            if intent in ("cloth", "shell"):
+                return "cloth"
+            if intent == "rod":
+                return "cable"
         a = prim.GetAttribute("newton:bodyType")
         if a and a.HasAuthoredValue() and str(a.Get()) == "cloth":
             return "cloth"
@@ -312,6 +321,59 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
         return builder.finalize()
 
 
+def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
+    """Build a cable model from NewtonRodAPI metadata and a BasisCurves centerline."""
+    from newton import utils as newton_utils
+
+    from .cable import extract_cable_points, find_cable_prim_path, read_cable_params
+
+    cable_path = find_cable_prim_path(usd_path)
+    if not cable_path:
+        raise RuntimeError(f"No cable or rod prim found in {usd_path}")
+
+    params = read_cable_params(usd_path)
+    points = extract_cable_points(usd_path)
+    if not points:
+        segment_count = int(params["segmentCount"])
+        points = newton_utils.create_straight_cable_points(
+            start=wp.vec3(0.0, 0.0, 0.0),
+            direction=wp.vec3(1.0, 0.0, 0.0),
+            length=float(params["length"]),
+            num_segments=segment_count,
+        )
+
+    if len(points) < 2:
+        raise RuntimeError(f"Cable asset {usd_path} must provide at least 2 centerline points")
+
+    quaternions = newton_utils.create_parallel_transport_cable_quaternions(points)
+    cfg = newton.ModelBuilder.ShapeConfig(density=float(params["density"]))
+
+    with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
+        builder = newton.ModelBuilder()
+        builder.add_ground_plane()
+        builder.add_rod(
+            positions=points,
+            quaternions=quaternions,
+            radius=float(params["radius"]),
+            cfg=cfg,
+            stretch_stiffness=float(params["stretchStiffness"]),
+            stretch_damping=float(params["stretchDamping"]),
+            bend_y_stiffness=float(params["bendYStiffness"]),
+            bend_y_damping=float(params["bendYDamping"]),
+            bend_z_stiffness=float(params["bendZStiffness"]),
+            bend_z_damping=float(params["bendZDamping"]),
+            torsion_stiffness=float(params["torsionStiffness"]),
+            torsion_damping=float(params["torsionDamping"]),
+            closed=bool(params["closed"]),
+            label="cable",
+        )
+        try:
+            builder.color()
+        except Exception:
+            pass
+        return builder.finalize()
+
+
 def load(usd_path: str, *, solver_override: str | None = None,
          device: str | None = None, fix_base: bool = False) -> NewtonBundle:
     """Read converted USD, build Newton model + solver, return ready-to-step bundle.
@@ -354,6 +416,17 @@ def load(usd_path: str, *, solver_override: str | None = None,
             solver_name = "vbd"
         else:
             solver_name = "xpbd"
+    if body_type == "cable":
+        if not scene_pinned and not solver_override:
+            if getattr(newton.solvers, "SolverVBD", None):
+                solver_name = "vbd"
+            else:
+                raise RuntimeError("Cable assets require SolverVBD, but this Newton build does not provide it")
+        elif solver_name != "vbd":
+            raise RuntimeError(
+                f"Cable assets require SolverVBD because stock JointType.CABLE is only supported by VBD "
+                f"(got solver '{solver_name}')"
+            )
     del stage
 
     if solver_override:
@@ -364,6 +437,8 @@ def load(usd_path: str, *, solver_override: str | None = None,
 
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name)
+    elif body_type == "cable":
+        model = _build_cable(usd_path, device=device)
     else:
         model = _build_rigid(usd_path, device=device, fix_base=fix_base)
 
