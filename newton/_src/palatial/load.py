@@ -333,10 +333,20 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
 
     params = read_cable_params(usd_path)
     points = extract_cable_points(usd_path)
+    if str(params["frameDefinition"]) not in ("parallelTransport", "parallel_transport"):
+        raise RuntimeError(
+            f"Cable asset {usd_path} must declare newton:rod:frameDefinition='parallelTransport' "
+            f"(got {params['frameDefinition']!r})"
+        )
+    if int(params["verticesPerSegment"]) != 2:
+        raise RuntimeError(
+            f"Cable asset {usd_path} must declare newton:rod:verticesPerSegment=2 for linear centerlines "
+            f"(got {params['verticesPerSegment']})"
+        )
     if not points:
         segment_count = int(params["segmentCount"])
         points = newton_utils.create_straight_cable_points(
-            start=wp.vec3(0.0, 0.0, 0.0),
+            start=wp.vec3(0.0, 0.0, float(params["dropHeight"])),
             direction=wp.vec3(1.0, 0.0, 0.0),
             length=float(params["length"]),
             num_segments=segment_count,
@@ -345,7 +355,10 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     if len(points) < 2:
         raise RuntimeError(f"Cable asset {usd_path} must provide at least 2 centerline points")
 
-    quaternions = newton_utils.create_parallel_transport_cable_quaternions(points)
+    quaternions = newton_utils.create_parallel_transport_cable_quaternions(
+        points,
+        twist_total=float(params["twistTotal"]),
+    )
     cfg = newton.ModelBuilder.ShapeConfig(density=float(params["density"]))
 
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):

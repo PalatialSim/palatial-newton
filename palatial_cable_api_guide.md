@@ -136,7 +136,25 @@ available on the `BasisCurves` prim because `NewtonRodAPI` can apply there too.
 | `newton:rod:segmentCount` | segment count | `16` | points count is `segmentCount + 1` |
 | `newton:rod:length` | centerline length [m] | `1.0` | author on the centerline `BasisCurves` prim |
 
-### 3.3 Temporary compatibility attrs
+### 3.3 Palatial convenience attrs
+
+These are worth keeping in this repo even though they are not the core
+cross-repo rod material model. They match the sort of loader-side convenience
+that already proved useful in the shell path.
+
+| USD attribute | Meaning | Default | Notes |
+|---|---|---|---|
+| `newton:rod:dropHeight` | procedural spawn height [m] | `0.3` | only used when the loader has to synthesize a straight centerline |
+| `newton:rod:twistTotal` | total distributed twist [rad] | `0.0` | forwarded to `create_parallel_transport_cable_quaternions()` |
+
+Important:
+
+- these are local palatial convenience attrs,
+- they should not replace authored `BasisCurves` points,
+- they should not replace the explicit anisotropic stiffness or damping fields,
+- do **not** reintroduce `newton:rod:youngsModulus`.
+
+### 3.4 Temporary compatibility attrs
 
 The other repos still keep a small migration layer. For this repo, the loader
 may read these as fallbacks, but they should not drive the formal schema design:
@@ -147,7 +165,7 @@ may read these as fallbacks, but they should not drive the formal schema design:
 | `newton:rod:verticesPerSegment` | temporary compatibility attr; expected value is `2` |
 | `newton:rodMaterial:*` | root-level legacy fallback material attrs |
 
-### 3.4 Rod material attrs
+### 3.5 Rod material attrs
 
 Reuse the full material layout from the related repos even if this repo first
 lowers it into stock isotropic `add_rod()`.
@@ -235,6 +253,17 @@ class "NewtonRodAPI" (
         doc = """Centerline length [m]. Prefer authoring this on the
         BasisCurves centerline prim."""
     )
+
+    float newton:rod:dropHeight = 0.3 (
+        doc = """Palatial loader convenience height [m]. Only used when the
+        loader needs to synthesize a straight centerline because no
+        BasisCurves points were authored."""
+    )
+
+    float newton:rod:twistTotal = 0.0 (
+        doc = """Palatial loader convenience total twist [rad]. Applied when
+        generating segment quaternions from the centerline."""
+    )
 }
 
 class "NewtonRodMaterialAPI" (
@@ -294,6 +323,7 @@ Important:
 
 - do **not** add a parallel `NewtonCableAPI` / `NewtonCableMaterialAPI`
 - use the existing `rod` naming as the schema surface
+- do **not** reintroduce `newton:rod:youngsModulus`
 
 ### Step 2 - Update `plugInfo.json`
 
@@ -356,6 +386,8 @@ DEFAULTS = {
     "thickness": None,
     "segmentCount": 16,
     "length": 1.0,
+    "dropHeight": 0.3,
+    "twistTotal": 0.0,
     "density": 1000.0,
     "stretchStiffness": 1.0e5,
     "stretchDamping": 0.0,
@@ -387,6 +419,7 @@ def read_cable_params(usd_path: str) -> dict:
 
     Loader fallback behavior:
     - prefer newton:rod:* on bound Material / root / centerline,
+    - keep local support for newton:rod:dropHeight and newton:rod:twistTotal,
     - accept newton:rodMaterial:* and newton:rod:isClosed as compatibility
       fallbacks when present.
     """
@@ -419,10 +452,19 @@ Build path for the current stock Newton runtime:
    - root attrs via `read_cable_params()`
    - `BasisCurves` points via `extract_cable_points()`
 2. If the USD has no authored points:
-   - fall back to a straight cable with `segmentCount` and `length`
+   - fall back to a straight cable with `segmentCount`, `length`, and
+     `dropHeight`
 3. Generate segment quaternions with:
    - `newton.utils.create_parallel_transport_cable_quaternions()`
+   - pass `twist_total=newton:rod:twistTotal`
 4. Lower into stock `builder.add_rod(...)`
+
+The intended split is:
+
+- authored `BasisCurves` points remain the primary geometric source,
+- `dropHeight` is only a procedural fallback convenience,
+- `twistTotal` is a loader-side framing convenience,
+- neither field should replace the explicit anisotropic rod material attrs.
 
 #### 4c. Intermediate anisotropic validation in stock `add_rod()`
 
@@ -671,7 +713,9 @@ Add a current-repo test that:
 2. `BasisCurves` point extraction works
 3. bound material lookup works through `MaterialBindingAPI`
 4. `flatRect` + `thickness` falls back to stock radius approximation
-5. stock runtime collapse from:
+5. procedural fallback centerline generation honors `dropHeight`
+6. quaternion generation honors `twistTotal`
+7. stock runtime collapse from:
    - `bendYStiffness`
    - `bendZStiffness`
    - `torsionDamping`
@@ -686,7 +730,8 @@ This guide is intentionally **not** asking for:
 - direct `add_usd()` rod import support,
 - a vendored `newton_usd_schemas` package split,
 - a separate `NewtonCableAPI` namespace,
-- a second parallel cable schema family.
+- a second parallel cable schema family,
+- a revived `newton:rod:youngsModulus` field.
 
 This guide also does **not** require the full subtree runtime port in the first
 patch. The intermediate target is narrower:

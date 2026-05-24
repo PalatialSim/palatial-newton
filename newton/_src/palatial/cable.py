@@ -20,7 +20,10 @@ DEFAULTS = {
     "width": 0.01,
     "thickness": 0.002,
     "segmentCount": 16,
+    "verticesPerSegment": 2,
     "length": 1.0,
+    "dropHeight": 0.3,
+    "twistTotal": 0.0,
     "density": 1000.0,
     "stretchStiffness": 1.0e5,
     "stretchDamping": 0.0,
@@ -223,10 +226,25 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
         "newton:rod:segmentCount",
         default=DEFAULTS["segmentCount"],
     )
+    out["verticesPerSegment"] = _walk_int(
+        geometry_sources,
+        "newton:rod:verticesPerSegment",
+        default=DEFAULTS["verticesPerSegment"],
+    )
     out["length"] = _walk_float(
         geometry_sources,
         "newton:rod:length",
         default=DEFAULTS["length"],
+    )
+    out["dropHeight"] = _walk_float(
+        geometry_sources,
+        "newton:rod:dropHeight",
+        default=DEFAULTS["dropHeight"],
+    )
+    out["twistTotal"] = _walk_float(
+        geometry_sources,
+        "newton:rod:twistTotal",
+        default=DEFAULTS["twistTotal"],
     )
 
     radius = _walk_optional(geometry_sources, "newton:rod:radius")
@@ -234,6 +252,9 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
         out["radius"] = 0.5 * float(out["thickness"])
     else:
         out["radius"] = DEFAULTS["radius"] if radius is None else float(radius)
+
+    legacy_bend_stiffness = _walk_optional(material_sources, "newton:rodMaterial:bendStiffness")
+    legacy_damping = _walk_optional(material_sources, "newton:rodMaterial:damping")
 
     out["density"] = _walk_float(
         material_sources,
@@ -250,7 +271,7 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
     out["stretchDamping"] = _walk_float(
         material_sources,
         "newton:rod:stretchDamping",
-        default=DEFAULTS["stretchDamping"],
+        default=float(legacy_damping) if legacy_damping is not None else DEFAULTS["stretchDamping"],
     )
     out["compressStiffness"] = _walk_float(
         material_sources,
@@ -265,33 +286,33 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
     out["bendYStiffness"] = _walk_float(
         material_sources,
         "newton:rod:bendYStiffness",
-        default=DEFAULTS["bendYStiffness"],
+        default=float(legacy_bend_stiffness) if legacy_bend_stiffness is not None else DEFAULTS["bendYStiffness"],
     )
     out["bendYDamping"] = _walk_float(
         material_sources,
         "newton:rod:bendYDamping",
-        default=DEFAULTS["bendYDamping"],
+        default=float(legacy_damping) if legacy_damping is not None else DEFAULTS["bendYDamping"],
     )
     out["bendZStiffness"] = _walk_float(
         material_sources,
         "newton:rod:bendZStiffness",
-        default=DEFAULTS["bendZStiffness"],
+        default=float(legacy_bend_stiffness) if legacy_bend_stiffness is not None else DEFAULTS["bendZStiffness"],
     )
     out["bendZDamping"] = _walk_float(
         material_sources,
         "newton:rod:bendZDamping",
-        default=DEFAULTS["bendZDamping"],
+        default=float(legacy_damping) if legacy_damping is not None else DEFAULTS["bendZDamping"],
     )
     out["torsionStiffness"] = _walk_float(
         material_sources,
         "newton:rod:torsionStiffness",
-        default=DEFAULTS["torsionStiffness"],
+        default=float(legacy_bend_stiffness) if legacy_bend_stiffness is not None else DEFAULTS["torsionStiffness"],
     )
     out["torsionDamping"] = _walk_float(
         material_sources,
         "newton:rod:torsionDamping",
         "newton:rodMaterial:damping",
-        default=DEFAULTS["torsionDamping"],
+        default=float(legacy_damping) if legacy_damping is not None else DEFAULTS["torsionDamping"],
     )
     out["intent"] = _walk_token(
         geometry_sources,
