@@ -427,4 +427,5 @@ See the `DiffSim examples on GitHub`_ for the current reference workflows.
    SolverSemiImplicit
    SolverStyle3D
    SolverVBD
+   SolverVBDPalatial
    SolverXPBD

@@ -351,6 +351,31 @@ class TestPalatialCable(unittest.TestCase):
                 atol=1.0e-6,
             )
 
+    def test_load_accepts_solver_vbd_palatial_alias(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "test_cable_vbd_palatial.usda"
+            _author_test_cable_stage(usd_path)
+
+            stage = Usd.Stage.Open(str(usd_path))
+            scene = stage.GetPrimAtPath("/physicsScene")
+            scene.CreateAttribute("newton:solver", Sdf.ValueTypeNames.Token, custom=True).Set("vbd_palatial")
+            stage.Save()
+
+            bundle = load(str(usd_path), device="cpu")
+
+            self.assertEqual(bundle.solver_name, "vbd_palatial")
+            self.assertIs(bundle.solver.__class__, newton.solvers.SolverVBDPalatial)
+
+    def test_load_accepts_solver_override_vbd_palatial_alias(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "test_cable_vbd_palatial_override.usda"
+            _author_test_cable_stage(usd_path)
+
+            bundle = load(str(usd_path), solver_override="vbd_palatial", device="cpu")
+
+            self.assertEqual(bundle.solver_name, "vbd_palatial")
+            self.assertIs(bundle.solver.__class__, newton.solvers.SolverVBDPalatial)
+
     def test_load_uses_world_space_authored_centerline_points(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             usd_path = Path(tmp_dir) / "test_cable_transformed.usda"

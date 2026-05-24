@@ -53,11 +53,13 @@ import warp as wp
 def _build_solver(name: str, model: Any, params: dict) -> Any:
     """Construct a solver, forwarding only kwargs the solver actually accepts."""
     import inspect as _ins
+
     classes = {
         "mujoco":        getattr(newton.solvers, "SolverMuJoCo",       None),
         "xpbd":          getattr(newton.solvers, "SolverXPBD",         None),
         "featherstone":  getattr(newton.solvers, "SolverFeatherstone", None),
         "vbd":           getattr(newton.solvers, "SolverVBD",          None),
+        "vbd_palatial":  getattr(newton.solvers, "SolverVBDPalatial",  None),
         "semi_implicit": getattr(newton.solvers, "SolverSemiImplicit", None),
         "style3d":       getattr(newton.solvers, "SolverStyle3D",      None),
     }
@@ -447,15 +449,16 @@ def load(usd_path: str, *, solver_override: str | None = None,
         else:
             solver_name = "xpbd"
     if body_type == "cable":
+        cable_solver_name = solver_override or solver_name
         if not scene_pinned and not solver_override:
             if getattr(newton.solvers, "SolverVBD", None):
                 solver_name = "vbd"
             else:
                 raise RuntimeError("Cable assets require SolverVBD, but this Newton build does not provide it")
-        elif solver_name != "vbd":
+        elif cable_solver_name not in ("vbd", "vbd_palatial"):
             raise RuntimeError(
                 f"Cable assets require SolverVBD because cable joint runtime is only supported by VBD "
-                f"(got solver '{solver_name}')"
+                f"(got solver '{cable_solver_name}')"
             )
     del stage
 
