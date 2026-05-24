@@ -37,11 +37,32 @@ def _create_custom_attribute(prim: Any, name: str, type_name: Any, value: object
     prim.CreateAttribute(name, type_name, custom=True).Set(value)
 
 
-def _author_test_cable_stage(output_path: Path) -> None:
+def _apply_transform_ops(
+    prim: Any,
+    *,
+    translate: tuple[float, float, float] | None = None,
+    rotate_xyz: tuple[float, float, float] | None = None,
+) -> None:
+    xformable = UsdGeom.Xformable(prim)
+    if translate is not None:
+        xformable.AddTranslateOp().Set(Gf.Vec3d(*translate))
+    if rotate_xyz is not None:
+        xformable.AddRotateXYZOp().Set(Gf.Vec3f(*rotate_xyz))
+
+
+def _author_test_cable_stage(
+    output_path: Path,
+    *,
+    root_translate: tuple[float, float, float] | None = None,
+    root_rotate_xyz: tuple[float, float, float] | None = None,
+    centerline_translate: tuple[float, float, float] | None = None,
+    centerline_rotate_xyz: tuple[float, float, float] | None = None,
+) -> None:
     stage = Usd.Stage.CreateNew(str(output_path))
 
     root = UsdGeom.Xform.Define(stage, "/Cable").GetPrim()
     stage.SetDefaultPrim(root)
+    _apply_transform_ops(root, translate=root_translate, rotate_xyz=root_rotate_xyz)
     root.ApplyAPI("NewtonDeformableAPI")
     root.ApplyAPI("NewtonRodAPI")
     UsdShade.MaterialBindingAPI.Apply(root)
@@ -58,6 +79,7 @@ def _author_test_cable_stage(output_path: Path) -> None:
 
     centerline = UsdGeom.BasisCurves.Define(stage, "/Cable/Centerline")
     centerline_prim = centerline.GetPrim()
+    _apply_transform_ops(centerline_prim, translate=centerline_translate, rotate_xyz=centerline_rotate_xyz)
     centerline_prim.ApplyAPI("NewtonRodAPI")
     centerline.CreateTypeAttr().Set(UsdGeom.Tokens.linear)
     centerline.CreateCurveVertexCountsAttr().Set([4])
@@ -93,11 +115,19 @@ def _author_test_cable_stage(output_path: Path) -> None:
     stage.Save()
 
 
-def _author_test_fallback_cable_stage(output_path: Path) -> None:
+def _author_test_fallback_cable_stage(
+    output_path: Path,
+    *,
+    root_translate: tuple[float, float, float] | None = None,
+    root_rotate_xyz: tuple[float, float, float] | None = None,
+    centerline_translate: tuple[float, float, float] | None = None,
+    centerline_rotate_xyz: tuple[float, float, float] | None = None,
+) -> None:
     stage = Usd.Stage.CreateNew(str(output_path))
 
     root = UsdGeom.Xform.Define(stage, "/Cable").GetPrim()
     stage.SetDefaultPrim(root)
+    _apply_transform_ops(root, translate=root_translate, rotate_xyz=root_rotate_xyz)
     root.ApplyAPI("NewtonDeformableAPI")
     root.ApplyAPI("NewtonRodAPI")
     UsdShade.MaterialBindingAPI.Apply(root)
@@ -113,6 +143,7 @@ def _author_test_fallback_cable_stage(output_path: Path) -> None:
 
     centerline = UsdGeom.BasisCurves.Define(stage, "/Cable/Centerline")
     centerline_prim = centerline.GetPrim()
+    _apply_transform_ops(centerline_prim, translate=centerline_translate, rotate_xyz=centerline_rotate_xyz)
     centerline_prim.ApplyAPI("NewtonRodAPI")
     centerline.CreateTypeAttr().Set(UsdGeom.Tokens.linear)
     centerline.CreateCurveVertexCountsAttr().Set([4])
@@ -258,6 +289,34 @@ class TestPalatialCable(unittest.TestCase):
             self.assertAlmostEqual(float(params["bendZDamping"]), 0.8)
             self.assertAlmostEqual(float(params["torsionDamping"]), 0.8)
 
+    def test_extract_cable_points_world_space_applies_hierarchy_transforms(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "test_cable_world_points.usda"
+            _author_test_cable_stage(
+                usd_path,
+                root_translate=(1.0, 2.0, 3.0),
+                root_rotate_xyz=(0.0, 0.0, 90.0),
+                centerline_translate=(0.25, 0.5, 0.0),
+            )
+
+            local_points = extract_cable_points(str(usd_path))
+            world_points = extract_cable_points(str(usd_path), world_space=True)
+
+            self.assertEqual(len(world_points), 4)
+            self.assertAlmostEqual(float(local_points[-1][0]), 1.5)
+
+            stage = Usd.Stage.Open(str(usd_path))
+            centerline_prim = stage.GetPrimAtPath("/Cable/Centerline")
+            matrix = UsdGeom.Xformable(centerline_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            expected_last = matrix.Transform(Gf.Vec3d(1.5, 0.0, 0.0))
+
+            self.assertAlmostEqual(float(world_points[0][0]), 0.5)
+            self.assertAlmostEqual(float(world_points[0][1]), 2.25)
+            self.assertAlmostEqual(float(world_points[0][2]), 3.0)
+            self.assertAlmostEqual(float(world_points[-1][0]), float(expected_last[0]))
+            self.assertAlmostEqual(float(world_points[-1][1]), float(expected_last[1]))
+            self.assertAlmostEqual(float(world_points[-1][2]), float(expected_last[2]))
+
     def test_load_builds_cable_bundle(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             usd_path = Path(tmp_dir) / "test_cable.usda"
@@ -270,6 +329,38 @@ class TestPalatialCable(unittest.TestCase):
             self.assertEqual(bundle.fps, 120)
             self.assertEqual(bundle.model.body_count, 3)
             self.assertEqual(bundle.model.joint_count, 2)
+
+    def test_load_uses_world_space_authored_centerline_points(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "test_cable_transformed.usda"
+            _author_test_cable_stage(
+                usd_path,
+                root_translate=(1.0, 2.0, 3.0),
+                root_rotate_xyz=(0.0, 0.0, 90.0),
+                centerline_translate=(0.25, 0.5, 0.0),
+            )
+
+            bundle = load(str(usd_path), device="cpu")
+            body_q = bundle.model.body_q.numpy()
+            expected_points = extract_cable_points(str(usd_path), world_space=True)
+            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+                expected_points,
+                twist_total=0.25,
+            )
+
+            self.assertEqual(bundle.model.body_count, 3)
+            for body_index in range(bundle.model.body_count):
+                np.testing.assert_allclose(
+                    body_q[body_index, :3],
+                    np.array(expected_points[body_index], dtype=np.float32),
+                    atol=1.0e-6,
+                    rtol=0.0,
+                )
+                _assert_same_quaternion(
+                    self,
+                    body_q[body_index, 3:7],
+                    np.array(expected_quaternions[body_index], dtype=np.float32),
+                )
 
     def test_load_fallback_uses_drop_height_and_twist_total(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -285,6 +376,51 @@ class TestPalatialCable(unittest.TestCase):
                 length=1.5,
                 num_segments=3,
             )
+            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+                expected_points,
+                twist_total=0.5,
+            )
+
+            self.assertEqual(bundle.model.body_count, 3)
+            for body_index in range(bundle.model.body_count):
+                np.testing.assert_allclose(
+                    body_q[body_index, :3],
+                    np.array(expected_points[body_index], dtype=np.float32),
+                    atol=1.0e-6,
+                    rtol=0.0,
+                )
+                _assert_same_quaternion(
+                    self,
+                    body_q[body_index, 3:7],
+                    np.array(expected_quaternions[body_index], dtype=np.float32),
+                )
+
+    def test_load_fallback_applies_reference_transform(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "test_cable_fallback_transformed.usda"
+            _author_test_fallback_cable_stage(
+                usd_path,
+                root_translate=(1.0, 2.0, 3.0),
+                root_rotate_xyz=(0.0, 0.0, 90.0),
+                centerline_translate=(0.25, 0.5, 0.0),
+            )
+
+            bundle = load(str(usd_path), device="cpu")
+            body_q = bundle.model.body_q.numpy()
+
+            stage = Usd.Stage.Open(str(usd_path))
+            centerline_prim = stage.GetPrimAtPath("/Cable/Centerline")
+            matrix = UsdGeom.Xformable(centerline_prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+            local_points = newton.utils.create_straight_cable_points(
+                start=wp.vec3(0.0, 0.0, 0.7),
+                direction=wp.vec3(1.0, 0.0, 0.0),
+                length=1.5,
+                num_segments=3,
+            )
+            expected_points = [
+                wp.vec3(*matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))))
+                for point in local_points
+            ]
             expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
                 expected_points,
                 twist_total=0.5,

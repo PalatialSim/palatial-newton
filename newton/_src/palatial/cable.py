@@ -9,7 +9,7 @@ import newton  # noqa: F401
 from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
 
 import warp as wp
-from pxr import Usd, UsdGeom, UsdShade
+from pxr import Gf, Usd, UsdGeom, UsdShade
 
 
 DEFAULTS = {
@@ -107,6 +107,24 @@ def find_cable_centerline_prim_path(usd_path: str) -> str | None:
         if prim.IsA(UsdGeom.BasisCurves) and (_has_rod_api(prim) or _has_rod_intent(prim)):
             return prim.GetPath().pathString
     return None
+
+
+def _get_world_transform_matrix(
+    prim: Usd.Prim,
+    *,
+    xform_cache: UsdGeom.XformCache | None = None,
+) -> Gf.Matrix4d:
+    """Return the prim's local-to-world transform matrix."""
+    xformable = UsdGeom.Xformable(prim)
+    if xform_cache is None:
+        return xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+    return xform_cache.GetLocalToWorldTransform(prim)
+
+
+def _transform_point(matrix: Gf.Matrix4d, point: object) -> wp.vec3:
+    """Transform a point-like value with a USD matrix."""
+    transformed = matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2])))
+    return wp.vec3(float(transformed[0]), float(transformed[1]), float(transformed[2]))
 
 
 def _bound_cable_material_prims(prim: Usd.Prim) -> list[Usd.Prim]:
@@ -323,8 +341,32 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
     return out
 
 
-def extract_cable_points(usd_path: str) -> list[wp.vec3]:
-    """Extract authored centerline points from a rod or cable BasisCurves prim."""
+def get_cable_reference_transform_matrix(usd_path: str) -> Gf.Matrix4d:
+    """Return the world transform matrix that should place cable geometry."""
+    stage = Usd.Stage.Open(usd_path)
+    if not stage:
+        return Gf.Matrix4d(1.0)
+
+    reference_path = find_cable_centerline_prim_path(usd_path) or find_cable_prim_path(usd_path)
+    if not reference_path:
+        return Gf.Matrix4d(1.0)
+
+    reference_prim = stage.GetPrimAtPath(reference_path)
+    if not reference_prim or not reference_prim.IsValid():
+        return Gf.Matrix4d(1.0)
+
+    return _get_world_transform_matrix(reference_prim)
+
+
+def extract_cable_points(usd_path: str, *, world_space: bool = False) -> list[wp.vec3]:
+    """Extract authored centerline points from a rod or cable BasisCurves prim.
+
+    Args:
+        usd_path: Path to the USD asset.
+        world_space: If True, apply the centerline prim's full local-to-world
+            transform before returning points. Otherwise return authored
+            local-space points.
+    """
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return []
@@ -342,4 +384,9 @@ def extract_cable_points(usd_path: str) -> list[wp.vec3]:
     if points is None:
         return []
 
-    return [wp.vec3(float(point[0]), float(point[1]), float(point[2])) for point in points]
+    if not world_space:
+        return [wp.vec3(float(point[0]), float(point[1]), float(point[2])) for point in points]
+
+    xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
+    world_transform = _get_world_transform_matrix(centerline_prim, xform_cache=xform_cache)
+    return [_transform_point(world_transform, point) for point in points]

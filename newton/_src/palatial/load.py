@@ -43,7 +43,7 @@ from __future__ import annotations
 # process.
 import newton
 
-from pxr import Usd, UsdGeom
+from pxr import Gf, Usd, UsdGeom
 
 from dataclasses import dataclass
 from typing import Any
@@ -325,14 +325,19 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     """Build a cable model from NewtonRodAPI metadata and a BasisCurves centerline."""
     from newton import utils as newton_utils
 
-    from .cable import extract_cable_points, find_cable_prim_path, read_cable_params
+    from .cable import (
+        extract_cable_points,
+        find_cable_prim_path,
+        get_cable_reference_transform_matrix,
+        read_cable_params,
+    )
 
     cable_path = find_cable_prim_path(usd_path)
     if not cable_path:
         raise RuntimeError(f"No cable or rod prim found in {usd_path}")
 
     params = read_cable_params(usd_path)
-    points = extract_cable_points(usd_path)
+    points = extract_cable_points(usd_path, world_space=True)
     if str(params["frameDefinition"]) not in ("parallelTransport", "parallel_transport"):
         raise RuntimeError(
             f"Cable asset {usd_path} must declare newton:rod:frameDefinition='parallelTransport' "
@@ -345,12 +350,24 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
         )
     if not points:
         segment_count = int(params["segmentCount"])
-        points = newton_utils.create_straight_cable_points(
+        local_points = newton_utils.create_straight_cable_points(
             start=wp.vec3(0.0, 0.0, float(params["dropHeight"])),
             direction=wp.vec3(1.0, 0.0, 0.0),
             length=float(params["length"]),
             num_segments=segment_count,
         )
+        reference_transform = get_cable_reference_transform_matrix(usd_path)
+        points = [
+            wp.vec3(
+                float(transformed[0]),
+                float(transformed[1]),
+                float(transformed[2]),
+            )
+            for point in local_points
+            for transformed in (
+                reference_transform.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))),
+            )
+        ]
 
     if len(points) < 2:
         raise RuntimeError(f"Cable asset {usd_path} must provide at least 2 centerline points")
