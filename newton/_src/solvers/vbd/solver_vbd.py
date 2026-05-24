@@ -99,16 +99,20 @@ class SolverVBD(SolverBase):
     use augmented-Lagrangian state.
 
     Non-cable structural joint slots default to **hard mode** (augmented Lagrangian
-    with persistent lambda and C0 stabilization). Cable stretch and bend default to
-    **soft mode**. The hard/soft mode can be changed per slot via :meth:`set_joint_constraint_mode`.
+    with persistent lambda and C0 stabilization). Cable structural slots default to
+    **soft mode**. The hard/soft mode can be changed per slot via
+    :meth:`set_joint_constraint_mode`.
 
     Joint limitations:
-        - Supported joint types: BALL, FIXED, FREE, REVOLUTE, PRISMATIC, D6, CABLE.
+        - Supported joint types: BALL, FIXED, FREE, REVOLUTE, PRISMATIC, D6,
+          CABLE, ANISOTROPIC_CABLE.
           DISTANCE joints are not supported.
         - :attr:`~newton.Model.joint_enabled` is supported for all joint types.
         - :attr:`~newton.Model.joint_target_ke`/:attr:`~newton.Model.joint_target_kd` are supported
-          for REVOLUTE, PRISMATIC, D6 (as drives), and CABLE (as stretch/bend stiffness and damping).
-          VBD interprets ``kd`` as a dimensionless Rayleigh coefficient (``D = kd * ke``).
+          for REVOLUTE, PRISMATIC, D6 (as drives), CABLE (as stretch/bend stiffness and damping),
+          and ANISOTROPIC_CABLE (as stretch/bend_y/bend_z/torsion stiffness and damping).
+          VBD interprets ``kd`` as a dimensionless Rayleigh coefficient
+          (``D = kd * ke``).
         - :attr:`~newton.Model.joint_limit_lower`/:attr:`~newton.Model.joint_limit_upper` and
           :attr:`~newton.Model.joint_limit_ke`/:attr:`~newton.Model.joint_limit_kd` are supported
           for REVOLUTE, PRISMATIC, and D6 joints. The default ``limit_kd`` in
@@ -178,6 +182,7 @@ class SolverVBD(SolverBase):
 
         The first two solver constraint slots are structural where present:
           - CABLE: LINEAR/STRETCH -> stretch, ANGULAR/BEND -> bend
+          - ANISOTROPIC_CABLE: LINEAR/STRETCH -> stretch, ANGULAR/BEND -> bend_y/bend_z/torsion vec3
           - BALL: LINEAR only
           - FIXED/REVOLUTE/PRISMATIC/D6: LINEAR and ANGULAR
 
@@ -826,6 +831,7 @@ class SolverVBD(SolverBase):
 
         VBD stores and adapts penalty stiffness values for scalar constraint components:
           - CABLE: 2 scalars (stretch/linear, bend/angular)
+          - ANISOTROPIC_CABLE: 4 scalars (stretch/linear, bend_y/angular, bend_z/angular, torsion/angular)
           - BALL:  1 scalar (isotropic linear anchor-coincidence)
           - FIXED: 2 scalars (isotropic linear + isotropic angular)
           - REVOLUTE:  3 scalars (isotropic linear + 2-DOF perpendicular angular + angular drive/limit)
@@ -846,6 +852,8 @@ class SolverVBD(SolverBase):
             for j in range(n_j):
                 if jt[j] == JointType.CABLE:
                     dim_np[j] = 2
+                elif jt[j] == JointType.ANISOTROPIC_CABLE:
+                    dim_np[j] = 4
                 elif jt[j] == JointType.BALL:
                     dim_np[j] = 1
                 elif jt[j] == JointType.FIXED:
@@ -860,7 +868,7 @@ class SolverVBD(SolverBase):
                     if jt[j] != JointType.FREE:
                         raise NotImplementedError(
                             f"SolverVBD rigid joints: JointType.{JointType(jt[j]).name} is not implemented yet "
-                            "(only CABLE, BALL, FIXED, REVOLUTE, PRISMATIC, and D6 are supported)."
+                            "(only CABLE, ANISOTROPIC_CABLE, BALL, FIXED, REVOLUTE, PRISMATIC, and D6 are supported)."
                         )
                     dim_np[j] = 0
 
@@ -886,6 +894,10 @@ class SolverVBD(SolverBase):
         Side effects (stored on self):
               - joint_penalty_kd:    damping coefficient per constraint scalar
               - joint_is_hard:       hard/soft flag per constraint scalar (1 = hard, 0 = soft)
+
+        Supported cable slot layouts:
+              - CABLE: [stretch, bend]
+              - ANISOTROPIC_CABLE: [stretch, bend_y, bend_z, torsion]
         """
         if (
             not hasattr(self, "joint_constraint_start")
@@ -952,6 +964,29 @@ class SolverVBD(SolverBase):
                     joint_k_init_np[c0 + 1] = ke_bend if ang_k_start is None else min(ang_k_start, ke_bend)
                     joint_kd_np[c0] = jtarget_kd[dof0]
                     joint_kd_np[c0 + 1] = jtarget_kd[dof0 + 1]
+                elif jt[j] == JointType.ANISOTROPIC_CABLE:
+                    c0 = int(jc_start[j])
+                    dof0 = int(jdofs[j])
+                    dof3 = dof0 + 3
+                    if dof0 < 0 or dof3 >= len(jtarget_ke) or dof3 >= len(jtarget_kd):
+                        raise RuntimeError(
+                            "SolverVBD _init_joint_penalty_k: JointType.ANISOTROPIC_CABLE requires "
+                            "4 contiguous DOF entries in model.joint_target_ke/kd starting at "
+                            f"joint_qd_start[j]. Got joint_index={j}, joint_qd_start={dof0}, "
+                            f"len(joint_target_ke)={len(jtarget_ke)}, len(joint_target_kd)={len(jtarget_kd)}."
+                        )
+                    slot_dof_indices = (dof0, dof0 + 1, dof0 + 2, dof0 + 3)
+                    slot_seeds = (
+                        jtarget_ke[dof0] if lin_k_start is None else min(lin_k_start, jtarget_ke[dof0]),
+                        jtarget_ke[dof0 + 1] if ang_k_start is None else min(ang_k_start, jtarget_ke[dof0 + 1]),
+                        jtarget_ke[dof0 + 2] if ang_k_start is None else min(ang_k_start, jtarget_ke[dof0 + 2]),
+                        jtarget_ke[dof0 + 3] if ang_k_start is None else min(ang_k_start, jtarget_ke[dof0 + 3]),
+                    )
+                    for slot_offset, slot_dof in enumerate(slot_dof_indices):
+                        slot = c0 + slot_offset
+                        joint_k_max_np[slot] = jtarget_ke[slot_dof]
+                        joint_k_init_np[slot] = slot_seeds[slot_offset]
+                        joint_kd_np[slot] = jtarget_kd[slot_dof]
                 elif jt[j] == JointType.BALL:
                     c0 = int(jc_start[j])
                     joint_k_max_np[c0] = structural_linear_ke

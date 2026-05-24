@@ -381,7 +381,7 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
-        builder.add_rod(
+        builder.add_rod_anisotropic(
             positions=points,
             quaternions=quaternions,
             radius=float(params["radius"]),
@@ -454,7 +454,7 @@ def load(usd_path: str, *, solver_override: str | None = None,
                 raise RuntimeError("Cable assets require SolverVBD, but this Newton build does not provide it")
         elif solver_name != "vbd":
             raise RuntimeError(
-                f"Cable assets require SolverVBD because stock JointType.CABLE is only supported by VBD "
+                f"Cable assets require SolverVBD because cable joint runtime is only supported by VBD "
                 f"(got solver '{solver_name}')"
             )
     del stage

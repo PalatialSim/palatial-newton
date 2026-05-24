@@ -55,6 +55,9 @@ class JointType(IntEnum):
     CABLE = 7
     """Cable joint: one linear (stretch) and one angular (isotropic bend/twist) DoF."""
 
+    ANISOTROPIC_CABLE = 8
+    """Cable joint: one linear stretch DoF plus three angular bend/twist channel DoFs."""
+
     def dof_count(self, num_axes: int) -> tuple[int, int]:
         """
         Returns the number of degrees of freedom (DoF) in velocity and the number of coordinates
@@ -78,6 +81,9 @@ class JointType(IntEnum):
         coord_count = num_axes
         if self == JointType.BALL:
             dof_count = 3
+            coord_count = 4
+        elif self == JointType.ANISOTROPIC_CABLE:
+            dof_count = 4
             coord_count = 4
         elif self == JointType.FREE or self == JointType.DISTANCE:
             dof_count = 6
@@ -105,6 +111,8 @@ class JointType(IntEnum):
         cts_count = 6 - num_axes
         if self == JointType.BALL:
             cts_count = 3
+        elif self == JointType.ANISOTROPIC_CABLE:
+            cts_count = 2
         elif self == JointType.FREE or self == JointType.DISTANCE:
             cts_count = 0
         elif self == JointType.FIXED:

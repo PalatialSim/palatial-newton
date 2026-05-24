@@ -329,6 +329,11 @@ class TestPalatialCable(unittest.TestCase):
             self.assertEqual(bundle.fps, 120)
             self.assertEqual(bundle.model.body_count, 3)
             self.assertEqual(bundle.model.joint_count, 2)
+            self.assertEqual(
+                bundle.model.joint_type.numpy().tolist(),
+                [int(newton.JointType.ANISOTROPIC_CABLE)] * 2,
+            )
+            self.assertEqual(bundle.model.joint_dof_dim.numpy().tolist(), [[1, 3], [1, 3]])
 
     def test_load_uses_world_space_authored_centerline_points(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

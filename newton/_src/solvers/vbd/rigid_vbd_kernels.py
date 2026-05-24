@@ -362,6 +362,28 @@ def _update_dual_vec3(
 
 
 @wp.func
+def _update_dual_vec3_diagonal(
+    C_vec: wp.vec3,
+    C0: wp.vec3,
+    alpha: float,
+    k_diag: wp.vec3,
+    lam: wp.vec3,
+    is_hard: int,
+):
+    """Shared AVBD dual update for a vec3 slot with per-component stiffness."""
+    if is_hard == 1:
+        C_stab = C_vec - alpha * C0
+        lam_new = wp.vec3(
+            k_diag[0] * C_stab[0] + lam[0],
+            k_diag[1] * C_stab[1] + lam[1],
+            k_diag[2] * C_stab[2] + lam[2],
+        )
+    else:
+        lam_new = lam
+    return lam_new
+
+
+@wp.func
 def evaluate_angular_constraint_force_hessian(
     q_wp: wp.quat,
     q_wc: wp.quat,
@@ -435,6 +457,81 @@ def evaluate_angular_constraint_force_hessian(
 
         k_damp = (damping * inv_dt) * penalty_k
         H_local = H_local + k_damp * P
+
+    H_aa = J_world * (H_local * wp.transpose(J_world))
+
+    tau_world = J_world * f_local
+    if not is_parent:
+        tau_world = -tau_world
+
+    return tau_world, H_aa, kappa_now_vec, J_world
+
+
+@wp.func
+def evaluate_anisotropic_angular_constraint_force_hessian(
+    q_wp: wp.quat,
+    q_wc: wp.quat,
+    q_wp_rest: wp.quat,
+    q_wc_rest: wp.quat,
+    q_wp_prev: wp.quat,
+    q_wc_prev: wp.quat,
+    is_parent: bool,
+    penalty_k: wp.vec3,
+    lambda_ang: wp.vec3,
+    C0_ang: wp.vec3,
+    alpha: float,
+    damping: wp.vec3,
+    dt: float,
+):
+    """Angular constraint force/Hessian with independent bend/torsion channels.
+
+    Uses the cable kappa basis directly, with diagonal stiffness/damping over
+    ``[bend_y, bend_z, torsion]``. This path intentionally bypasses isotropic
+    Dahl friction and reuses the existing AVBD angular lambda/C0 state.
+    """
+    inv_dt = 1.0 / dt
+
+    kappa_now_vec, J_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
+    kappa_stab = kappa_now_vec - alpha * C0_ang
+
+    f_local = wp.vec3(
+        penalty_k[0] * kappa_stab[0] + lambda_ang[0],
+        penalty_k[1] * kappa_stab[1] + lambda_ang[1],
+        penalty_k[2] * kappa_stab[2] + lambda_ang[2],
+    )
+    H_local = wp.mat33(
+        penalty_k[0],
+        0.0,
+        0.0,
+        0.0,
+        penalty_k[1],
+        0.0,
+        0.0,
+        0.0,
+        penalty_k[2],
+    )
+
+    if damping[0] > 0.0 or damping[1] > 0.0 or damping[2] > 0.0:
+        omega_p_world = quat_velocity(q_wp, q_wp_prev, dt)
+        omega_c_world = quat_velocity(q_wc, q_wc_prev, dt)
+
+        dkappa_dt_vec = compute_kappa_dot(J_world, omega_p_world, omega_c_world)
+        f_local = f_local + wp.vec3(
+            damping[0] * penalty_k[0] * dkappa_dt_vec[0],
+            damping[1] * penalty_k[1] * dkappa_dt_vec[1],
+            damping[2] * penalty_k[2] * dkappa_dt_vec[2],
+        )
+        H_local = H_local + wp.mat33(
+            damping[0] * inv_dt * penalty_k[0],
+            0.0,
+            0.0,
+            0.0,
+            damping[1] * inv_dt * penalty_k[1],
+            0.0,
+            0.0,
+            0.0,
+            damping[2] * inv_dt * penalty_k[2],
+        )
 
     H_aa = J_world * (H_local * wp.transpose(J_world))
 
@@ -1054,13 +1151,15 @@ def evaluate_joint_force_hessian(
 ):
     """Compute AVBD joint force and Hessian contributions for one body.
 
-    Supported joint types: CABLE, BALL, FIXED, REVOLUTE, PRISMATIC, D6.
+    Supported joint types: CABLE, ANISOTROPIC_CABLE, BALL, FIXED, REVOLUTE,
+    PRISMATIC, D6.
     Uses unified projector-based constraint evaluators for all joint types.
 
     Indexing:
         joint_constraint_start[j] is a solver-owned start offset into the per-constraint
         arrays (joint_penalty_k, joint_penalty_kd). Layout per joint type:
           - CABLE: 2 scalars -> [stretch, bend]
+          - ANISOTROPIC_CABLE: 4 scalars -> [stretch, bend_y, bend_z, torsion]
           - BALL:  1 scalar  -> [linear]
           - FIXED: 2 scalars -> [linear, angular]
           - REVOLUTE:  3 scalars -> [linear, angular, ang_drive_limit]
@@ -1072,6 +1171,7 @@ def evaluate_joint_force_hessian(
     jt = joint_type[joint_index]
     if (
         jt != JointType.CABLE
+        and jt != JointType.ANISOTROPIC_CABLE
         and jt != JointType.BALL
         and jt != JointType.FIXED
         and jt != JointType.REVOLUTE
@@ -1189,6 +1289,70 @@ def evaluate_joint_force_hessian(
             )
             total_torque = total_torque + bend_torque
             total_H_aa = total_H_aa + bend_H_aa
+
+        if k_stretch > 0.0:
+            f_s, t_s, Hll_s, Hal_s, Haa_s = evaluate_linear_constraint_force_hessian(
+                X_wp,
+                X_wc,
+                X_wp_prev,
+                X_wc_prev,
+                parent_pose,
+                child_pose,
+                parent_com,
+                child_com,
+                is_parent_body,
+                k_stretch,
+                P_I,
+                lin_lambda,
+                lin_C0,
+                lin_alpha,
+                kd_stretch,
+                dt,
+            )
+            total_force = total_force + f_s
+            total_torque = total_torque + t_s
+            total_H_ll = total_H_ll + Hll_s
+            total_H_al = total_H_al + Hal_s
+            total_H_aa = total_H_aa + Haa_s
+
+        return total_force, total_torque, total_H_ll, total_H_al, total_H_aa
+
+    elif jt == JointType.ANISOTROPIC_CABLE:
+        k_stretch = joint_penalty_k[c_start + 0]
+        k_bend_y = joint_penalty_k[c_start + 1]
+        k_bend_z = joint_penalty_k[c_start + 2]
+        k_torsion = joint_penalty_k[c_start + 3]
+        kd_stretch = joint_penalty_kd[c_start + 0]
+        kd_bend_y = joint_penalty_kd[c_start + 1]
+        kd_bend_z = joint_penalty_kd[c_start + 2]
+        kd_torsion = joint_penalty_kd[c_start + 3]
+
+        total_force = wp.vec3(0.0)
+        total_torque = wp.vec3(0.0)
+        total_H_ll = wp.mat33(0.0)
+        total_H_al = wp.mat33(0.0)
+        total_H_aa = wp.mat33(0.0)
+
+        if k_bend_y > 0.0 or k_bend_z > 0.0 or k_torsion > 0.0:
+            angular_torque, angular_H_aa, _angular_kappa, _angular_J = (
+                evaluate_anisotropic_angular_constraint_force_hessian(
+                    q_wp,
+                    q_wc,
+                    q_wp_rest,
+                    q_wc_rest,
+                    q_wp_prev,
+                    q_wc_prev,
+                    is_parent_body,
+                    wp.vec3(k_bend_y, k_bend_z, k_torsion),
+                    ang_lambda,
+                    ang_C0,
+                    ang_alpha,
+                    wp.vec3(kd_bend_y, kd_bend_z, kd_torsion),
+                    dt,
+                )
+            )
+            total_torque = total_torque + angular_torque
+            total_H_aa = total_H_aa + angular_H_aa
 
         if k_stretch > 0.0:
             f_s, t_s, Hll_s, Hal_s, Haa_s = evaluate_linear_constraint_force_hessian(
@@ -3208,6 +3372,7 @@ def update_duals_joint(
     jt = joint_type[j]
     if (
         jt != JointType.CABLE
+        and jt != JointType.ANISOTROPIC_CABLE
         and jt != JointType.BALL
         and jt != JointType.FIXED
         and jt != JointType.REVOLUTE
@@ -3270,6 +3435,58 @@ def update_duals_joint(
         joint_lambda_ang[j] = lam_new
         joint_penalty_k[bend_idx] = wp.min(
             joint_penalty_k_max[bend_idx], joint_penalty_k[bend_idx] + beta_ang * wp.length(kappa)
+        )
+        return
+
+    # ANISOTROPIC_CABLE joint: stretch and per-axis angular penalties (4 scalars).
+    if jt == JointType.ANISOTROPIC_CABLE:
+        q_wp = wp.transform_get_rotation(X_wp)
+        q_wc = wp.transform_get_rotation(X_wc)
+        q_wp_rest = wp.transform_get_rotation(X_wp_rest)
+        q_wc_rest = wp.transform_get_rotation(X_wc_rest)
+
+        x_p = wp.transform_get_translation(X_wp)
+        x_c = wp.transform_get_translation(X_wc)
+        C_vec_stretch = x_c - x_p
+        kappa = compute_kappa(q_wp, q_wc, q_wp_rest, q_wc_rest)
+
+        stretch_idx = c_start
+        lam_new = _update_dual_vec3(
+            C_vec_stretch,
+            joint_C0_lin[j],
+            avbd_alpha,
+            joint_penalty_k[stretch_idx],
+            joint_lambda_lin[j],
+            joint_is_hard[stretch_idx],
+        )
+        joint_lambda_lin[j] = lam_new
+        joint_penalty_k[stretch_idx] = wp.min(
+            joint_penalty_k_max[stretch_idx], joint_penalty_k[stretch_idx] + beta_lin * wp.length(C_vec_stretch)
+        )
+
+        ang_idx = c_start + 1
+        ang_k = wp.vec3(
+            joint_penalty_k[ang_idx + 0],
+            joint_penalty_k[ang_idx + 1],
+            joint_penalty_k[ang_idx + 2],
+        )
+        lam_new = _update_dual_vec3_diagonal(
+            kappa,
+            joint_C0_ang[j],
+            avbd_alpha,
+            ang_k,
+            joint_lambda_ang[j],
+            joint_is_hard[ang_idx],
+        )
+        joint_lambda_ang[j] = lam_new
+        joint_penalty_k[ang_idx + 0] = wp.min(
+            joint_penalty_k_max[ang_idx + 0], joint_penalty_k[ang_idx + 0] + beta_ang * wp.abs(kappa[0])
+        )
+        joint_penalty_k[ang_idx + 1] = wp.min(
+            joint_penalty_k_max[ang_idx + 1], joint_penalty_k[ang_idx + 1] + beta_ang * wp.abs(kappa[1])
+        )
+        joint_penalty_k[ang_idx + 2] = wp.min(
+            joint_penalty_k_max[ang_idx + 2], joint_penalty_k[ang_idx + 2] + beta_ang * wp.abs(kappa[2])
         )
         return
 

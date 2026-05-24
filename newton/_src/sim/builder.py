@@ -4419,6 +4419,21 @@ class ModelBuilder:
             The index of the added joint.
 
         """
+        anisotropic_param_names = (
+            "bend_y_stiffness",
+            "bend_y_damping",
+            "bend_z_stiffness",
+            "bend_z_damping",
+            "torsion_stiffness",
+            "torsion_damping",
+        )
+        anisotropic_kwargs = [name for name in anisotropic_param_names if name in kwargs]
+        if anisotropic_kwargs:
+            raise ValueError(
+                "JointType.CABLE is isotropic-only; anisotropic per-axis arguments "
+                f"{anisotropic_kwargs} require JointType.ANISOTROPIC_CABLE via add_joint_anisotropic_cable()."
+            )
+
         # Linear DOF (stretch)
         se_ke = 1.0e5 if stretch_stiffness is None else stretch_stiffness
         se_kd = 0.0 if stretch_damping is None else stretch_damping
@@ -4443,6 +4458,152 @@ class ModelBuilder:
             custom_attributes=custom_attributes,
             **kwargs,
         )
+
+    @staticmethod
+    def _resolve_nonnegative_parameter(value: float | None, *, default: float, name: str) -> float:
+        resolved = default if value is None else float(value)
+        if resolved < 0.0:
+            raise ValueError(f"{name} must be >= 0")
+        return resolved
+
+    @staticmethod
+    def _validate_segment_length_for_anisotropic(length: float, *, context: str) -> float:
+        min_segment_length = 1.0e-9
+        if length <= min_segment_length:
+            raise ValueError(
+                f"{context}: edge/segment too small (length={length:.3e}); requires length > {min_segment_length:.1e}"
+            )
+        return length
+
+    def _validate_anisotropic_joint_slot_layout(self, joint_index: int) -> None:
+        qd_start = self.joint_qd_start[joint_index]
+        if joint_index + 1 == len(self.joint_qd_start):
+            qd_end = self.joint_dof_count
+        else:
+            qd_end = self.joint_qd_start[joint_index + 1]
+        qd_dim = qd_end - qd_start
+        if qd_dim != 4:
+            raise RuntimeError(
+                "ANISOTROPIC_CABLE requires 4 DOF entries; "
+                f"joint_index={joint_index}, joint_qd_start={qd_start}, joint_qd_dim={qd_dim}"
+            )
+        if (
+            len(self.joint_target_ke[qd_start:qd_start + 4]) != 4
+            or len(self.joint_target_kd[qd_start:qd_start + 4]) != 4
+        ):
+            raise RuntimeError(
+                "ANISOTROPIC_CABLE requires 4 DOF entries; "
+                f"joint_index={joint_index}, joint_qd_start={qd_start}"
+            )
+
+    def add_joint_anisotropic_cable(
+        self,
+        parent: int,
+        child: int,
+        parent_xform: Transform | None = None,
+        child_xform: Transform | None = None,
+        stretch_stiffness: float | None = None,
+        stretch_damping: float | None = None,
+        bend_y_stiffness: float | None = None,
+        bend_y_damping: float | None = None,
+        bend_z_stiffness: float | None = None,
+        bend_z_damping: float | None = None,
+        torsion_stiffness: float | None = None,
+        torsion_damping: float | None = None,
+        label: str | None = None,
+        collision_filter_parent: bool | None = None,
+        enabled: bool = True,
+        custom_attributes: dict[str, Any] | None = None,
+        **kwargs,
+    ) -> int:
+        """Adds an anisotropic cable joint with explicit per-axis angular channels.
+
+        The stored joint DoF slot order is frozen as
+        ``[stretch, bend_y, bend_z, torsion]``.
+
+        Args:
+            parent: The index of the parent body.
+            child: The index of the child body.
+            parent_xform: The transform from the parent body frame to the joint parent anchor frame; its
+                translation is the attachment point.
+            child_xform: The transform from the child body frame to the joint child anchor frame; its
+                translation is the attachment point.
+            stretch_stiffness: Cable stretch stiffness, stored directly as ``target_ke`` [N/m]. If None,
+                defaults to 1.0e5.
+            stretch_damping: Cable stretch damping, stored directly as ``target_kd``. If None,
+                defaults to 0.0.
+            bend_y_stiffness: Cable bend stiffness around one transverse axis, stored directly as
+                ``target_ke`` [N*m]. If None, defaults to 0.0.
+            bend_y_damping: Cable bend damping around one transverse axis, stored directly as
+                ``target_kd``. If None, defaults to 0.0.
+            bend_z_stiffness: Cable bend stiffness around the other transverse axis, stored directly as
+                ``target_ke`` [N*m]. If None, defaults to 0.0.
+            bend_z_damping: Cable bend damping around the other transverse axis, stored directly as
+                ``target_kd``. If None, defaults to 0.0.
+            torsion_stiffness: Cable torsion stiffness around the tangent axis, stored directly as
+                ``target_ke`` [N*m]. If None, defaults to 0.0.
+            torsion_damping: Cable torsion damping around the tangent axis, stored directly as
+                ``target_kd``. If None, defaults to 0.0.
+            label: The label of the joint.
+            collision_filter_parent: Whether to filter collisions between shapes of the parent and child bodies.
+                Defaults to ``False`` for joints to world, ``True`` otherwise.
+            enabled: Whether the joint is enabled.
+            custom_attributes: Dictionary of custom attribute values for JOINT, JOINT_DOF, or JOINT_COORD
+                frequency attributes.
+
+        Returns:
+            The index of the added joint.
+        """
+        stretch_ke = self._resolve_nonnegative_parameter(
+            stretch_stiffness, default=1.0e5, name="stretch_stiffness"
+        )
+        stretch_kd = self._resolve_nonnegative_parameter(
+            stretch_damping, default=0.0, name="stretch_damping"
+        )
+        bend_y_ke = self._resolve_nonnegative_parameter(
+            bend_y_stiffness, default=0.0, name="bend_y_stiffness"
+        )
+        bend_y_kd = self._resolve_nonnegative_parameter(
+            bend_y_damping, default=0.0, name="bend_y_damping"
+        )
+        bend_z_ke = self._resolve_nonnegative_parameter(
+            bend_z_stiffness, default=0.0, name="bend_z_stiffness"
+        )
+        bend_z_kd = self._resolve_nonnegative_parameter(
+            bend_z_damping, default=0.0, name="bend_z_damping"
+        )
+        torsion_ke = self._resolve_nonnegative_parameter(
+            torsion_stiffness, default=0.0, name="torsion_stiffness"
+        )
+        torsion_kd = self._resolve_nonnegative_parameter(
+            torsion_damping, default=0.0, name="torsion_damping"
+        )
+
+        linear_axes = [
+            ModelBuilder.JointDofConfig(target_ke=stretch_ke, target_kd=stretch_kd),
+        ]
+        angular_axes = [
+            ModelBuilder.JointDofConfig(target_ke=bend_y_ke, target_kd=bend_y_kd),
+            ModelBuilder.JointDofConfig(target_ke=bend_z_ke, target_kd=bend_z_kd),
+            ModelBuilder.JointDofConfig(target_ke=torsion_ke, target_kd=torsion_kd),
+        ]
+
+        joint_index = self.add_joint(
+            JointType.ANISOTROPIC_CABLE,
+            parent,
+            child,
+            parent_xform=parent_xform,
+            child_xform=child_xform,
+            linear_axes=linear_axes,
+            angular_axes=angular_axes,
+            label=label,
+            collision_filter_parent=collision_filter_parent,
+            enabled=enabled,
+            custom_attributes=custom_attributes,
+            **kwargs,
+        )
+        self._validate_anisotropic_joint_slot_layout(joint_index)
+        return joint_index
 
     def add_equality_constraint(
         self,
@@ -4734,6 +4895,8 @@ class ModelBuilder:
                 return "distance"
             elif type == JointType.CABLE:
                 return "cable"
+            elif type == JointType.ANISOTROPIC_CABLE:
+                return "anisotropic_cable"
             return "unknown"
 
         def shape_type_str(type):
@@ -6856,6 +7019,182 @@ class ModelBuilder:
 
         return link_bodies, link_joints
 
+    def add_rod_anisotropic(
+        self,
+        positions: list[Vec3],
+        quaternions: list[Quat] | None = None,
+        radius: float = 0.1,
+        cfg: ShapeConfig | None = None,
+        stretch_stiffness: float | None = None,
+        stretch_damping: float | None = None,
+        bend_y_stiffness: float | None = None,
+        bend_y_damping: float | None = None,
+        bend_z_stiffness: float | None = None,
+        bend_z_damping: float | None = None,
+        torsion_stiffness: float | None = None,
+        torsion_damping: float | None = None,
+        closed: bool = False,
+        label: str | None = None,
+        wrap_in_articulation: bool = True,
+    ) -> tuple[list[int], list[int]]:
+        """Adds a rod composed of capsules connected by anisotropic cable joints.
+
+        This method is the additive counterpart to :meth:`add_rod`. It preserves
+        explicit ``bend_y``, ``bend_z``, and ``torsion`` channels instead of
+        collapsing them into the isotropic ``JointType.CABLE`` path.
+
+        Args:
+            positions: Centerline node positions [m] in world space.
+            quaternions: Optional per-segment orientations in world space. If provided,
+                must have ``len(positions) - 1`` elements and each quaternion should align
+                the capsule's local +Z with the segment direction.
+            radius: Capsule radius [m].
+            cfg: Shape configuration for the capsules. If ``None``, :attr:`default_shape_cfg`
+                is used.
+            stretch_stiffness: Per-joint cable stretch stiffness, stored directly as
+                ``target_ke`` [N/m]. If ``None``, defaults to ``1.0e5``.
+            stretch_damping: Per-joint cable stretch damping, stored directly as
+                ``target_kd``. If ``None``, defaults to ``0.0``.
+            bend_y_stiffness: Per-joint bend stiffness around one transverse cable axis,
+                stored directly as ``target_ke`` [N*m]. If ``None``, defaults to ``0.0``.
+            bend_y_damping: Per-joint bend damping around one transverse cable axis. If
+                ``None``, defaults to ``0.0``.
+            bend_z_stiffness: Per-joint bend stiffness around the other transverse cable
+                axis, stored directly as ``target_ke`` [N*m]. If ``None``, defaults to
+                ``0.0``.
+            bend_z_damping: Per-joint bend damping around the other transverse cable axis.
+                If ``None``, defaults to ``0.0``.
+            torsion_stiffness: Per-joint torsion stiffness around the cable tangent axis,
+                stored directly as ``target_ke`` [N*m]. If ``None``, defaults to ``0.0``.
+            torsion_damping: Per-joint torsion damping around the cable tangent axis. If
+                ``None``, defaults to ``0.0``.
+            closed: If ``True``, connects the last segment back to the first to form a
+                closed loop. If ``False``, creates an open chain.
+            label: Optional label prefix for bodies, shapes, and joints.
+            wrap_in_articulation: If ``True``, wraps the created joints into a single
+                articulation.
+
+        Returns:
+            A pair ``(body_indices, joint_indices)``.
+
+        Note:
+            This builder path creates :class:`JointType.ANISOTROPIC_CABLE` joints.
+            Solver support for that joint type is backend-specific.
+        """
+        if cfg is None:
+            cfg = self.default_shape_cfg
+
+        stretch_stiffness = self._resolve_nonnegative_parameter(
+            stretch_stiffness, default=1.0e5, name="stretch_stiffness"
+        )
+        stretch_damping = self._resolve_nonnegative_parameter(
+            stretch_damping, default=0.0, name="stretch_damping"
+        )
+        bend_y_stiffness = self._resolve_nonnegative_parameter(
+            bend_y_stiffness, default=0.0, name="bend_y_stiffness"
+        )
+        bend_y_damping = self._resolve_nonnegative_parameter(
+            bend_y_damping, default=0.0, name="bend_y_damping"
+        )
+        bend_z_stiffness = self._resolve_nonnegative_parameter(
+            bend_z_stiffness, default=0.0, name="bend_z_stiffness"
+        )
+        bend_z_damping = self._resolve_nonnegative_parameter(
+            bend_z_damping, default=0.0, name="bend_z_damping"
+        )
+        torsion_stiffness = self._resolve_nonnegative_parameter(
+            torsion_stiffness, default=0.0, name="torsion_stiffness"
+        )
+        torsion_damping = self._resolve_nonnegative_parameter(
+            torsion_damping, default=0.0, name="torsion_damping"
+        )
+
+        num_segments = len(positions) - 1
+        if num_segments < 1:
+            raise ValueError("add_rod_anisotropic: positions must contain at least 2 points")
+
+        positions_wp: list[wp.vec3] = [axis_to_vec3(p) for p in positions]
+
+        if quaternions is not None and len(quaternions) != num_segments:
+            raise ValueError(
+                f"add_rod_anisotropic: quaternions must have {num_segments} elements for {num_segments} segments, "
+                f"got {len(quaternions)} quaternions"
+            )
+
+        if num_segments < 2:
+            raise ValueError(
+                f"add_rod_anisotropic: requires at least 2 segments (got {num_segments}); "
+                "for a single capsule, create a body and add a capsule shape instead."
+            )
+
+        edges = [(i, i + 1) for i in range(num_segments)]
+        link_bodies, link_joints = self.add_rod_graph_anisotropic(
+            node_positions=positions_wp,
+            edges=edges,
+            radius=radius,
+            cfg=cfg,
+            stretch_stiffness=stretch_stiffness,
+            stretch_damping=stretch_damping,
+            bend_y_stiffness=bend_y_stiffness,
+            bend_y_damping=bend_y_damping,
+            bend_z_stiffness=bend_z_stiffness,
+            bend_z_damping=bend_z_damping,
+            torsion_stiffness=torsion_stiffness,
+            torsion_damping=torsion_damping,
+            label=label,
+            wrap_in_articulation=False,
+            quaternions=quaternions,
+        )
+
+        if wrap_in_articulation and link_joints:
+            rod_art_label = f"{label}_articulation" if label else None
+            self.add_articulation(link_joints, label=rod_art_label)
+
+        if closed:
+            if not wrap_in_articulation:
+                warnings.warn(
+                    "add_rod_anisotropic: wrap_in_articulation=False requires the caller to wrap joints via "
+                    "add_articulation() before finalize; closed=True also adds a loop-closing joint that must remain "
+                    "outside any articulation.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            if link_bodies:
+                first_body = link_bodies[0]
+                last_body = link_bodies[-1]
+                last_segment_length = self._validate_segment_length_for_anisotropic(
+                    float(wp.length(positions_wp[-1] - positions_wp[-2])),
+                    context="add_rod_anisotropic",
+                )
+                parent_xform = wp.transform(
+                    wp.vec3(0.0, 0.0, last_segment_length),
+                    wp.quat_identity(),
+                )
+                child_xform = wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())
+
+                loop_joint_label = f"{label}_cable_{len(link_joints) + 1}" if label else None
+                j_loop = self.add_joint_anisotropic_cable(
+                    parent=last_body,
+                    child=first_body,
+                    parent_xform=parent_xform,
+                    child_xform=child_xform,
+                    stretch_stiffness=stretch_stiffness,
+                    stretch_damping=stretch_damping,
+                    bend_y_stiffness=bend_y_stiffness,
+                    bend_y_damping=bend_y_damping,
+                    bend_z_stiffness=bend_z_stiffness,
+                    bend_z_damping=bend_z_damping,
+                    torsion_stiffness=torsion_stiffness,
+                    torsion_damping=torsion_damping,
+                    label=loop_joint_label,
+                    collision_filter_parent=True,
+                    enabled=True,
+                )
+                link_joints.append(j_loop)
+
+        return link_bodies, link_joints
+
     def add_rod_graph(
         self,
         node_positions: list[Vec3],
@@ -7216,6 +7555,332 @@ class ModelBuilder:
                         bj = bodies[j]
                         if (bi, bj) in jointed_body_pairs:
                             # Already filtered by add_joint_cable(collision_filter_parent=True).
+                            continue
+                        for si in self.body_shapes.get(bi, []):
+                            for sj in self.body_shapes.get(bj, []):
+                                self.add_shape_collision_filter_pair(int(si), int(sj))
+
+        return edge_bodies, all_joints
+
+    def add_rod_graph_anisotropic(
+        self,
+        node_positions: list[Vec3],
+        edges: list[tuple[int, int]],
+        radius: float = 0.1,
+        cfg: ShapeConfig | None = None,
+        stretch_stiffness: float | None = None,
+        stretch_damping: float | None = None,
+        bend_y_stiffness: float | None = None,
+        bend_y_damping: float | None = None,
+        bend_z_stiffness: float | None = None,
+        bend_z_damping: float | None = None,
+        torsion_stiffness: float | None = None,
+        torsion_damping: float | None = None,
+        label: str | None = None,
+        wrap_in_articulation: bool = True,
+        quaternions: list[Quat] | None = None,
+        junction_collision_filter: bool = True,
+    ) -> tuple[list[int], list[int]]:
+        """Adds a rod/cable graph using anisotropic cable joints.
+
+        Args:
+            node_positions: Junction node positions [m] in world space.
+            edges: List of ``(u, v)`` node index pairs defining rod segments.
+            radius: Capsule radius [m].
+            cfg: Shape configuration for the capsules. If ``None``, :attr:`default_shape_cfg`
+                is used.
+            stretch_stiffness: Per-joint cable stretch stiffness, stored directly as
+                ``target_ke`` [N/m]. If ``None``, defaults to ``1.0e5``.
+            stretch_damping: Per-joint cable stretch damping. If ``None``, defaults to
+                ``0.0``.
+            bend_y_stiffness: Per-joint bend stiffness around one transverse axis,
+                stored directly as ``target_ke`` [N*m]. If ``None``, defaults to ``0.0``.
+            bend_y_damping: Per-joint bend damping around one transverse axis. If ``None``,
+                defaults to ``0.0``.
+            bend_z_stiffness: Per-joint bend stiffness around the other transverse axis,
+                stored directly as ``target_ke`` [N*m]. If ``None``, defaults to ``0.0``.
+            bend_z_damping: Per-joint bend damping around the other transverse axis. If
+                ``None``, defaults to ``0.0``.
+            torsion_stiffness: Per-joint torsion stiffness around the tangent axis,
+                stored directly as ``target_ke`` [N*m]. If ``None``, defaults to ``0.0``.
+            torsion_damping: Per-joint torsion damping around the tangent axis. If ``None``,
+                defaults to ``0.0``.
+            label: Optional label prefix for bodies, shapes, joints, and articulations.
+            wrap_in_articulation: If ``True``, wraps the generated joint forest into one
+                articulation per connected component.
+            quaternions: Optional per-edge orientations in world space. If provided, must
+                have ``len(edges)`` elements and each quaternion must align the capsule's
+                local +Z with the corresponding edge direction.
+            junction_collision_filter: If ``True``, adds collision filters between
+                non-jointed segment bodies that meet at a high-degree junction.
+
+        Returns:
+            A pair ``(body_indices, joint_indices)`` where bodies correspond to edges in
+            the same order as ``edges``.
+
+        Note:
+            This builder path creates :class:`JointType.ANISOTROPIC_CABLE` joints.
+            Solver support for that joint type is backend-specific.
+        """
+        if cfg is None:
+            cfg = self.default_shape_cfg
+
+        stretch_stiffness = self._resolve_nonnegative_parameter(
+            stretch_stiffness, default=1.0e5, name="stretch_stiffness"
+        )
+        stretch_damping = self._resolve_nonnegative_parameter(
+            stretch_damping, default=0.0, name="stretch_damping"
+        )
+        bend_y_stiffness = self._resolve_nonnegative_parameter(
+            bend_y_stiffness, default=0.0, name="bend_y_stiffness"
+        )
+        bend_y_damping = self._resolve_nonnegative_parameter(
+            bend_y_damping, default=0.0, name="bend_y_damping"
+        )
+        bend_z_stiffness = self._resolve_nonnegative_parameter(
+            bend_z_stiffness, default=0.0, name="bend_z_stiffness"
+        )
+        bend_z_damping = self._resolve_nonnegative_parameter(
+            bend_z_damping, default=0.0, name="bend_z_damping"
+        )
+        torsion_stiffness = self._resolve_nonnegative_parameter(
+            torsion_stiffness, default=0.0, name="torsion_stiffness"
+        )
+        torsion_damping = self._resolve_nonnegative_parameter(
+            torsion_damping, default=0.0, name="torsion_damping"
+        )
+
+        if len(node_positions) < 2:
+            raise ValueError("add_rod_graph_anisotropic: node_positions must contain at least 2 nodes")
+        if len(edges) < 1:
+            raise ValueError("add_rod_graph_anisotropic: edges must contain at least 1 edge")
+
+        num_nodes = len(node_positions)
+        num_edges = len(edges)
+        if quaternions is not None and len(quaternions) != num_edges:
+            raise ValueError(
+                f"add_rod_graph_anisotropic: quaternions must have {num_edges} elements for {num_edges} edges, "
+                f"got {len(quaternions)} quaternions"
+            )
+
+        node_positions_wp: list[wp.vec3] = [axis_to_vec3(p) for p in node_positions]
+        node_incidence: list[list[int]] = [[] for _ in range(num_nodes)]
+
+        edge_u: list[int] = []
+        edge_v: list[int] = []
+        edge_len: list[float] = []
+        edge_bodies: list[int] = []
+
+        for e_idx, (u, v) in enumerate(edges):
+            if u < 0 or u >= num_nodes or v < 0 or v >= num_nodes:
+                raise ValueError(
+                    f"add_rod_graph_anisotropic: edge {e_idx} has invalid node indices ({u}, {v}) for {num_nodes} nodes"
+                )
+            if u == v:
+                raise ValueError(
+                    f"add_rod_graph_anisotropic: edge {e_idx} connects a node to itself ({u} -> {v})"
+                )
+
+            p0 = node_positions_wp[u]
+            p1 = node_positions_wp[v]
+            seg_vec = p1 - p0
+            seg_length = self._validate_segment_length_for_anisotropic(
+                float(wp.length(seg_vec)),
+                context=f"add_rod_graph_anisotropic edge {e_idx}",
+            )
+
+            if quaternions is None:
+                seg_dir = wp.normalize(seg_vec)
+                q = quat_between_vectors_robust(wp.vec3(0.0, 0.0, 1.0), seg_dir)
+            else:
+                q = quaternions[e_idx]
+                seg_dir = wp.normalize(seg_vec)
+                local_z_world = wp.quat_rotate(q, wp.vec3(0.0, 0.0, 1.0))
+                alignment = wp.dot(seg_dir, local_z_world)
+                if alignment < 0.999:
+                    raise ValueError(
+                        "add_rod_graph_anisotropic: quaternion at edge index "
+                        f"{e_idx} does not align capsule +Z with edge direction (node_positions[v] - node_positions[u]); "
+                        "quaternions must be world-space and constructed so that local +Z maps to the "
+                        "edge direction node_positions[v] - node_positions[u]."
+                    )
+
+            half_height = 0.5 * seg_length
+            body_q = wp.transform(p0, q)
+            com_offset = wp.vec3(0.0, 0.0, half_height)
+
+            body_label = f"{label}_edge_body_{e_idx}" if label else None
+            shape_label = f"{label}_edge_capsule_{e_idx}" if label else None
+
+            body_id = self.add_link(xform=body_q, com=com_offset, label=body_label)
+            capsule_xform = wp.transform(wp.vec3(0.0, 0.0, half_height), wp.quat_identity())
+            self.add_shape_capsule(
+                body_id,
+                xform=capsule_xform,
+                radius=radius,
+                half_height=half_height,
+                cfg=cfg,
+                label=shape_label,
+            )
+
+            edge_u.append(u)
+            edge_v.append(v)
+            edge_len.append(seg_length)
+            edge_bodies.append(body_id)
+            node_incidence[u].append(e_idx)
+            node_incidence[v].append(e_idx)
+
+        def _edge_anchor_xform(e_idx: int, node_idx: int) -> wp.transform:
+            if node_idx == edge_u[e_idx]:
+                z = 0.0
+            elif node_idx == edge_v[e_idx]:
+                z = edge_len[e_idx]
+            else:
+                raise RuntimeError("add_rod_graph_anisotropic: internal error (node not incident to edge)")
+            return wp.transform(wp.vec3(0.0, 0.0, float(z)), wp.quat_identity())
+
+        joint_counter = 0
+        jointed_body_pairs: set[tuple[int, int]] = set()
+
+        def _remember_jointed_pair(parent_body: int, child_body: int) -> None:
+            if parent_body <= child_body:
+                jointed_body_pairs.add((parent_body, child_body))
+            else:
+                jointed_body_pairs.add((child_body, parent_body))
+
+        def _build_joint(
+            parent_body: int,
+            child_body: int,
+            parent_edge: int,
+            child_edge: int,
+            shared_node: int,
+        ) -> int:
+            nonlocal joint_counter
+            parent_xform = _edge_anchor_xform(parent_edge, shared_node)
+            child_xform = _edge_anchor_xform(child_edge, shared_node)
+            joint_counter += 1
+            joint_label = f"{label}_cable_{joint_counter}" if label else None
+            return self.add_joint_anisotropic_cable(
+                parent=parent_body,
+                child=child_body,
+                parent_xform=parent_xform,
+                child_xform=child_xform,
+                stretch_stiffness=stretch_stiffness,
+                stretch_damping=stretch_damping,
+                bend_y_stiffness=bend_y_stiffness,
+                bend_y_damping=bend_y_damping,
+                bend_z_stiffness=bend_z_stiffness,
+                bend_z_damping=bend_z_damping,
+                torsion_stiffness=torsion_stiffness,
+                torsion_damping=torsion_damping,
+                label=joint_label,
+                collision_filter_parent=True,
+                enabled=True,
+            )
+
+        def _build_joints_star() -> list[int]:
+            all_joints: list[int] = []
+            for node_idx in range(num_nodes):
+                inc = node_incidence[node_idx]
+                if len(inc) < 2:
+                    continue
+
+                parent_edge = inc[0]
+                parent_body = edge_bodies[parent_edge]
+                for child_edge in inc[1:]:
+                    child_body = edge_bodies[child_edge]
+                    if parent_body == child_body:
+                        raise RuntimeError("add_rod_graph_anisotropic: internal error (self-connection)")
+                    j = _build_joint(parent_body, child_body, parent_edge, child_edge, node_idx)
+                    all_joints.append(j)
+                    _remember_jointed_pair(parent_body, child_body)
+            return all_joints
+
+        def _build_joints_forest() -> list[int]:
+            all_joints: list[int] = []
+            visited = [False] * num_edges
+            component_index = 0
+
+            for start_edge in range(num_edges):
+                if visited[start_edge]:
+                    continue
+
+                queue: deque[int] = deque([start_edge])
+                visited[start_edge] = True
+                component_joints: list[int] = []
+                component_edges: list[int] = []
+
+                while queue:
+                    parent_edge = queue.popleft()
+                    component_edges.append(parent_edge)
+                    parent_body = edge_bodies[parent_edge]
+
+                    for shared_node in (edge_u[parent_edge], edge_v[parent_edge]):
+                        for child_edge in node_incidence[shared_node]:
+                            if child_edge == parent_edge or visited[child_edge]:
+                                continue
+
+                            child_body = edge_bodies[child_edge]
+                            if parent_body == child_body:
+                                raise RuntimeError("add_rod_graph_anisotropic: internal error (self-connection)")
+
+                            j = _build_joint(parent_body, child_body, parent_edge, child_edge, shared_node)
+                            component_joints.append(j)
+                            all_joints.append(j)
+                            _remember_jointed_pair(parent_body, child_body)
+                            visited[child_edge] = True
+                            queue.append(child_edge)
+
+                if component_edges:
+                    component_nodes: set[int] = set()
+                    for e_idx in component_edges:
+                        component_nodes.add(edge_u[e_idx])
+                        component_nodes.add(edge_v[e_idx])
+
+                    if len(component_edges) > max(0, len(component_nodes) - 1):
+                        warnings.warn(
+                            "add_rod_graph_anisotropic: detected a cycle (closed loop) in the edge graph. "
+                            "With wrap_in_articulation=True, joints are built as a tree/forest, so "
+                            "cycles are not closed. Use wrap_in_articulation=False and add explicit "
+                            "closure constraints if you need a ring/loop.",
+                            UserWarning,
+                            stacklevel=2,
+                        )
+
+                if component_joints:
+                    if label:
+                        art_label = (
+                            f"{label}_articulation_{component_index}"
+                            if component_index > 0
+                            else f"{label}_articulation"
+                        )
+                    else:
+                        art_label = None
+                    self.add_articulation(component_joints, label=art_label)
+
+                component_index += 1
+
+            return all_joints
+
+        if not wrap_in_articulation:
+            all_joints = _build_joints_star()
+        else:
+            all_joints = _build_joints_forest()
+
+        if junction_collision_filter:
+            for inc in node_incidence:
+                if len(inc) < 3:
+                    continue
+                bodies_set = {edge_bodies[e_idx] for e_idx in inc}
+                if len(bodies_set) < 2:
+                    continue
+                bodies = sorted(bodies_set)
+
+                for i in range(len(bodies)):
+                    for j in range(i + 1, len(bodies)):
+                        bi = bodies[i]
+                        bj = bodies[j]
+                        if (bi, bj) in jointed_body_pairs:
                             continue
                         for si in self.body_shapes.get(bi, []):
                             for sj in self.body_shapes.get(bj, []):

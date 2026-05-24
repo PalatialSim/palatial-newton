@@ -360,6 +360,7 @@ def compute_joint_basis_lines(
         and joint_t != int(newton.JointType.REVOLUTE)
         and joint_t != int(newton.JointType.D6)
         and joint_t != int(newton.JointType.CABLE)
+        and joint_t != int(newton.JointType.ANISOTROPIC_CABLE)
         and joint_t != int(newton.JointType.BALL)
     ):
         # Set NaN for unsupported joints to hide them
