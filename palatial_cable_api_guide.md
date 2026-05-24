@@ -65,24 +65,22 @@ That means the first implementation phase in this repo can be:
 - schema-aligned,
 - loader-aligned,
 - call-surface-aligned with anisotropic inputs,
-- while still collapsing those anisotropic inputs into the current isotropic
-  `JointType.CABLE` behavior underneath.
+- and wired through the stock runtime without inventing a parallel
+  `newton:cable:*` schema family.
 
 What stays for a later phase is the full vendored Newton runtime port, for
 example:
 
-- `JointType.ANISOTROPIC_CABLE`
-- `add_joint_anisotropic_cable()`
-- `add_rod_anisotropic()`
-- `add_rod_graph_anisotropic()`
 - `SolverVBDPalatial`
+- any remaining subtree-specific runtime deltas that have not already been
+  transplanted into this repo.
 
 So the split is:
 
-- **phase A**: stock `add_rod()` learns the richer anisotropic parameter surface
-  and uses a deterministic collapse for validation,
-- **phase B**: port the subtree-backed Newton runtime changes so those same
-  parameters are consumed natively without collapse.
+- **phase A**: land the rod schema, palatial loader, and stock-builder surface
+  so authored `bendY` / `bendZ` / `torsion` fields flow end to end,
+- **phase B**: port any still-missing subtree-backed runtime pieces that are
+  outside this repo's current stock/VBD implementation.
 
 ---
 
@@ -167,8 +165,10 @@ may read these as fallbacks, but they should not drive the formal schema design:
 
 ### 3.5 Rod material attrs
 
-Reuse the full material layout from the related repos even if this repo first
-lowers it into stock isotropic `add_rod()`.
+Reuse the full material layout from the related repos. The current repo now
+threads the anisotropic bend/torsion channels through stock `builder.add_rod()`
+and the VBD cable runtime directly, while still keeping the schema aligned with
+the related repos.
 
 | USD attribute | Meaning | Default |
 |---|---|---|
@@ -186,9 +186,19 @@ lowers it into stock isotropic `add_rod()`.
 
 These fields are future-proof:
 
-- phase A stock runtime can accept and collapse them to isotropic rod
-  parameters,
-- a later subtree-backed anisotropic runtime port can consume them one-to-one.
+- the current repo can read and pass them through one-to-one for stock
+  `builder.add_rod()` cable construction,
+- a later subtree-backed runtime port can keep the same authored schema without
+  redesign.
+
+Current limitation to keep explicit:
+
+- `compressStiffness` and `compressDamping` are preserved by the schema and
+  palatial read-side helpers,
+- but the stock rod/cable runtime in this repo still uses the single
+  stretch/tension path exposed by `add_rod()`,
+- so separate axial compression behavior remains future-facing for a later
+  runtime extension.
 
 ---
 
@@ -466,7 +476,7 @@ The intended split is:
 - `twistTotal` is a loader-side framing convenience,
 - neither field should replace the explicit anisotropic rod material attrs.
 
-#### 4c. Intermediate anisotropic validation in stock `add_rod()`
+#### 4c. Intermediate anisotropic support in stock `add_rod()`
 
 This repo's current target is not just "loader collapse" in isolation.
 As an intermediate validation step, the stock builder path itself should accept
@@ -494,57 +504,19 @@ builder.add_rod(
 )
 ```
 
-Phase-A behavior inside stock `add_rod()`:
+Current behavior inside stock `add_rod()`:
 
-- if only legacy isotropic args are provided, preserve current behavior,
-- if anisotropic args are provided, accept them and collapse them
-  deterministically to the current isotropic cable joint path,
+- if only legacy isotropic args are provided, preserve current
+  `JointType.CABLE` behavior,
+- if any anisotropic args are provided, dispatch to
+  `JointType.ANISOTROPIC_CABLE`,
+- for unspecified anisotropic angular channels, fall back to the authored
+  isotropic `bend_stiffness` / `bend_damping` values when present,
 - do not silently ignore the new args.
 
-Suggested stock collapse rule for phase A:
-
-```python
-effective_bend_stiffness = (
-    bend_stiffness
-    if bend_stiffness is not None
-    else 0.5 * (bend_y_stiffness + bend_z_stiffness)
-)
-
-effective_bend_damping = max(
-    bend_damping or 0.0,
-    bend_y_damping or 0.0,
-    bend_z_damping or 0.0,
-    torsion_damping or 0.0,
-)
-```
-
-This is intentionally only a validation approximation. It gives us:
-
-- stable schema-to-builder mapping now,
-- minimal churn at callsites later,
-- a clean stepping stone toward the true subtree-backed anisotropic runtime.
-
-For the stock phase, collapse anisotropic material to isotropic rod inputs the
-same way the related repo's `asset_example/runner_core.py` does:
-
-```python
-    stretch_stiffness = float(p["stretchStiffness"])
-    stretch_damping = float(p["stretchDamping"])
-    bend_y_stiffness = float(p["bendYStiffness"])
-    bend_y_damping = float(p["bendYDamping"])
-    bend_z_stiffness = float(p["bendZStiffness"])
-    bend_z_damping = float(p["bendZDamping"])
-    torsion_stiffness = float(p["torsionStiffness"])
-    torsion_damping = float(p["torsionDamping"])
-
-    bend_stiffness = 0.5 * (bend_y_stiffness + bend_z_stiffness)
-    bend_damping = max(
-        bend_y_damping,
-        bend_z_damping,
-        torsion_damping,
-        stretch_damping,
-    )
-```
+That means the current repo already validates the authored USD material layout
+against real per-axis runtime slots instead of only collapsing them to a single
+isotropic bend channel.
 
 Radius handling for the stock phase:
 
@@ -587,14 +559,6 @@ def _build_cable(usd_path: str, *, device: str | None = None,
     torsion_stiffness = float(p["torsionStiffness"])
     torsion_damping = float(p["torsionDamping"])
 
-    bend_stiffness = 0.5 * (bend_y_stiffness + bend_z_stiffness)
-    bend_damping = max(
-        bend_y_damping,
-        bend_z_damping,
-        torsion_damping,
-        stretch_damping,
-    )
-
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
@@ -604,8 +568,6 @@ def _build_cable(usd_path: str, *, device: str | None = None,
             radius=radius,
             stretch_stiffness=stretch_stiffness,
             stretch_damping=stretch_damping,
-            bend_stiffness=bend_stiffness,
-            bend_damping=bend_damping,
             bend_y_stiffness=bend_y_stiffness,
             bend_y_damping=bend_y_damping,
             bend_z_stiffness=bend_z_stiffness,
@@ -715,11 +677,14 @@ Add a current-repo test that:
 4. `flatRect` + `thickness` falls back to stock radius approximation
 5. procedural fallback centerline generation honors `dropHeight`
 6. quaternion generation honors `twistTotal`
-7. stock runtime collapse from:
+7. stock runtime preserves deterministic slot mapping from:
    - `bendYStiffness`
    - `bendZStiffness`
+   - `torsionStiffness`
+   - `bendYDamping`
+   - `bendZDamping`
    - `torsionDamping`
-   into stock `add_rod()` args is deterministic
+   into `add_rod()` / `ANISOTROPIC_CABLE` joint targets
 
 ---
 
@@ -738,7 +703,9 @@ patch. The intermediate target is narrower:
 
 - stock `add_rod()` accepts anisotropic inputs,
 - palatial schema/loader maps USD into those inputs,
-- the underlying runtime may still collapse to isotropic cable behavior.
+- the current stock/VBD runtime can already preserve anisotropic cable slots for
+  this path,
+- later subtree work can focus on any still-missing downstream integrations.
 
 Those can all happen later if needed.
 
@@ -747,7 +714,7 @@ For now, the most compatible path is:
 1. reuse `NewtonDeformableAPI` + `NewtonRodAPI` + `NewtonRodMaterialAPI`,
 2. read that schema in `newton/_src/palatial/cable.py`,
 3. extend stock `builder.add_rod()` so it can accept anisotropic cable fields,
-4. lower those fields through a deterministic phase-A collapse,
+4. preserve those fields through deterministic stock/VBD slot mapping,
 5. preserve the richer anisotropic fields in USD so a later subtree runtime
    port does not require another schema redesign.
 

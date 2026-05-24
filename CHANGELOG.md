@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add Newton rod/cable USD schema support with palatial cable loading, including
+  `NewtonRodAPI`, `NewtonRodMaterialAPI`, anisotropic `add_rod()` dispatch, and
+  VBD anisotropic cable joint slots
 - Add linear HDR color output support to `SensorTiledCamera` via `hdr_color_image`.
 - Add composable actuator subsystem with pluggable `Controller` (`ControllerPD`, `ControllerPID`, `ControllerNeuralMLP`, `ControllerNeuralLSTM`), `Clamping` (`ClampingMaxEffort`, `ClampingDCMotor`, `ClampingPositionBased`), and `Delay` components; supports per-DOF delays, CUDA graph capture, and masked environment reset
 - Add heatmap rendering for scalar arrays logged through `ViewerGL.log_array()`

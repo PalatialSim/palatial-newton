@@ -260,6 +260,8 @@ class TestPalatialCable(unittest.TestCase):
             self.assertAlmostEqual(float(params["radius"]), 0.002)
             self.assertAlmostEqual(float(params["density"]), 500.0)
             self.assertAlmostEqual(float(params["stretchStiffness"]), 321.0)
+            self.assertAlmostEqual(float(params["compressStiffness"]), 654.0)
+            self.assertAlmostEqual(float(params["compressDamping"]), 0.05)
             self.assertAlmostEqual(float(params["dropHeight"]), 0.7)
             self.assertAlmostEqual(float(params["twistTotal"]), 0.25)
             self.assertAlmostEqual(float(params["bendYStiffness"]), 12.0)
@@ -281,6 +283,8 @@ class TestPalatialCable(unittest.TestCase):
             self.assertEqual(int(params["verticesPerSegment"]), 2)
             self.assertAlmostEqual(float(params["density"]), 700.0)
             self.assertAlmostEqual(float(params["stretchStiffness"]), 456.0)
+            self.assertAlmostEqual(float(params["compressStiffness"]), 1.0e5)
+            self.assertAlmostEqual(float(params["compressDamping"]), 0.0)
             self.assertAlmostEqual(float(params["bendYStiffness"]), 33.0)
             self.assertAlmostEqual(float(params["bendZStiffness"]), 33.0)
             self.assertAlmostEqual(float(params["torsionStiffness"]), 33.0)
@@ -334,6 +338,18 @@ class TestPalatialCable(unittest.TestCase):
                 [int(newton.JointType.ANISOTROPIC_CABLE)] * 2,
             )
             self.assertEqual(bundle.model.joint_dof_dim.numpy().tolist(), [[1, 3], [1, 3]])
+            np.testing.assert_allclose(
+                bundle.model.joint_target_ke.numpy(),
+                np.array([321.0, 12.0, 20.0, 9.0, 321.0, 12.0, 20.0, 9.0], dtype=np.float32),
+                rtol=0.0,
+                atol=1.0e-6,
+            )
+            np.testing.assert_allclose(
+                bundle.model.joint_target_kd.numpy(),
+                np.array([0.1, 0.2, 0.4, 0.6, 0.1, 0.2, 0.4, 0.6], dtype=np.float32),
+                rtol=0.0,
+                atol=1.0e-6,
+            )
 
     def test_load_uses_world_space_authored_centerline_points(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
