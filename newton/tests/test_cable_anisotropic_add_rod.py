@@ -3,12 +3,17 @@
 
 from __future__ import annotations
 
+import math
 import unittest
 
 import numpy as np
 import warp as wp
 
 import newton
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    evaluate_angular_constraint_force_hessian,
+    evaluate_anisotropic_angular_constraint_force_hessian,
+)
 
 
 def _numpy_to_transform(arr: np.ndarray) -> wp.transform:
@@ -65,8 +70,78 @@ def _joint_kappa(model: newton.Model, body_q: wp.array, joint_id: int) -> np.nda
     return np.array([float(kappa[0]), float(kappa[1]), float(kappa[2])], dtype=np.float64)
 
 
+@wp.kernel
+def _eval_stock_cable_angular_kernel(
+    q_wp: wp.array[wp.quat],
+    q_wc: wp.array[wp.quat],
+    q_wp_rest: wp.array[wp.quat],
+    q_wc_rest: wp.array[wp.quat],
+    q_wp_prev: wp.array[wp.quat],
+    q_wc_prev: wp.array[wp.quat],
+    k_eff: float,
+    damping: float,
+    torque_out: wp.array[wp.vec3],
+    hessian_out: wp.array[wp.mat33],
+):
+    tau, H_aa, _kappa, _J = evaluate_angular_constraint_force_hessian(
+        q_wp[0],
+        q_wc[0],
+        q_wp_rest[0],
+        q_wc_rest[0],
+        q_wp_prev[0],
+        q_wc_prev[0],
+        True,
+        k_eff,
+        wp.identity(3, float),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        0.0,
+        damping,
+        1.0,
+    )
+    torque_out[0] = tau
+    hessian_out[0] = H_aa
+
+
+@wp.kernel
+def _eval_anisotropic_cable_angular_kernel(
+    q_wp: wp.array[wp.quat],
+    q_wc: wp.array[wp.quat],
+    q_wp_rest: wp.array[wp.quat],
+    q_wc_rest: wp.array[wp.quat],
+    q_wp_prev: wp.array[wp.quat],
+    q_wc_prev: wp.array[wp.quat],
+    k_eff: wp.vec3,
+    damping: wp.vec3,
+    torque_out: wp.array[wp.vec3],
+    hessian_out: wp.array[wp.mat33],
+):
+    tau, H_aa, _kappa, _J = evaluate_anisotropic_angular_constraint_force_hessian(
+        q_wp[0],
+        q_wc[0],
+        q_wp_rest[0],
+        q_wc_rest[0],
+        q_wp_prev[0],
+        q_wc_prev[0],
+        True,
+        k_eff,
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        0.0,
+        damping,
+        1.0,
+    )
+    torque_out[0] = tau
+    hessian_out[0] = H_aa
+
+
 class TestCableAnisotropicAddRod(unittest.TestCase):
     """Tests for anisotropic cable support on ModelBuilder.add_rod()."""
+
+    _CHANNEL_ISOLATION_TOL = 1.0e-4
+    _ISOTROPIC_EQUIVALENCE_TOL = 1.0e-6
 
     @staticmethod
     def _straight_points_and_quaternions() -> tuple[list[wp.vec3], list[wp.quat]]:
@@ -76,6 +151,127 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
             length=1.5,
             num_segments=3,
         )
+
+    @staticmethod
+    def _identity_quat() -> wp.quat:
+        return wp.quat(0.0, 0.0, 0.0, 1.0)
+
+    @staticmethod
+    def _axis_angle_quat(axis: tuple[float, float, float], angle: float) -> wp.quat:
+        axis_length = math.sqrt(sum(component * component for component in axis))
+        axis_vec = tuple(component / axis_length for component in axis)
+        half_angle = 0.5 * angle
+        sin_half = math.sin(half_angle)
+        return wp.quat(
+            axis_vec[0] * sin_half,
+            axis_vec[1] * sin_half,
+            axis_vec[2] * sin_half,
+            math.cos(half_angle),
+        )
+
+    def _evaluate_stock(
+        self,
+        *,
+        child_rotation: wp.quat,
+        previous_child_rotation: wp.quat,
+        k_eff: float,
+        damping: float,
+    ) -> tuple[tuple[float, float, float], tuple[tuple[float, ...], ...]]:
+        q_wp = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc = wp.array([child_rotation], dtype=wp.quat, device="cpu")
+        q_wp_rest = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc_rest = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wp_prev = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc_prev = wp.array([previous_child_rotation], dtype=wp.quat, device="cpu")
+        torque_out = wp.zeros(1, dtype=wp.vec3, device="cpu")
+        hessian_out = wp.zeros(1, dtype=wp.mat33, device="cpu")
+
+        wp.launch(
+            _eval_stock_cable_angular_kernel,
+            dim=1,
+            inputs=[
+                q_wp,
+                q_wc,
+                q_wp_rest,
+                q_wc_rest,
+                q_wp_prev,
+                q_wc_prev,
+                k_eff,
+                damping,
+                torque_out,
+                hessian_out,
+            ],
+            device="cpu",
+        )
+
+        torque_np = torque_out.numpy()[0]
+        hessian_np = hessian_out.numpy()[0]
+        return (
+            (float(torque_np[0]), float(torque_np[1]), float(torque_np[2])),
+            tuple(
+                tuple(float(hessian_np[row, col]) for col in range(3))
+                for row in range(3)
+            ),
+        )
+
+    def _evaluate_anisotropic(
+        self,
+        *,
+        child_rotation: wp.quat,
+        previous_child_rotation: wp.quat,
+        stiffness: tuple[float, float, float],
+        damping: tuple[float, float, float],
+    ) -> tuple[tuple[float, float, float], tuple[tuple[float, ...], ...]]:
+        q_wp = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc = wp.array([child_rotation], dtype=wp.quat, device="cpu")
+        q_wp_rest = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc_rest = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wp_prev = wp.array([self._identity_quat()], dtype=wp.quat, device="cpu")
+        q_wc_prev = wp.array([previous_child_rotation], dtype=wp.quat, device="cpu")
+        torque_out = wp.zeros(1, dtype=wp.vec3, device="cpu")
+        hessian_out = wp.zeros(1, dtype=wp.mat33, device="cpu")
+
+        wp.launch(
+            _eval_anisotropic_cable_angular_kernel,
+            dim=1,
+            inputs=[
+                q_wp,
+                q_wc,
+                q_wp_rest,
+                q_wc_rest,
+                q_wp_prev,
+                q_wc_prev,
+                wp.vec3(*stiffness),
+                wp.vec3(*damping),
+                torque_out,
+                hessian_out,
+            ],
+            device="cpu",
+        )
+
+        torque_np = torque_out.numpy()[0]
+        hessian_np = hessian_out.numpy()[0]
+        return (
+            (float(torque_np[0]), float(torque_np[1]), float(torque_np[2])),
+            tuple(
+                tuple(float(hessian_np[row, col]) for col in range(3))
+                for row in range(3)
+            ),
+        )
+
+    def _assert_channel_isolated(
+        self,
+        torque: tuple[float, float, float],
+        *,
+        active_axis: int,
+        expected_scale: float,
+    ) -> None:
+        self.assertGreater(abs(torque[active_axis]), 0.0)
+        leakage_limit = abs(expected_scale) * self._CHANNEL_ISOLATION_TOL
+        for axis, component in enumerate(torque):
+            if axis == active_axis:
+                continue
+            self.assertLessEqual(abs(component), leakage_limit)
 
     def test_add_rod_uses_anisotropic_joint_chain_when_per_axis_args_are_authored(self):
         builder = newton.ModelBuilder()
@@ -401,6 +597,83 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         self.assertLess(abs(initial_bend_z[0]), 1.0e-6)
         self.assertLess(abs(initial_bend_z[2]), 1.0e-6)
         self.assertLess(abs(final_bend_z_ref[1]), abs(final_bend_z[1]))
+
+    def test_anisotropic_kernel_pure_bend_y_excites_only_bend_y_channel(self):
+        angle = 0.125
+        torque, _hessian = self._evaluate_anisotropic(
+            child_rotation=self._axis_angle_quat((1.0, 0.0, 0.0), angle),
+            previous_child_rotation=self._identity_quat(),
+            stiffness=(5.0, 2.0, 1.0),
+            damping=(0.0, 0.0, 0.0),
+        )
+        self._assert_channel_isolated(torque, active_axis=0, expected_scale=5.0 * angle)
+
+    def test_anisotropic_kernel_pure_bend_z_excites_only_bend_z_channel(self):
+        angle = 0.125
+        torque, _hessian = self._evaluate_anisotropic(
+            child_rotation=self._axis_angle_quat((0.0, 1.0, 0.0), angle),
+            previous_child_rotation=self._identity_quat(),
+            stiffness=(5.0, 2.0, 1.0),
+            damping=(0.0, 0.0, 0.0),
+        )
+        self._assert_channel_isolated(torque, active_axis=1, expected_scale=2.0 * angle)
+
+    def test_anisotropic_kernel_pure_torsion_excites_only_torsion_channel(self):
+        angle = 0.125
+        torque, _hessian = self._evaluate_anisotropic(
+            child_rotation=self._axis_angle_quat((0.0, 0.0, 1.0), angle),
+            previous_child_rotation=self._identity_quat(),
+            stiffness=(5.0, 2.0, 1.0),
+            damping=(0.0, 0.0, 0.0),
+        )
+        self._assert_channel_isolated(torque, active_axis=2, expected_scale=1.0 * angle)
+
+    def test_anisotropic_kernel_equal_channels_match_stock_isotropic(self):
+        child_rotation = self._axis_angle_quat((1.0, 1.0, 1.0), 0.09)
+        previous_child_rotation = self._axis_angle_quat((1.0, 1.0, 1.0), 0.03)
+
+        stock_torque, stock_hessian = self._evaluate_stock(
+            child_rotation=child_rotation,
+            previous_child_rotation=previous_child_rotation,
+            k_eff=3.0,
+            damping=0.2,
+        )
+        anisotropic_torque, anisotropic_hessian = self._evaluate_anisotropic(
+            child_rotation=child_rotation,
+            previous_child_rotation=previous_child_rotation,
+            stiffness=(3.0, 3.0, 3.0),
+            damping=(0.2, 0.2, 0.2),
+        )
+
+        for stock_component, anisotropic_component in zip(stock_torque, anisotropic_torque):
+            self.assertAlmostEqual(stock_component, anisotropic_component, delta=self._ISOTROPIC_EQUIVALENCE_TOL)
+
+        for stock_row, anisotropic_row in zip(stock_hessian, anisotropic_hessian):
+            for stock_value, anisotropic_value in zip(stock_row, anisotropic_row):
+                self.assertAlmostEqual(stock_value, anisotropic_value, delta=self._ISOTROPIC_EQUIVALENCE_TOL)
+
+    def test_anisotropic_kernel_damping_isolated_per_axis(self):
+        current_rotation = self._axis_angle_quat((0.0, 0.0, 1.0), 0.15)
+        previous_rotation = self._axis_angle_quat((0.0, 0.0, 1.0), 0.05)
+        torque_no_damping, hessian_no_damping = self._evaluate_anisotropic(
+            child_rotation=current_rotation,
+            previous_child_rotation=previous_rotation,
+            stiffness=(4.0, 6.0, 8.0),
+            damping=(0.0, 0.0, 0.0),
+        )
+        torque_with_damping, hessian_with_damping = self._evaluate_anisotropic(
+            child_rotation=current_rotation,
+            previous_child_rotation=previous_rotation,
+            stiffness=(4.0, 6.0, 8.0),
+            damping=(0.0, 0.0, 0.5),
+        )
+
+        self.assertAlmostEqual(torque_no_damping[0], torque_with_damping[0], delta=1.0e-8)
+        self.assertAlmostEqual(torque_no_damping[1], torque_with_damping[1], delta=1.0e-8)
+        self.assertGreater(abs(torque_with_damping[2] - torque_no_damping[2]), 1.0e-6)
+        self.assertAlmostEqual(hessian_no_damping[0][0], hessian_with_damping[0][0], delta=1.0e-8)
+        self.assertAlmostEqual(hessian_no_damping[1][1], hessian_with_damping[1][1], delta=1.0e-8)
+        self.assertGreater(abs(hessian_with_damping[2][2] - hessian_no_damping[2][2]), 1.0e-6)
 
 
 if __name__ == "__main__":
