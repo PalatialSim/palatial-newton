@@ -736,7 +736,7 @@ class SolverKamino(SolverBase):
         - triangles, edges, tetrahedra
         - muscles
         - equality constraints
-        - distance, cable, or gimbal joints
+        - distance, cable, anisotropic cable, or gimbal joints
 
         Args:
             model: The Newton model to validate.
@@ -781,6 +781,10 @@ class SolverKamino(SolverBase):
                     unsupported_joint_types["DISTANCE"] = unsupported_joint_types.get("DISTANCE", 0) + 1
                 elif joint_type == JointType.CABLE:
                     unsupported_joint_types["CABLE"] = unsupported_joint_types.get("CABLE", 0) + 1
+                elif joint_type == JointType.ANISOTROPIC_CABLE:
+                    unsupported_joint_types["ANISOTROPIC_CABLE"] = (
+                        unsupported_joint_types.get("ANISOTROPIC_CABLE", 0) + 1
+                    )
                 # Check for GIMBAL configuration (3 coords, 3 DoFs, 0 linear/3 angular)
                 elif joint_type == JointType.D6 and q_count == 3 and qd_count == 3 and dof_dim == (0, 3):
                     unsupported_joint_types["D6 (GIMBAL)"] = unsupported_joint_types.get("D6 (GIMBAL)", 0) + 1

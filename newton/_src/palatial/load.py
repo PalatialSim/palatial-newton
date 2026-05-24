@@ -381,7 +381,7 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
-        builder.add_rod_anisotropic(
+        builder.add_rod(
             positions=points,
             quaternions=quaternions,
             radius=float(params["radius"]),

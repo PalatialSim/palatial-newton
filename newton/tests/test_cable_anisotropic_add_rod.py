@@ -12,7 +12,7 @@ import newton
 
 
 class TestCableAnisotropicAddRod(unittest.TestCase):
-    """Tests for the phase-A anisotropic cable surface on ModelBuilder.add_rod()."""
+    """Tests for anisotropic cable support on ModelBuilder.add_rod()."""
 
     @staticmethod
     def _straight_points_and_quaternions() -> tuple[list[wp.vec3], list[wp.quat]]:
@@ -23,7 +23,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
             num_segments=3,
         )
 
-    def test_add_rod_collapses_anisotropic_stiffness_and_damping(self):
+    def test_add_rod_uses_anisotropic_joint_chain_when_per_axis_args_are_authored(self):
         builder = newton.ModelBuilder()
         positions, quaternions = self._straight_points_and_quaternions()
 
@@ -42,10 +42,20 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
 
         self.assertEqual(len(rod_bodies), 3)
         self.assertEqual(len(rod_joints), 2)
-        self.assertEqual(builder.joint_target_ke[-4:], [123.0, 16.0, 123.0, 16.0])
-        self.assertEqual(builder.joint_target_kd[-4:], [0.6, 0.6, 0.6, 0.6])
+        self.assertEqual(
+            [builder.joint_type[joint_index] for joint_index in rod_joints],
+            [newton.JointType.ANISOTROPIC_CABLE, newton.JointType.ANISOTROPIC_CABLE],
+        )
+        self.assertEqual(
+            builder.joint_target_ke[-8:],
+            [123.0, 12.0, 20.0, 9.0, 123.0, 12.0, 20.0, 9.0],
+        )
+        self.assertEqual(
+            builder.joint_target_kd[-8:],
+            [0.1, 0.2, 0.4, 0.6, 0.1, 0.2, 0.4, 0.6],
+        )
 
-    def test_add_rod_uses_explicit_isotropic_bend_stiffness_when_present(self):
+    def test_add_rod_uses_isotropic_bend_as_fallback_for_unspecified_angular_channels(self):
         builder = newton.ModelBuilder()
         positions, quaternions = self._straight_points_and_quaternions()
 
@@ -58,14 +68,40 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
             bend_damping=0.3,
             bend_y_stiffness=12.0,
             bend_y_damping=0.2,
-            bend_z_stiffness=20.0,
-            bend_z_damping=0.4,
+            bend_z_stiffness=None,
+            bend_z_damping=None,
             torsion_stiffness=9.0,
             torsion_damping=0.25,
         )
 
+        self.assertEqual(
+            builder.joint_target_ke[-8:],
+            [50.0, 12.0, 7.5, 9.0, 50.0, 12.0, 7.5, 9.0],
+        )
+        self.assertEqual(
+            builder.joint_target_kd[-8:],
+            [0.1, 0.2, 0.3, 0.25, 0.1, 0.2, 0.3, 0.25],
+        )
+
+    def test_add_rod_uses_isotropic_cable_when_only_isotropic_args_are_authored(self):
+        builder = newton.ModelBuilder()
+        positions, quaternions = self._straight_points_and_quaternions()
+
+        _rod_bodies, rod_joints = builder.add_rod(
+            positions=positions,
+            quaternions=quaternions,
+            stretch_stiffness=50.0,
+            stretch_damping=0.1,
+            bend_stiffness=7.5,
+            bend_damping=0.3,
+        )
+
+        self.assertEqual(
+            [builder.joint_type[joint_index] for joint_index in rod_joints],
+            [newton.JointType.CABLE, newton.JointType.CABLE],
+        )
         self.assertEqual(builder.joint_target_ke[-4:], [50.0, 7.5, 50.0, 7.5])
-        self.assertEqual(builder.joint_target_kd[-4:], [0.4, 0.4, 0.4, 0.4])
+        self.assertEqual(builder.joint_target_kd[-4:], [0.1, 0.3, 0.1, 0.3])
 
     def test_add_joint_cable_rejects_anisotropic_kwargs(self):
         builder = newton.ModelBuilder()
@@ -152,7 +188,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         builder = newton.ModelBuilder()
         positions, quaternions = self._straight_points_and_quaternions()
 
-        builder.add_rod_anisotropic(
+        builder.add_rod(
             positions=positions,
             quaternions=quaternions,
             stretch_stiffness=123.0,
@@ -189,7 +225,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         positions, quaternions = self._straight_points_and_quaternions()
 
         builder.add_ground_plane()
-        builder.add_rod_anisotropic(
+        builder.add_rod(
             positions=positions,
             quaternions=quaternions,
             radius=0.02,

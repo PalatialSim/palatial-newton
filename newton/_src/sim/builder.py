@@ -6823,8 +6823,12 @@ class ModelBuilder:
 
         Constructs a chain of capsule bodies from the given centerline points and orientations.
         Each segment is a capsule aligned by the corresponding quaternion, and adjacent capsules
-        are connected by cable joints providing one linear (stretch) and one angular (bend/twist)
-        degree of freedom.
+        are connected by cable joints.
+
+        If only isotropic angular parameters are authored, this method creates
+        :class:`JointType.CABLE` joints. If any explicit per-axis angular parameters
+        (``bend_y_*``, ``bend_z_*``, or ``torsion_*``) are authored, it creates
+        :class:`JointType.ANISOTROPIC_CABLE` joints and preserves those channels.
 
         Args:
             positions: Centerline node positions (segment endpoints) in world space. These are the
@@ -6841,24 +6845,20 @@ class ModelBuilder:
             stretch_damping: Stretch damping for the cable joints (applied per-joint; not length-normalized). If None,
                 defaults to 0.0.
             bend_stiffness: Per-joint cable bend/twist stiffness, stored directly as ``target_ke`` [N*m]
-                (torque per radian). If None, defaults to 0.0.
+                (torque per radian). If None, defaults to 0.0. When explicit per-axis angular
+                parameters are authored, this acts as a fallback for any unspecified angular
+                channels.
             bend_damping: Bend/twist damping for the cable joints (applied per-joint; not length-normalized). If None,
-                defaults to 0.0.
+                defaults to 0.0. When explicit per-axis angular parameters are authored, this
+                acts as a fallback for any unspecified angular channels.
             bend_y_stiffness: Optional anisotropic bend stiffness around one transverse cable axis [N*m].
-                In the current stock phase, this is collapsed with ``bend_z_stiffness`` into the single isotropic
-                cable-joint angular stiffness when ``bend_stiffness`` is not provided.
-            bend_y_damping: Optional anisotropic bend damping around one transverse cable axis. In the current
-                stock phase, this contributes to the single isotropic cable-joint angular damping.
+                If any per-axis angular parameter is authored, this method creates
+                :class:`JointType.ANISOTROPIC_CABLE` joints.
+            bend_y_damping: Optional anisotropic bend damping around one transverse cable axis.
             bend_z_stiffness: Optional anisotropic bend stiffness around the other transverse cable axis [N*m].
-                In the current stock phase, this is collapsed with ``bend_y_stiffness`` into the single isotropic
-                cable-joint angular stiffness when ``bend_stiffness`` is not provided.
-            bend_z_damping: Optional anisotropic bend damping around the other transverse cable axis. In the
-                current stock phase, this contributes to the single isotropic cable-joint angular damping.
-            torsion_stiffness: Optional torsion stiffness around the cable tangent axis [N*m]. The stock
-                ``JointType.CABLE`` path does not represent torsion separately; when it is the only authored
-                anisotropic angular stiffness, it is used as the isotropic angular stiffness fallback.
-            torsion_damping: Optional torsion damping around the cable tangent axis. In the current stock phase,
-                this contributes to the single isotropic cable-joint angular damping.
+            bend_z_damping: Optional anisotropic bend damping around the other transverse cable axis.
+            torsion_stiffness: Optional torsion stiffness around the cable tangent axis [N*m].
+            torsion_damping: Optional torsion damping around the cable tangent axis.
             closed: If True, connects the last segment back to the first to form a closed loop. If False,
                 creates an open chain. Note: rods require at least 2 segments.
             label: Optional label prefix for bodies, shapes, and joints.
@@ -6884,6 +6884,8 @@ class ModelBuilder:
             - Bend defaults are 0.0 (no bending resistance unless specified). Stretch defaults to 1.0e5;
               pass a larger value when neighboring capsules should remain nearly inextensible.
             - Stretch, bend, and damping values are passed through as provided per joint.
+            - In anisotropic mode, unspecified angular channels fall back to ``bend_stiffness`` and
+              ``bend_damping`` when those are provided; otherwise they default to 0.0.
             - Each segment is implemented as a capsule primitive. The segment's body transform is
               placed at the start point ``positions[i]`` with a local center-of-mass offset of
               ``(0, 0, half_height)`` so that the COM lies at the segment midpoint. The capsule shape
@@ -6893,26 +6895,43 @@ class ModelBuilder:
         if cfg is None:
             cfg = self.default_shape_cfg
 
+        anisotropic_requested = any(
+            value is not None
+            for value in (
+                bend_y_stiffness,
+                bend_y_damping,
+                bend_z_stiffness,
+                bend_z_damping,
+                torsion_stiffness,
+                torsion_damping,
+            )
+        )
+        if anisotropic_requested:
+            return self.add_rod_anisotropic(
+                positions=positions,
+                quaternions=quaternions,
+                radius=radius,
+                cfg=cfg,
+                stretch_stiffness=stretch_stiffness,
+                stretch_damping=stretch_damping,
+                bend_y_stiffness=bend_stiffness if bend_y_stiffness is None else bend_y_stiffness,
+                bend_y_damping=bend_damping if bend_y_damping is None else bend_y_damping,
+                bend_z_stiffness=bend_stiffness if bend_z_stiffness is None else bend_z_stiffness,
+                bend_z_damping=bend_damping if bend_z_damping is None else bend_z_damping,
+                torsion_stiffness=bend_stiffness if torsion_stiffness is None else torsion_stiffness,
+                torsion_damping=bend_damping if torsion_damping is None else torsion_damping,
+                closed=closed,
+                label=label,
+                wrap_in_articulation=wrap_in_articulation,
+            )
+
         # Stretch defaults to the cable/rod axial stiffness used by VBD examples.
         stretch_stiffness = 1.0e5 if stretch_stiffness is None else stretch_stiffness
+        stretch_damping = 0.0 if stretch_damping is None else stretch_damping
 
-        # Phase-A anisotropic collapse: stock cable joints expose one isotropic angular stiffness
-        # and damping, so we reduce richer rod material inputs deterministically.
-        if bend_stiffness is None:
-            if bend_y_stiffness is None and bend_z_stiffness is None:
-                bend_stiffness = 0.0 if torsion_stiffness is None else torsion_stiffness
-            else:
-                bend_y_value = bend_z_stiffness if bend_y_stiffness is None else bend_y_stiffness
-                bend_z_value = bend_y_stiffness if bend_z_stiffness is None else bend_z_stiffness
-                bend_stiffness = 0.5 * (bend_y_value + bend_z_value)
-        stretch_damping = max(
-            0.0 if value is None else value
-            for value in (stretch_damping, bend_y_damping, bend_z_damping, torsion_damping)
-        )
-        bend_damping = max(
-            0.0 if value is None else value
-            for value in (bend_damping, stretch_damping, bend_y_damping, bend_z_damping, torsion_damping)
-        )
+        # Bend defaults: 0.0 (users must explicitly set for bending resistance)
+        bend_stiffness = 0.0 if bend_stiffness is None else bend_stiffness
+        bend_damping = 0.0 if bend_damping is None else bend_damping
 
         # Input validation
         stiffness_values = {

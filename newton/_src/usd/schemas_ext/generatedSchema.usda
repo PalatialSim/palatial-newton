@@ -151,7 +151,8 @@ class "NewtonRodAPI" (
     uniform token newton:rod:crossSectionType = "roundSolid" (
         allowedTokens = ["roundSolid", "flatRect"]
         doc = """Cross-section kind. roundSolid maps directly to stock
-        add_rod(); flatRect is approximated in the stock phase."""
+        add_rod(); flatRect is currently approximated with an equivalent
+        round radius for stock rigid-rod construction."""
     )
 
     float newton:rod:radius = 0.005 (
