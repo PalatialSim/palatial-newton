@@ -383,6 +383,7 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
+        shape_type = "box" if str(params["crossSectionType"]) == "flatRect" else "capsule"
         builder.add_rod(
             positions=points,
             quaternions=quaternions,
@@ -398,6 +399,9 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
             torsion_damping=float(params["torsionDamping"]),
             closed=bool(params["closed"]),
             label="cable",
+            shape_type=shape_type,
+            width=float(params["width"]),
+            thickness=float(params["thickness"]),
         )
         try:
             builder.color()

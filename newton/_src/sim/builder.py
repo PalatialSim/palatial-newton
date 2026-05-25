@@ -6818,12 +6818,15 @@ class ModelBuilder:
         closed: bool = False,
         label: str | None = None,
         wrap_in_articulation: bool = True,
+        shape_type: Literal["capsule", "box"] = "capsule",
+        width: float = 0.0,
+        thickness: float = 0.0,
     ) -> tuple[list[int], list[int]]:
-        """Adds a rod composed of capsule bodies connected by cable joints.
+        """Adds a rod composed of rigid segments connected by cable joints.
 
-        Constructs a chain of capsule bodies from the given centerline points and orientations.
-        Each segment is a capsule aligned by the corresponding quaternion, and adjacent capsules
-        are connected by cable joints.
+        Constructs a chain of rigid bodies from the given centerline points and
+        orientations. Each segment is aligned by the corresponding quaternion, and
+        adjacent segments are connected by cable joints.
 
         If only isotropic angular parameters are authored, this method creates
         :class:`JointType.CABLE` joints. If any explicit per-axis angular parameters
@@ -6864,6 +6867,14 @@ class ModelBuilder:
             label: Optional label prefix for bodies, shapes, and joints.
             wrap_in_articulation: If True, the created joints are automatically wrapped into a single
                 articulation. Defaults to True to ensure valid simulation models.
+            shape_type: Segment collision shape type. ``"capsule"`` keeps the legacy
+                rod representation. ``"box"`` uses box segments and routes through
+                :meth:`add_rod_anisotropic` so rectangular ribbons can preserve
+                their authored width and thickness.
+            width: Full segment width along the body local X axis [m]. Only used
+                when ``shape_type="box"``.
+            thickness: Full segment thickness along the body local Y axis [m]. Only
+                used when ``shape_type="box"``.
 
         Returns:
             A pair ``(body_indices, joint_indices)``. For an open chain,
@@ -6886,11 +6897,14 @@ class ModelBuilder:
             - Stretch, bend, and damping values are passed through as provided per joint.
             - In anisotropic mode, unspecified angular channels fall back to ``bend_stiffness`` and
               ``bend_damping`` when those are provided; otherwise they default to 0.0.
-            - Each segment is implemented as a capsule primitive. The segment's body transform is
-              placed at the start point ``positions[i]`` with a local center-of-mass offset of
-              ``(0, 0, half_height)`` so that the COM lies at the segment midpoint. The capsule shape
-              is added with a local transform of ``(0, 0, half_height)`` so it spans from the start to
-              the end along local +Z.
+            - ``shape_type="box"`` always routes through :meth:`add_rod_anisotropic`
+              because the stock isotropic cable path only builds capsule segments.
+            - Each segment's body transform is placed at the start point
+              ``positions[i]`` with a local center-of-mass offset of
+              ``(0, 0, half_height)`` so that the COM lies at the segment midpoint.
+              Capsule and box segment shapes are then added with a local transform of
+              ``(0, 0, half_height)`` so they span from the start to the end along
+              local +Z.
         """
         if cfg is None:
             cfg = self.default_shape_cfg
@@ -6906,7 +6920,7 @@ class ModelBuilder:
                 torsion_damping,
             )
         )
-        if anisotropic_requested:
+        if anisotropic_requested or shape_type != "capsule":
             return self.add_rod_anisotropic(
                 positions=positions,
                 quaternions=quaternions,
@@ -6923,6 +6937,9 @@ class ModelBuilder:
                 closed=closed,
                 label=label,
                 wrap_in_articulation=wrap_in_articulation,
+                shape_type=shape_type,
+                width=width,
+                thickness=thickness,
             )
 
         # Stretch defaults to the cable/rod axial stiffness used by VBD examples.
@@ -7055,8 +7072,11 @@ class ModelBuilder:
         closed: bool = False,
         label: str | None = None,
         wrap_in_articulation: bool = True,
+        shape_type: Literal["capsule", "box"] = "capsule",
+        width: float = 0.0,
+        thickness: float = 0.0,
     ) -> tuple[list[int], list[int]]:
-        """Adds a rod composed of capsules connected by anisotropic cable joints.
+        """Adds a rod composed of rigid segments connected by anisotropic cable joints.
 
         This method is the additive counterpart to :meth:`add_rod`. It preserves
         explicit ``bend_y``, ``bend_z``, and ``torsion`` channels instead of
@@ -7092,6 +7112,14 @@ class ModelBuilder:
             label: Optional label prefix for bodies, shapes, and joints.
             wrap_in_articulation: If ``True``, wraps the created joints into a single
                 articulation.
+            shape_type: Segment collision shape type. ``"capsule"`` keeps the legacy
+                rod geometry. ``"box"`` uses box segments aligned with each rod
+                quaternion so rectangular ribbons can preserve authored width and
+                thickness.
+            width: Full segment width along the body local X axis [m]. Only used
+                when ``shape_type="box"``.
+            thickness: Full segment thickness along the body local Y axis [m]. Only
+                used when ``shape_type="box"``.
 
         Returns:
             A pair ``(body_indices, joint_indices)``.
@@ -7163,6 +7191,9 @@ class ModelBuilder:
             label=label,
             wrap_in_articulation=False,
             quaternions=quaternions,
+            shape_type=shape_type,
+            width=width,
+            thickness=thickness,
         )
 
         if wrap_in_articulation and link_joints:
@@ -7599,6 +7630,9 @@ class ModelBuilder:
         wrap_in_articulation: bool = True,
         quaternions: list[Quat] | None = None,
         junction_collision_filter: bool = True,
+        shape_type: Literal["capsule", "box"] = "capsule",
+        width: float = 0.0,
+        thickness: float = 0.0,
     ) -> tuple[list[int], list[int]]:
         """Adds a rod/cable graph using anisotropic cable joints.
 
@@ -7632,6 +7666,14 @@ class ModelBuilder:
                 local +Z with the corresponding edge direction.
             junction_collision_filter: If ``True``, adds collision filters between
                 non-jointed segment bodies that meet at a high-degree junction.
+            shape_type: Segment collision shape type. ``"capsule"`` keeps the legacy
+                rod geometry. ``"box"`` uses box segments aligned with each rod
+                quaternion so rectangular ribbons can preserve authored width and
+                thickness.
+            width: Full segment width along the body local X axis [m]. Only used
+                when ``shape_type="box"``.
+            thickness: Full segment thickness along the body local Y axis [m]. Only
+                used when ``shape_type="box"``.
 
         Returns:
             A pair ``(body_indices, joint_indices)`` where bodies correspond to edges in
@@ -7681,6 +7723,15 @@ class ModelBuilder:
                 f"add_rod_graph_anisotropic: quaternions must have {num_edges} elements for {num_edges} edges, "
                 f"got {len(quaternions)} quaternions"
             )
+        if shape_type not in ("capsule", "box"):
+            raise ValueError(
+                f"add_rod_graph_anisotropic: shape_type must be 'capsule' or 'box', got '{shape_type}'"
+            )
+        if shape_type == "box":
+            if width <= 0.0:
+                raise ValueError("add_rod_graph_anisotropic: width must be > 0 when shape_type='box'")
+            if thickness <= 0.0:
+                raise ValueError("add_rod_graph_anisotropic: thickness must be > 0 when shape_type='box'")
 
         node_positions_wp: list[wp.vec3] = [axis_to_vec3(p) for p in node_positions]
         node_incidence: list[list[int]] = [[] for _ in range(num_nodes)]
@@ -7729,18 +7780,29 @@ class ModelBuilder:
             com_offset = wp.vec3(0.0, 0.0, half_height)
 
             body_label = f"{label}_edge_body_{e_idx}" if label else None
-            shape_label = f"{label}_edge_capsule_{e_idx}" if label else None
+            shape_label = f"{label}_edge_{shape_type}_{e_idx}" if label else None
 
             body_id = self.add_link(xform=body_q, com=com_offset, label=body_label)
-            capsule_xform = wp.transform(wp.vec3(0.0, 0.0, half_height), wp.quat_identity())
-            self.add_shape_capsule(
-                body_id,
-                xform=capsule_xform,
-                radius=radius,
-                half_height=half_height,
-                cfg=cfg,
-                label=shape_label,
-            )
+            shape_xform = wp.transform(wp.vec3(0.0, 0.0, half_height), wp.quat_identity())
+            if shape_type == "box":
+                self.add_shape_box(
+                    body_id,
+                    xform=shape_xform,
+                    hx=width * 0.5,
+                    hy=thickness * 0.5,
+                    hz=half_height,
+                    cfg=cfg,
+                    label=shape_label,
+                )
+            else:
+                self.add_shape_capsule(
+                    body_id,
+                    xform=shape_xform,
+                    radius=radius,
+                    half_height=half_height,
+                    cfg=cfg,
+                    label=shape_label,
+                )
 
             edge_u.append(u)
             edge_v.append(v)

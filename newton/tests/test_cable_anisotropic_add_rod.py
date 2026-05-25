@@ -434,6 +434,64 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         )
         self.assertEqual(model.joint_dof_dim.numpy().tolist(), [[1, 3], [1, 3]])
 
+    def test_add_rod_accepts_box_segments_for_ribbon_geometry(self):
+        builder = newton.ModelBuilder()
+        positions, quaternions = self._straight_points_and_quaternions()
+
+        rod_bodies, rod_joints = builder.add_rod(
+            positions=positions,
+            quaternions=quaternions,
+            stretch_stiffness=123.0,
+            stretch_damping=0.1,
+            bend_stiffness=7.5,
+            bend_damping=0.3,
+            shape_type="box",
+            width=0.08,
+            thickness=0.02,
+            label="ribbon",
+        )
+
+        self.assertEqual(len(rod_bodies), 3)
+        self.assertEqual(len(rod_joints), 2)
+        self.assertEqual(
+            [builder.joint_type[joint_index] for joint_index in rod_joints],
+            [newton.JointType.ANISOTROPIC_CABLE, newton.JointType.ANISOTROPIC_CABLE],
+        )
+
+        shape_indices = [builder.body_shapes[body_index][0] for body_index in rod_bodies]
+        self.assertEqual(
+            [builder.shape_type[shape_index] for shape_index in shape_indices],
+            [newton.GeoType.BOX, newton.GeoType.BOX, newton.GeoType.BOX],
+        )
+        for shape_index in shape_indices:
+            scale = builder.shape_scale[shape_index]
+            self.assertAlmostEqual(float(scale[0]), 0.04)
+            self.assertAlmostEqual(float(scale[1]), 0.01)
+            self.assertAlmostEqual(float(scale[2]), 0.25)
+
+    def test_add_rod_graph_anisotropic_requires_box_dimensions(self):
+        builder = newton.ModelBuilder()
+        node_positions, quaternions = self._straight_points_and_quaternions()
+        edges = [(0, 1), (1, 2), (2, 3)]
+
+        with self.assertRaisesRegex(ValueError, "width must be > 0"):
+            builder.add_rod_graph_anisotropic(
+                node_positions=node_positions,
+                edges=edges,
+                quaternions=quaternions,
+                shape_type="box",
+                thickness=0.02,
+            )
+
+        with self.assertRaisesRegex(ValueError, "thickness must be > 0"):
+            builder.add_rod_graph_anisotropic(
+                node_positions=node_positions,
+                edges=edges,
+                quaternions=quaternions,
+                shape_type="box",
+                width=0.08,
+            )
+
     def test_solver_vbd_initializes_anisotropic_constraint_slots(self):
         builder = newton.ModelBuilder()
         positions, quaternions = self._straight_points_and_quaternions()

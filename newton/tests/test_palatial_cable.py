@@ -338,6 +338,9 @@ class TestPalatialCable(unittest.TestCase):
                 bundle.model.joint_type.numpy().tolist(),
                 [int(newton.JointType.ANISOTROPIC_CABLE)] * 2,
             )
+            shape_types = bundle.model.shape_type.numpy().tolist()
+            self.assertEqual(shape_types.count(int(newton.GeoType.BOX)), 3)
+            self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 0)
             self.assertEqual(bundle.model.joint_dof_dim.numpy().tolist(), [[1, 3], [1, 3]])
             np.testing.assert_allclose(
                 bundle.model.joint_target_ke.numpy(),
@@ -514,6 +517,9 @@ class TestPalatialCable(unittest.TestCase):
                 bundle.model.joint_type.numpy().tolist(),
                 [int(newton.JointType.ANISOTROPIC_CABLE)] * 15,
             )
+            shape_types = bundle.model.shape_type.numpy().tolist()
+            self.assertEqual(shape_types.count(int(newton.GeoType.BOX)), 16)
+            self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 0)
 
     def test_generator_can_author_round_asset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -552,6 +558,8 @@ class TestPalatialCable(unittest.TestCase):
                 bundle.model.joint_type.numpy().tolist(),
                 [int(newton.JointType.ANISOTROPIC_CABLE)] * 5,
             )
+            shape_types = bundle.model.shape_type.numpy().tolist()
+            self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 6)
 
 
 if __name__ == "__main__":
