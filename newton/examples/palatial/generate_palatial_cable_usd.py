@@ -6,16 +6,19 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 from typing import Any
 
 import newton  # noqa: F401
+import warp as wp
 
 from newton.palatial import read_cable_params
 
 DEFAULT_OUTPUT_PATH = Path("palatial_cable_example.newton.usda")
 DEFAULT_ROOT_PATH = "/Cable"
 DEFAULT_CENTERLINE_PATH = f"{DEFAULT_ROOT_PATH}/Centerline"
+DEFAULT_SURFACE_PATH = f"{DEFAULT_ROOT_PATH}/Surface"
 DEFAULT_MATERIAL_PATH = "/Materials/CableMaterial"
 
 
@@ -107,6 +110,167 @@ def _build_straight_points(
 
     step = float(length) / float(segment_count)
     return [Gf.Vec3f(float(index) * step, 0.0, float(z_height)) for index in range(segment_count + 1)]
+
+
+def _as_wp_points(points: list[Any]) -> list[wp.vec3]:
+    return [wp.vec3(float(point[0]), float(point[1]), float(point[2])) for point in points]
+
+
+def _build_segment_frames(
+    points: list[wp.vec3],
+    quaternions: list[wp.quat],
+) -> list[tuple[wp.vec3, wp.vec3]]:
+    local_x = wp.vec3(1.0, 0.0, 0.0)
+    local_y = wp.vec3(0.0, 1.0, 0.0)
+    frames: list[tuple[wp.vec3, wp.vec3]] = []
+    for index, quaternion in enumerate(quaternions):
+        if index >= len(points) - 1:
+            break
+        normal = wp.normalize(wp.quat_rotate(quaternion, local_x))
+        binormal = wp.normalize(wp.quat_rotate(quaternion, local_y))
+        frames.append((normal, binormal))
+    return frames
+
+
+def _build_round_surface_mesh(
+    *,
+    points: list[wp.vec3],
+    frames: list[tuple[wp.vec3, wp.vec3]],
+    radius: float,
+    radial_segments: int,
+) -> tuple[list[wp.vec3], list[int], list[int]]:
+    vertices: list[wp.vec3] = []
+    for ring_index, point in enumerate(points):
+        normal, binormal = frames[min(ring_index, len(frames) - 1)]
+        for radial_index in range(radial_segments):
+            angle = 2.0 * math.pi * (radial_index / radial_segments)
+            offset = normal * (radius * math.cos(angle)) + binormal * (radius * math.sin(angle))
+            vertices.append(point + offset)
+
+    face_vertex_counts: list[int] = []
+    face_vertex_indices: list[int] = []
+    for ring_index in range(len(points) - 1):
+        ring_start = ring_index * radial_segments
+        next_ring_start = (ring_index + 1) * radial_segments
+        for radial_index in range(radial_segments):
+            next_radial = (radial_index + 1) % radial_segments
+            face_vertex_counts.append(4)
+            face_vertex_indices.extend(
+                (
+                    ring_start + radial_index,
+                    ring_start + next_radial,
+                    next_ring_start + next_radial,
+                    next_ring_start + radial_index,
+                )
+            )
+
+    return vertices, face_vertex_counts, face_vertex_indices
+
+
+def _build_rect_surface_mesh(
+    *,
+    points: list[wp.vec3],
+    frames: list[tuple[wp.vec3, wp.vec3]],
+    width: float,
+    thickness: float,
+    width_segments: int,
+    thickness_segments: int,
+) -> tuple[list[wp.vec3], list[int], list[int]]:
+    half_width = 0.5 * width
+    half_thickness = 0.5 * thickness
+    verts_per_ring = 2 * (width_segments + thickness_segments)
+
+    vertices: list[wp.vec3] = []
+    for ring_index, point in enumerate(points):
+        normal, binormal = frames[min(ring_index, len(frames) - 1)]
+
+        for segment_index in range(width_segments):
+            t_param = segment_index / width_segments
+            u_coord = -1.0 + 2.0 * t_param
+            vertices.append(point + normal * (u_coord * half_width) + binormal * half_thickness)
+
+        for segment_index in range(thickness_segments):
+            t_param = segment_index / thickness_segments
+            v_coord = 1.0 - 2.0 * t_param
+            vertices.append(point + normal * half_width + binormal * (v_coord * half_thickness))
+
+        for segment_index in range(width_segments):
+            t_param = segment_index / width_segments
+            u_coord = 1.0 - 2.0 * t_param
+            vertices.append(point + normal * (u_coord * half_width) - binormal * half_thickness)
+
+        for segment_index in range(thickness_segments):
+            t_param = segment_index / thickness_segments
+            v_coord = -1.0 + 2.0 * t_param
+            vertices.append(point - normal * half_width + binormal * (v_coord * half_thickness))
+
+    face_vertex_counts: list[int] = []
+    face_vertex_indices: list[int] = []
+    for ring_index in range(len(points) - 1):
+        ring_start = ring_index * verts_per_ring
+        next_ring_start = (ring_index + 1) * verts_per_ring
+        for edge_index in range(verts_per_ring):
+            next_edge_index = (edge_index + 1) % verts_per_ring
+            face_vertex_counts.append(4)
+            face_vertex_indices.extend(
+                (
+                    ring_start + edge_index,
+                    ring_start + next_edge_index,
+                    next_ring_start + next_edge_index,
+                    next_ring_start + edge_index,
+                )
+            )
+
+    return vertices, face_vertex_counts, face_vertex_indices
+
+
+def _author_surface_mesh(
+    *,
+    stage: Any,
+    centerline_points: list[Any],
+    cross_section_type: str,
+    radius: float,
+    width: float,
+    thickness: float,
+    twist_total: float,
+    Gf: Any,
+    UsdGeom: Any,
+) -> None:
+    points_wp = _as_wp_points(centerline_points)
+    quaternions = list(
+        newton.utils.create_parallel_transport_cable_quaternions(
+            points_wp,
+            twist_total=float(twist_total),
+        )
+    )
+    frames = _build_segment_frames(points_wp, quaternions)
+
+    if cross_section_type == "flatRect":
+        vertices, face_vertex_counts, face_vertex_indices = _build_rect_surface_mesh(
+            points=points_wp,
+            frames=frames,
+            width=float(width),
+            thickness=float(thickness),
+            width_segments=4,
+            thickness_segments=1,
+        )
+    else:
+        vertices, face_vertex_counts, face_vertex_indices = _build_round_surface_mesh(
+            points=points_wp,
+            frames=frames,
+            radius=float(radius),
+            radial_segments=8,
+        )
+
+    mesh = UsdGeom.Mesh.Define(stage, DEFAULT_SURFACE_PATH)
+    mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+    mesh.CreateDoubleSidedAttr().Set(True)
+    mesh.CreateFaceVertexCountsAttr().Set(face_vertex_counts)
+    mesh.CreateFaceVertexIndicesAttr().Set(face_vertex_indices)
+    mesh.CreatePointsAttr().Set(
+        [Gf.Vec3f(float(vertex[0]), float(vertex[1]), float(vertex[2])) for vertex in vertices]
+    )
+    mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant).Set([Gf.Vec3f(0.16, 0.19, 0.24)])
 
 
 def author_cable_usd(
@@ -230,6 +394,17 @@ def author_cable_usd(
     centerline.CreateCurveVertexCountsAttr().Set([segment_count + 1])
     centerline.CreatePointsAttr().Set(centerline_points)
     _create_custom_attribute(centerline_prim, "newton:rod:length", Sdf.ValueTypeNames.Float, float(length))
+    _author_surface_mesh(
+        stage=stage,
+        centerline_points=centerline_points,
+        cross_section_type=cross_section_type,
+        radius=float(radius),
+        width=float(width),
+        thickness=float(thickness),
+        twist_total=float(twist_total),
+        Gf=Gf,
+        UsdGeom=UsdGeom,
+    )
 
     material = UsdShade.Material.Define(stage, DEFAULT_MATERIAL_PATH)
     material_prim = material.GetPrim()

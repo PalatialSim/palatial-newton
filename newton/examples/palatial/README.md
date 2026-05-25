@@ -14,8 +14,9 @@ All commands assume the `test_venv` interpreter set up in
 
 Generates a **first-kind** palatial cable asset: a high-level
 `*.newton.usda` with `NewtonRodAPI`, `NewtonRodMaterialAPI`, a
-`BasisCurves` centerline, and baked solver metadata. The default output is a
-flat rectangular cable so it exercises the anisotropic rod path.
+`BasisCurves` centerline, an authored `UsdGeom.Mesh` surface, and baked solver
+metadata. The default output is a flat rectangular cable so it exercises the
+anisotropic rod path.
 
 ```bash
 /home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \

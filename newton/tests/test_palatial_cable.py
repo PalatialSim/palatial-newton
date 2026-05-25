@@ -507,6 +507,11 @@ class TestPalatialCable(unittest.TestCase):
             self.assertEqual(len(points), 17)
             self.assertAlmostEqual(float(points[0][2]), 0.302, places=6)
             self.assertAlmostEqual(float(points[-1][0]), 1.5, places=6)
+            stage = Usd.Stage.Open(str(authored_path))
+            surface = UsdGeom.Mesh.Get(stage, "/Cable/Surface")
+            self.assertTrue(surface)
+            self.assertEqual(len(surface.GetPointsAttr().Get()), 170)
+            self.assertEqual(len(surface.GetFaceVertexCountsAttr().Get()), 160)
 
             bundle = load(str(authored_path), device="cpu")
             self.assertEqual(bundle.body_type, "cable")
@@ -549,6 +554,11 @@ class TestPalatialCable(unittest.TestCase):
             self.assertEqual(len(points), 7)
             self.assertAlmostEqual(float(points[0][2]), 0.41, places=6)
             self.assertAlmostEqual(float(points[-1][0]), 2.0, places=6)
+            stage = Usd.Stage.Open(str(usd_path))
+            surface = UsdGeom.Mesh.Get(stage, "/Cable/Surface")
+            self.assertTrue(surface)
+            self.assertEqual(len(surface.GetPointsAttr().Get()), 56)
+            self.assertEqual(len(surface.GetFaceVertexCountsAttr().Get()), 48)
 
             bundle = load(str(usd_path), device="cpu")
             self.assertEqual(bundle.solver_name, "vbd_palatial")
