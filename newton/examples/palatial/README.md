@@ -79,6 +79,31 @@ Pins two opposing edges of a cloth and counter-rotates them, like
   --record-mp4 /tmp/jean_twist.mp4 --top-view
 ```
 
+## 4. `example_palatial_cable` — cable load / anchored twist
+
+Requires a **cable** bundle (authored with `NewtonRodAPI`). By default it
+anchors the first segment and spins it around the cable axis so you can see
+twist propagation through the loaded rod. Set `--spin-rate 0` for a pure
+hanging / settling run, or `--no-anchor-first` to let the whole cable move.
+
+```bash
+/home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
+  -m newton.examples.palatial.example_palatial_cable \
+  ~/power_cable.newton.usda \
+  --device cuda:0 --substeps 2 \
+  --anchor-first --spin-rate 0.5 \
+  --gui --steps 1000
+```
+
+Record a front-facing mp4:
+
+```bash
+... example_palatial_cable ~/power_cable.newton.usda \
+  --device cuda:0 --substeps 2 \
+  --anchor-first --spin-rate 0.5 \
+  --record-mp4 /tmp/power_cable_twist.mp4 --mp4-fps 60 --steps 1000
+```
+
 ---
 
 ## Camera conventions
@@ -88,6 +113,7 @@ Pins two opposing edges of a cloth and counter-rotates them, like
 | `example_palatial_load`          | front (-Y → +Y)  | always front   |
 | `example_palatial_articulated`   | front (-Y → +Y)  | always front   |
 | `example_palatial_twist`         | top-down         | `--top-view`   |
+| `example_palatial_cable`         | front (-Y → +Y)  | `--top-view`   |
 
 Newton's `ViewerGL.set_camera(pos, pitch, yaw)` is degree-based, Z-up:
 * yaw=0/pitch=0 → look toward +X
