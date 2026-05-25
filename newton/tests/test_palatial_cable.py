@@ -7,11 +7,13 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import newton  # noqa: F401
 import numpy as np
 import warp as wp
 
+from newton.examples.palatial.example_palatial_cable import _resolve_input_usd
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import (
     extract_cable_points,
@@ -570,6 +572,33 @@ class TestPalatialCable(unittest.TestCase):
             )
             shape_types = bundle.model.shape_type.numpy().tolist()
             self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 6)
+
+    def test_example_can_generate_default_flat_rect_asset(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with mock.patch(
+                "newton.examples.palatial.example_palatial_cable.tempfile.gettempdir",
+                return_value=tmp_dir,
+            ):
+                usd_path = Path(
+                    _resolve_input_usd(
+                        None,
+                        substeps=3,
+                        solver_override="vbd_palatial",
+                    )
+                )
+
+            self.assertTrue(usd_path.exists())
+            params = read_cable_params(str(usd_path))
+            self.assertEqual(params["crossSectionType"], "flatRect")
+            self.assertAlmostEqual(float(params["width"]), 0.012)
+            self.assertAlmostEqual(float(params["thickness"]), 0.004)
+
+            bundle = load(str(usd_path), device="cpu")
+            self.assertEqual(bundle.solver_name, "vbd_palatial")
+            self.assertEqual(
+                bundle.model.joint_type.numpy().tolist(),
+                [int(newton.JointType.ANISOTROPIC_CABLE)] * 15,
+            )
 
 
 if __name__ == "__main__":

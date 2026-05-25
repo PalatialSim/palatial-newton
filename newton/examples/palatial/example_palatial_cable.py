@@ -14,12 +14,15 @@ from __future__ import annotations
 import argparse
 import inspect
 import sys
+import tempfile
+from pathlib import Path
 
 import numpy as np
 import warp as wp
 
 import newton
 
+from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import extract_cable_points, load, read_cable_params
 
 
@@ -95,6 +98,27 @@ def _set_top_camera(viewer, points: np.ndarray) -> None:
     height = zmax + max(ext_x, ext_y, 1.0) * 1.5
     viewer.set_camera(wp.vec3(cx, cy, height), -90.0, 0.0)
     print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
+
+
+def _resolve_input_usd(
+    usd_path: str | None,
+    *,
+    substeps: int | None,
+    solver_override: str | None,
+) -> str:
+    """Return the user USD path or author a temporary flatRect ribbon asset."""
+    if usd_path:
+        return usd_path
+
+    generated_path = Path(tempfile.gettempdir()) / "palatial_ribbon_example.newton.usda"
+    author_cable_usd(
+        generated_path,
+        cross_section_type="flatRect",
+        solver=solver_override or "vbd",
+        solver_substeps=max(1, int(substeps)) if substeps is not None else 2,
+    )
+    print(f"[write] generated default cable asset: {generated_path}")
+    return str(generated_path)
 
 
 class Example:
@@ -206,13 +230,23 @@ class Example:
 
     def _print_bundle_summary(self, extra_drop_height: float) -> None:
         params = self.cable_params
+        cross_section = str(params["crossSectionType"])
+        if cross_section == "flatRect":
+            cross_section_summary = (
+                f"cross_section={cross_section}  width={float(params['width']):.4f}m  "
+                f"thickness={float(params['thickness']):.4f}m  radius={float(params['radius']):.4f}m"
+            )
+        else:
+            cross_section_summary = (
+                f"cross_section={cross_section}  radius={float(params['radius']):.4f}m"
+            )
         print(
             f"[cable] usd={self.usd_path}  solver={self.bundle.solver_name}  "
             f"fps={self.fps}  substeps={self.sim_substeps}  bodies={int(self.model.body_count)}  "
             f"joints={int(self.model.joint_count)}"
         )
         print(
-            f"        cross_section={params['crossSectionType']}  radius={float(params['radius']):.4f}m  "
+            f"        {cross_section_summary}  "
             f"length={float(params['length']):.4f}m  segments={int(params['segmentCount'])}  "
             f"anchor_first={self.anchor_first}  spin_rate={self.spin_rate:.3f}rad/s  "
             f"extra_drop={extra_drop_height:.3f}m"
@@ -271,7 +305,12 @@ class Example:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="example_palatial_cable")
-    parser.add_argument("usd", help="Path to a converted cable *.newton.usda")
+    parser.add_argument(
+        "usd",
+        nargs="?",
+        default=None,
+        help="Path to a converted cable *.newton.usda. If omitted, a temporary flatRect ribbon asset is generated.",
+    )
     parser.add_argument("--steps", type=int, default=600, help="Frames to simulate when not in GUI mode")
     parser.add_argument("--substeps", type=int, default=None, help="Override newton:solver:substeps from the USDA")
     parser.add_argument("--gui", action="store_true", help="Open ViewerGL and run until the window is closed")
@@ -313,6 +352,11 @@ def main(argv=None) -> int:
         help="Skip the recording auto-camera so the viewer keeps its default camera",
     )
     args = parser.parse_args(argv)
+    resolved_usd = _resolve_input_usd(
+        args.usd,
+        substeps=args.substeps,
+        solver_override=args.solver_override,
+    )
 
     from newton import viewer as v
 
@@ -325,7 +369,7 @@ def main(argv=None) -> int:
 
     example = Example(
         viewer,
-        args.usd,
+        resolved_usd,
         substeps=args.substeps,
         device=args.device,
         solver_override=args.solver_override,

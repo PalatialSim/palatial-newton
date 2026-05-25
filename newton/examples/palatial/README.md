@@ -36,6 +36,13 @@ Then run it with the cable example:
   --device cuda:0 --gui --steps 1000
 ```
 
+Or let the example generate its own temporary flatRect ribbon asset:
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  --device cuda:0 --gui --steps 1000
+```
+
 ---
 
 ## 1. `example_palatial_load` — generic settle / drop
@@ -109,10 +116,12 @@ Pins two opposing edges of a cloth and counter-rotates them, like
 
 ## 4. `example_palatial_cable` — cable load / anchored twist
 
-Requires a **cable** bundle (authored with `NewtonRodAPI`). By default it
-anchors the first segment and spins it around the cable axis so you can see
-twist propagation through the loaded rod. Set `--spin-rate 0` for a pure
-hanging / settling run, or `--no-anchor-first` to let the whole cable move.
+Requires a **cable** bundle (authored with `NewtonRodAPI`), but if you omit the
+USD path it will generate a temporary flatRect ribbon asset for you. By
+default it anchors the first segment and spins it around the cable axis so you
+can see twist propagation through the loaded rod. Set `--spin-rate 0` for a
+pure hanging / settling run, or `--no-anchor-first` to let the whole cable
+move.
 
 ```bash
 /home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
