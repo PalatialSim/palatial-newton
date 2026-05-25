@@ -10,6 +10,33 @@ All commands assume the `test_venv` interpreter set up in
 
 ---
 
+## 0. `generate_palatial_cable_usd` — author a cable asset
+
+Generates a **first-kind** palatial cable asset: a high-level
+`*.newton.usda` with `NewtonRodAPI`, `NewtonRodMaterialAPI`, a
+`BasisCurves` centerline, and baked solver metadata. The default output is a
+flat rectangular cable so it exercises the anisotropic rod path.
+
+```bash
+/home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
+  -m newton.examples.palatial.generate_palatial_cable_usd \
+  ~/power_cable.newton.usda \
+  --cross-section-type flatRect \
+  --length 1.5 --segment-count 16 \
+  --drop-height 0.3 \
+  --solver vbd --solver-substeps 2
+```
+
+Then run it with the cable example:
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  ~/power_cable.newton.usda \
+  --device cuda:0 --gui --steps 1000
+```
+
+---
+
 ## 1. `example_palatial_load` — generic settle / drop
 
 Works for both **cloth** and **rigid** bundles. Cloth-only knobs are ignored

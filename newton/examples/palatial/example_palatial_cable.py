@@ -165,7 +165,17 @@ class Example:
         self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
 
+        self.capture()
         self._print_bundle_summary(extra_drop_height)
+
+    def capture(self) -> None:
+        """Capture the cable simulation into a CUDA graph when available."""
+        if self.solver.device.is_cuda:
+            with wp.ScopedCapture() as capture:
+                self.simulate()
+            self.graph = capture.graph
+        else:
+            self.graph = None
 
     def _rebuild_solver(self) -> None:
         self.solver = type(self.solver)(self.model, **self._solver_kwargs)
@@ -246,7 +256,10 @@ class Example:
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def step(self) -> None:
-        self.simulate()
+        if self.graph is not None:
+            wp.capture_launch(self.graph)
+        else:
+            self.simulate()
         self.sim_time += self.frame_dt
 
     def render(self) -> None:

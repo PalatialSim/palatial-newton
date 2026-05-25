@@ -12,6 +12,7 @@ import newton  # noqa: F401
 import numpy as np
 import warp as wp
 
+from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import (
     extract_cable_points,
     find_cable_centerline_prim_path,
@@ -485,6 +486,72 @@ class TestPalatialCable(unittest.TestCase):
                     body_q[body_index, 3:7],
                     np.array(expected_quaternions[body_index], dtype=np.float32),
                 )
+
+    def test_generator_authors_default_flat_rect_asset(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "generated_flat_rect.newton.usda"
+
+            authored_path = author_cable_usd(usd_path)
+            self.assertEqual(authored_path, usd_path.resolve())
+
+            params = read_cable_params(str(authored_path))
+            self.assertEqual(params["crossSectionType"], "flatRect")
+            self.assertAlmostEqual(float(params["width"]), 0.012)
+            self.assertAlmostEqual(float(params["thickness"]), 0.004)
+            self.assertAlmostEqual(float(params["radius"]), 0.002)
+
+            points = extract_cable_points(str(authored_path))
+            self.assertEqual(len(points), 17)
+            self.assertAlmostEqual(float(points[0][2]), 0.302, places=6)
+            self.assertAlmostEqual(float(points[-1][0]), 1.5, places=6)
+
+            bundle = load(str(authored_path), device="cpu")
+            self.assertEqual(bundle.body_type, "cable")
+            self.assertEqual(bundle.solver_name, "vbd")
+            self.assertEqual(bundle.fps, 120)
+            self.assertEqual(bundle.model.body_count, 16)
+            self.assertEqual(
+                bundle.model.joint_type.numpy().tolist(),
+                [int(newton.JointType.ANISOTROPIC_CABLE)] * 15,
+            )
+
+    def test_generator_can_author_round_asset(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "generated_round.newton.usda"
+
+            author_cable_usd(
+                usd_path,
+                cross_section_type="roundSolid",
+                radius=0.01,
+                length=2.0,
+                segment_count=6,
+                drop_height=0.4,
+                twist_total=0.25,
+                solver="vbd_palatial",
+                solver_iterations=3,
+                solver_substeps=4,
+            )
+
+            params = read_cable_params(str(usd_path))
+            self.assertEqual(params["crossSectionType"], "roundSolid")
+            self.assertAlmostEqual(float(params["radius"]), 0.01)
+            self.assertAlmostEqual(float(params["length"]), 2.0)
+            self.assertAlmostEqual(float(params["dropHeight"]), 0.4)
+            self.assertAlmostEqual(float(params["twistTotal"]), 0.25)
+
+            points = extract_cable_points(str(usd_path))
+            self.assertEqual(len(points), 7)
+            self.assertAlmostEqual(float(points[0][2]), 0.41, places=6)
+            self.assertAlmostEqual(float(points[-1][0]), 2.0, places=6)
+
+            bundle = load(str(usd_path), device="cpu")
+            self.assertEqual(bundle.solver_name, "vbd_palatial")
+            self.assertIs(bundle.solver.__class__, newton.solvers.SolverVBDPalatial)
+            self.assertEqual(bundle.model.body_count, 6)
+            self.assertEqual(
+                bundle.model.joint_type.numpy().tolist(),
+                [int(newton.JointType.ANISOTROPIC_CABLE)] * 5,
+            )
 
 
 if __name__ == "__main__":
