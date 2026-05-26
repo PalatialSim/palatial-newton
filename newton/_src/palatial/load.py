@@ -102,6 +102,7 @@ class NewtonBundle:
     state_out: Any
     control: Any
     solver_params: dict      # raw newton:solver:* attrs from the USD
+    scene_kind: str | None = None
 
     @property
     def dt(self) -> float:
@@ -136,16 +137,22 @@ def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
     return solver, fps, solver_params
 
 
-def _detect_body_type(stage: Usd.Stage) -> str:
-    """Return 'cloth' or 'cable' when present, else 'rigid'.
+def _detect_scene_kind(stage: Usd.Stage) -> str:
+    """Return the narrow scene kind for the Palatial loader.
 
     Three positive signals (any of):
+      - v1 source assembly: Power cable assembly under /World/Geometry
       - new schema: NewtonShellAPI / NewtonClothAPI in applied schemas
       - new schema: NewtonRodAPI in applied schemas
       - new schema: newton:deformable:simulationIntent in {cloth, shell}
       - new schema: newton:deformable:simulationIntent == rod
       - legacy: newton:bodyType="cloth"
     """
+    from .cable_assembly import is_power_cable_assembly_stage
+
+    if is_power_cable_assembly_stage(stage):
+        return "cable_assembly"
+
     for prim in stage.Traverse():
         applied = set(prim.GetAppliedSchemas())
         # Also walk raw apiSchemas listOp so we still see tokens when this
@@ -170,6 +177,12 @@ def _detect_body_type(stage: Usd.Stage) -> str:
         if a and a.HasAuthoredValue() and str(a.Get()) == "cloth":
             return "cloth"
     return "rigid"
+
+
+def _detect_body_type(stage: Usd.Stage) -> str:
+    """Return the coarse body family: 'cloth', 'cable', or 'rigid'."""
+    scene_kind = _detect_scene_kind(stage)
+    return "cable" if scene_kind == "cable_assembly" else scene_kind
 
 
 def _build_rigid(usd_path: str, *, device: str | None = None,
@@ -410,6 +423,35 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
         return builder.finalize()
 
 
+def _build_cable_assembly(usd_path: str, *, device: str | None = None) -> Any:
+    """Build a cable assembly model from a v1 Power assembly source USDA."""
+    from .cable_assembly import build_power_cable_assembly_model
+
+    return build_power_cable_assembly_model(usd_path, device=device)
+
+
+def _scene_has_authored_solver(stage: Usd.Stage) -> bool:
+    """Return whether the first PhysicsScene pins a solver."""
+    for prim in stage.Traverse():
+        if prim.GetTypeName() != "PhysicsScene":
+            continue
+        a = prim.GetAttribute("newton:solver")
+        if not (a and a.HasAuthoredValue()):
+            a = prim.GetAttribute("palatial:solver")
+        return bool(a and a.HasAuthoredValue())
+    return False
+
+
+def _scene_has_authored_fps(stage: Usd.Stage) -> bool:
+    """Return whether the first PhysicsScene pins timeStepsPerSecond."""
+    for prim in stage.Traverse():
+        if prim.GetTypeName() != "PhysicsScene":
+            continue
+        a = prim.GetAttribute("newton:timeStepsPerSecond")
+        return bool(a and a.HasAuthoredValue())
+    return False
+
+
 def load(usd_path: str, *, solver_override: str | None = None,
          device: str | None = None, fix_base: bool = False) -> NewtonBundle:
     """Read converted USD, build Newton model + solver, return ready-to-step bundle.
@@ -421,20 +463,14 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if not stage:
         raise RuntimeError(f"Cannot open USD: {usd_path}")
     solver_name, fps, solver_params = _read_scene_params(stage)
-    body_type = _detect_body_type(stage)
+    scene_kind = _detect_scene_kind(stage)
+    body_type = "cable" if scene_kind == "cable_assembly" else scene_kind
 
     # Defensive: if the scene didn't pin a solver but the asset is cloth,
     # pick a sensible default. VBD by default; Style3D when any
     # newton:shell:style3d:* attr is authored (those are Style3D-only).
-    scene_pinned = False
-    for prim in stage.Traverse():
-        if prim.GetTypeName() == "PhysicsScene":
-            a = prim.GetAttribute("newton:solver")
-            if not (a and a.HasAuthoredValue()):
-                a = prim.GetAttribute("palatial:solver")
-            if a and a.HasAuthoredValue():
-                scene_pinned = True
-            break
+    scene_pinned = _scene_has_authored_solver(stage)
+    fps_pinned = _scene_has_authored_fps(stage)
     if body_type == "cloth" and not scene_pinned and not solver_override:
         style3d_used = False
         for prim in stage.Traverse():
@@ -454,11 +490,25 @@ def load(usd_path: str, *, solver_override: str | None = None,
             solver_name = "xpbd"
     if body_type == "cable":
         cable_solver_name = solver_override or solver_name
+        if scene_kind == "cable_assembly" and not fps_pinned:
+            from .cable_assembly import (
+                DEFAULT_ASSEMBLY_FPS,
+                DEFAULT_ASSEMBLY_ITERATIONS,
+                DEFAULT_ASSEMBLY_SUBSTEPS,
+            )
+
+            fps = DEFAULT_ASSEMBLY_FPS
+            solver_params.setdefault("iterations", DEFAULT_ASSEMBLY_ITERATIONS)
+            solver_params.setdefault("substeps", DEFAULT_ASSEMBLY_SUBSTEPS)
         if not scene_pinned and not solver_override:
-            if getattr(newton.solvers, "SolverVBD", None):
+            if scene_kind == "cable_assembly" and getattr(newton.solvers, "SolverVBDPalatial", None):
+                solver_name = "vbd_palatial"
+            elif getattr(newton.solvers, "SolverVBD", None):
                 solver_name = "vbd"
             else:
-                raise RuntimeError("Cable assets require SolverVBD, but this Newton build does not provide it")
+                raise RuntimeError(
+                    "Cable assets require SolverVBD or SolverVBDPalatial, but this Newton build does not provide it"
+                )
         elif cable_solver_name not in ("vbd", "vbd_palatial"):
             raise RuntimeError(
                 f"Cable assets require SolverVBD because cable joint runtime is only supported by VBD "
@@ -474,6 +524,8 @@ def load(usd_path: str, *, solver_override: str | None = None,
 
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name)
+    elif scene_kind == "cable_assembly":
+        model = _build_cable_assembly(usd_path, device=device)
     elif body_type == "cable":
         model = _build_cable(usd_path, device=device)
     else:
@@ -492,6 +544,7 @@ def load(usd_path: str, *, solver_override: str | None = None,
         state_out=model.state(),
         control=model.control(),
         solver_params=solver_params,
+        scene_kind=scene_kind,
     )
 
 
@@ -504,6 +557,7 @@ if __name__ == "__main__":
     b = load(a.usd)
     print(f"usd        : {b.usd_path}")
     print(f"body type  : {b.body_type}")
+    print(f"scene kind : {b.scene_kind}")
     print(f"solver     : {b.solver_name}  ({type(b.solver).__name__})")
     print(f"fps / dt   : {b.fps}  /  {b.dt:.6f}")
     if b.solver_params:

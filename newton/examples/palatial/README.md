@@ -141,6 +141,14 @@ Record a front-facing mp4:
   --record-mp4 /tmp/power_cable_twist.mp4 --mp4-fps 60 --steps 1000
 ```
 
+The same example also accepts the v1 Power cable assembly source USDA:
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\palatial-sim-newton-solvers-usd\02_WorkingFiles\Cables.usda \
+  --device cuda:0 --gui --substeps 10
+```
+
 ---
 
 ## Camera conventions

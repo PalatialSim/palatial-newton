@@ -15,6 +15,9 @@ Example
         solver.step(bundle.state_in, bundle.state_out,
                     bundle.control, contacts, dt)
         bundle.state_in, bundle.state_out = bundle.state_out, bundle.state_in
+
+The returned :class:`NewtonBundle` also includes ``scene_kind`` so callers
+can distinguish plain cable bundles from assembly bundles.
 """
 
 from ._src.palatial.load import NewtonBundle, load

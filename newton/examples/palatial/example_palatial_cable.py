@@ -144,6 +144,7 @@ class Example:
             )
 
         self.bundle = bundle
+        self.scene_kind = bundle.scene_kind or bundle.body_type
         self.model = bundle.model
         self.solver = bundle.solver
         self.state_0 = bundle.state_in
@@ -151,8 +152,12 @@ class Example:
         self.control = bundle.control
         self.contacts = bundle.model.contacts()
 
-        self.cable_params = read_cable_params(usd_path)
-        self.centerline_points = extract_cable_points(usd_path, world_space=True)
+        if self.scene_kind == "cable_assembly":
+            self.cable_params = {}
+            self.centerline_points = []
+        else:
+            self.cable_params = read_cable_params(usd_path)
+            self.centerline_points = extract_cable_points(usd_path, world_space=True)
         self._solver_kwargs = _filter_solver_kwargs(type(self.solver), bundle.solver_params)
 
         self.anchor_first = bool(anchor_first)
@@ -229,6 +234,22 @@ class Example:
         self.model.body_inv_inertia.assign(body_inv_inertia)
 
     def _print_bundle_summary(self, extra_drop_height: float) -> None:
+        if self.scene_kind == "cable_assembly":
+            shape_types = self.model.shape_type.numpy().tolist()
+            mesh_count = shape_types.count(int(newton.GeoType.MESH))
+            box_count = shape_types.count(int(newton.GeoType.BOX))
+            print(
+                f"[cable_assembly] usd={self.usd_path}  solver={self.bundle.solver_name}  "
+                f"fps={self.fps}  substeps={self.sim_substeps}  bodies={int(self.model.body_count)}  "
+                f"joints={int(self.model.joint_count)}"
+            )
+            print(
+                f"        connector_meshes={mesh_count}  static_boxes={box_count}  "
+                f"anchor_first={self.anchor_first}  spin_rate={self.spin_rate:.3f}rad/s  "
+                f"extra_drop={extra_drop_height:.3f}m"
+            )
+            return
+
         params = self.cable_params
         cross_section = str(params["crossSectionType"])
         if cross_section == "flatRect":

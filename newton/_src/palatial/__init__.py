@@ -4,8 +4,9 @@
 
 Reads `*.newton.usda` files (authored by an external converter) and
 returns a `NewtonBundle(model, solver, fps, state_in, state_out, control,
-body_type, solver_params)` ready to step. Same entry point works for
-rigid and cloth assets; the body type is detected from the USDA.
+body_type, solver_params, scene_kind)` ready to step. Same entry point works
+for rigid, cloth, simple cable, and cable-assembly assets; the body type and
+scene kind are detected from the USDA.
 
 Public surface is re-exported via `newton.palatial`.
 """
