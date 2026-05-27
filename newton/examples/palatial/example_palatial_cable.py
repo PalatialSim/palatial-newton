@@ -12,6 +12,7 @@ demonstrate twist propagation through the loaded cable bundle.
 from __future__ import annotations
 
 import argparse
+import math
 import inspect
 import sys
 import tempfile
@@ -23,7 +24,7 @@ import warp as wp
 import newton
 
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
-from newton.palatial import extract_cable_points, load, read_cable_params
+from newton.palatial import create_cable_quaternions, extract_cable_points, load, read_cable_params
 
 DEFAULT_SIMPLE_CABLE_CONTACT_KE = 1.0e4
 DEFAULT_SIMPLE_CABLE_CONTACT_KD = 0.0
@@ -35,6 +36,9 @@ DEFAULT_OBSTACLE_BOX_HX = 0.18
 DEFAULT_OBSTACLE_BOX_HY = 0.12
 DEFAULT_OBSTACLE_BOX_HZ = 0.10
 _IDENTITY_QUAT = wp.quat(0.0, 0.0, 0.0, 1.0)
+_CABLE_SHAPE_COLOR = wp.vec3(0.95, 0.52, 0.18)
+_OBSTACLE_SHAPE_COLOR = wp.vec3(0.34, 0.37, 0.42)
+_RIBBON_OVERLAY_COLOR = (0.98, 0.46, 0.12)
 
 
 @wp.kernel
@@ -111,6 +115,27 @@ def _set_front_camera(viewer, points: np.ndarray) -> None:
     print(f"  front-view camera: pos=({cx:.3f},{cy - dist:.3f},{cz_mid:.3f})")
 
 
+def _set_camera_look_at(viewer, position: wp.vec3, target: wp.vec3, *, label: str) -> None:
+    """Place a camera at ``position`` and orient it toward ``target``."""
+
+    dx = float(target[0] - position[0])
+    dy = float(target[1] - position[1])
+    dz = float(target[2] - position[2])
+    horizontal = math.hypot(dx, dy)
+    if horizontal <= 1.0e-8:
+        yaw = 0.0
+        pitch = -90.0 if dz < 0.0 else 90.0
+    else:
+        yaw = math.degrees(math.atan2(dy, dx))
+        pitch = math.degrees(math.atan2(dz, horizontal))
+    viewer.set_camera(position, pitch, yaw)
+    print(
+        f"  {label}: "
+        f"pos=({float(position[0]):.3f},{float(position[1]):.3f},{float(position[2]):.3f})  "
+        f"pitch={pitch:.1f}  yaw={yaw:.1f}"
+    )
+
+
 def _set_top_camera(viewer, points: np.ndarray) -> None:
     """Frame a top-down camera from the current cable bounds."""
     cx = float(points[:, 0].mean())
@@ -121,6 +146,160 @@ def _set_top_camera(viewer, points: np.ndarray) -> None:
     height = zmax + max(ext_x, ext_y, 1.0) * 1.5
     viewer.set_camera(wp.vec3(cx, cy, height), -90.0, 0.0)
     print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
+
+
+def _normalize_direction(direction: np.ndarray, fallback: tuple[float, float, float]) -> np.ndarray:
+    """Return a normalized 3D direction, falling back when the input is degenerate."""
+
+    vector = np.asarray(direction, dtype=float)
+    norm = float(np.linalg.norm(vector))
+    if norm > 1.0e-8:
+        return vector / norm
+    return np.asarray(fallback, dtype=float)
+
+
+def _estimate_centerline_direction(points: np.ndarray) -> np.ndarray:
+    """Estimate the dominant cable direction from the visible body positions."""
+
+    if len(points) >= 2:
+        direction = np.asarray(points[-1] - points[0], dtype=float)
+        planar = direction.copy()
+        planar[2] = 0.0
+        if np.linalg.norm(planar) > 1.0e-8:
+            return planar / np.linalg.norm(planar)
+        if np.linalg.norm(direction) > 1.0e-8:
+            return direction / np.linalg.norm(direction)
+
+        diffs = np.diff(points, axis=0)
+        if len(diffs) > 0:
+            lengths = np.linalg.norm(diffs, axis=1)
+            longest = int(np.argmax(lengths))
+            candidate = np.asarray(diffs[longest], dtype=float)
+            candidate[2] = 0.0
+            return _normalize_direction(candidate, (1.0, 0.0, 0.0))
+
+    return np.asarray((1.0, 0.0, 0.0), dtype=float)
+
+
+def _set_ribbon_camera(viewer, points: np.ndarray, extra_points: np.ndarray | None = None) -> None:
+    """Frame a flat ribbon from an oblique angle so its width reads clearly."""
+
+    scene_points = points if extra_points is None else np.vstack([points, extra_points])
+    center = scene_points.mean(axis=0)
+    zmin = float(scene_points[:, 2].min())
+    zmax = float(scene_points[:, 2].max())
+    span_x = float(scene_points[:, 0].max() - scene_points[:, 0].min())
+    span_y = float(scene_points[:, 1].max() - scene_points[:, 1].min())
+    span_z = float(scene_points[:, 2].max() - scene_points[:, 2].min())
+    span = max(span_x, span_y, span_z, 0.8)
+
+    tangent = _estimate_centerline_direction(points)
+    up = np.asarray((0.0, 0.0, 1.0), dtype=float)
+    width_axis = _normalize_direction(np.cross(up, tangent), (0.0, 1.0, 0.0))
+
+    camera_pos = wp.vec3(
+        float(center[0] - tangent[0] * 0.95 * span - width_axis[0] * 0.10 * span),
+        float(center[1] - tangent[1] * 0.95 * span - width_axis[1] * 0.10 * span),
+        float(zmax + 0.85 * span),
+    )
+    target = wp.vec3(float(center[0]), float(center[1]), float(0.5 * (zmin + zmax)))
+    _set_camera_look_at(viewer, camera_pos, target, label="ribbon camera")
+
+
+def _box_corners(center: tuple[float, float, float], hx: float, hy: float, hz: float) -> np.ndarray:
+    """Return the 8 world-space corners of an axis-aligned box."""
+
+    cx, cy, cz = center
+    return np.asarray(
+        [
+            (cx + sx * hx, cy + sy * hy, cz + sz * hz)
+            for sx in (-1.0, 1.0)
+            for sy in (-1.0, 1.0)
+            for sz in (-1.0, 1.0)
+        ],
+        dtype=float,
+    )
+
+
+def _compute_obstacle_box_center(points: np.ndarray, hz: float) -> tuple[float, float, float]:
+    """Compute the static obstacle-box center used by the simple-cable builder."""
+
+    return (
+        float((points[:, 0].min() + points[:, 0].max()) * 0.5),
+        float(points[:, 1].mean()),
+        float(hz),
+    )
+
+
+def _set_obstacle_camera(
+    viewer,
+    points: np.ndarray,
+    *,
+    obstacle_box_hx: float,
+    obstacle_box_hy: float,
+    obstacle_box_hz: float,
+) -> None:
+    """Frame a diagonal camera for cable-on-box scenarios."""
+
+    box_center = _compute_obstacle_box_center(points, float(obstacle_box_hz))
+    scene_points = np.vstack(
+        [
+            points,
+            _box_corners(
+                box_center,
+                float(obstacle_box_hx),
+                float(obstacle_box_hy),
+                float(obstacle_box_hz),
+            ),
+        ]
+    )
+    cx = float(scene_points[:, 0].mean())
+    cy = float(scene_points[:, 1].mean())
+    zmin = float(scene_points[:, 2].min())
+    zmax = float(scene_points[:, 2].max())
+    box_top_z = box_center[2] + float(obstacle_box_hz)
+    span_x = float(scene_points[:, 0].max() - scene_points[:, 0].min())
+    span_y = float(scene_points[:, 1].max() - scene_points[:, 1].min())
+    span = max(span_x, span_y, 2.0 * obstacle_box_hx, 2.0 * obstacle_box_hy, 0.8)
+    target = wp.vec3(
+        cx,
+        cy,
+        0.5 * (0.5 * (zmin + zmax) + box_top_z),
+    )
+    camera_pos = wp.vec3(
+        cx - 0.55 * span,
+        cy - 0.70 * span,
+        max(zmax, box_top_z) + 0.95 * span,
+    )
+    _set_camera_look_at(viewer, camera_pos, target, label="obstacle camera")
+
+
+def _apply_simple_cable_shape_colors(model: newton.Model) -> None:
+    """Apply high-contrast colors so simple cable scenes are easier to inspect."""
+
+    shape_body = model.shape_body.numpy()
+    shape_color = model.shape_color.numpy().copy()
+    shape_labels = list(getattr(model, "shape_label", []))
+
+    for shape_index, body_index in enumerate(shape_body.tolist()):
+        label = shape_labels[shape_index] if shape_index < len(shape_labels) else ""
+        if body_index >= 0:
+            shape_color[shape_index] = np.array(_CABLE_SHAPE_COLOR, dtype=np.float32)
+        elif "cable_drop_box" in label:
+            shape_color[shape_index] = np.array(_OBSTACLE_SHAPE_COLOR, dtype=np.float32)
+
+    model.shape_color.assign(shape_color)
+
+
+def _shift_points_z(points: list[wp.vec3], dz: float) -> np.ndarray:
+    """Return a shifted copy of centerline points as a NumPy array."""
+
+    point_array = np.asarray(
+        [(float(point[0]), float(point[1]), float(point[2])) for point in points],
+        dtype=float,
+    )
+    point_array[:, 2] += float(dz)
+    return point_array
 
 
 def _resolve_input_usd(
@@ -148,6 +327,12 @@ def _reconstruct_cable_points_from_bundle(bundle, params: dict[str, object]) -> 
     """Reconstruct centerline points from the loaded cable body transforms."""
 
     body_q = bundle.model.body_q.numpy()
+    return _reconstruct_cable_points_from_body_q(body_q, params)
+
+
+def _reconstruct_cable_points_from_body_q(body_q: np.ndarray, params: dict[str, object]) -> list[wp.vec3]:
+    """Reconstruct centerline points from body transforms."""
+
     if body_q.shape[0] <= 0:
         raise RuntimeError("Cable bundle has zero rigid bodies")
 
@@ -168,6 +353,62 @@ def _reconstruct_cable_points_from_bundle(bundle, params: dict[str, object]) -> 
     return points
 
 
+def _build_ribbon_overlay_mesh(
+    body_q: np.ndarray,
+    params: dict[str, object],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build a thin ribbon surface from the current cable state."""
+
+    points = _reconstruct_cable_points_from_body_q(body_q, params)
+    width = float(params["width"])
+    thickness = float(params["thickness"])
+    half_width = 0.5 * width
+    half_thickness = 0.5 * thickness
+    bias = max(1.0e-4, 0.05 * thickness)
+    segment_count = len(points) - 1
+
+    if segment_count < 1:
+        raise RuntimeError("Ribbon overlay requires at least one segment")
+
+    segment_rotations: list[wp.quat] = [
+        wp.quat(
+            float(body_q[index, 3]),
+            float(body_q[index, 4]),
+            float(body_q[index, 5]),
+            float(body_q[index, 6]),
+        )
+        for index in range(segment_count)
+    ]
+
+    vertices: list[tuple[float, float, float]] = []
+    for point_index, point in enumerate(points):
+        rotation = segment_rotations[min(point_index, segment_count - 1)]
+        width_axis = wp.normalize(wp.quat_rotate(rotation, wp.vec3(1.0, 0.0, 0.0)))
+        thickness_axis = wp.normalize(wp.quat_rotate(rotation, wp.vec3(0.0, 1.0, 0.0)))
+        center = point + thickness_axis * (half_thickness + bias)
+        left = center - width_axis * half_width
+        right = center + width_axis * half_width
+        vertices.append((float(left[0]), float(left[1]), float(left[2])))
+        vertices.append((float(right[0]), float(right[1]), float(right[2])))
+
+    indices: list[int] = []
+    for segment_index in range(segment_count):
+        ring_start = 2 * segment_index
+        next_ring_start = ring_start + 2
+        indices.extend(
+            [
+                ring_start,
+                ring_start + 1,
+                next_ring_start + 1,
+                ring_start,
+                next_ring_start + 1,
+                next_ring_start,
+            ]
+        )
+
+    return np.asarray(vertices, dtype=np.float32), np.asarray(indices, dtype=np.int32)
+
+
 def _build_simple_cable_model(
     *,
     bundle,
@@ -185,8 +426,9 @@ def _build_simple_cable_model(
     if not points:
         points = _reconstruct_cable_points_from_bundle(bundle, params)
 
-    quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+    quaternions = create_cable_quaternions(
         points,
+        cross_section_type=str(params["crossSectionType"]),
         twist_total=float(params["twistTotal"]),
     )
     cfg = newton.ModelBuilder.ShapeConfig(density=float(params["density"]))
@@ -227,6 +469,7 @@ def _build_simple_cable_model(
                 hx=float(obstacle_box_hx),
                 hy=float(obstacle_box_hy),
                 hz=float(obstacle_box_hz),
+                color=_OBSTACLE_SHAPE_COLOR,
                 label="cable_drop_box",
             )
         try:
@@ -260,6 +503,7 @@ class Example:
         contact_mu: float | None = None,
         contact_margin: float | None = None,
         contact_gap: float | None = None,
+        show_contacts: bool = False,
     ):
         self.viewer = viewer
         self.usd_path = usd_path
@@ -285,6 +529,7 @@ class Example:
         self.obstacle_box_hy = float(obstacle_box_hy)
         self.obstacle_box_hz = float(obstacle_box_hz)
         self._solver_kwargs = _filter_solver_kwargs(type(bundle.solver), bundle.solver_params)
+        self._show_ribbon_overlay = False
 
         if self.scene_kind != "cable_assembly" and self.obstacle_box:
             self.model = _build_simple_cable_model(
@@ -350,10 +595,14 @@ class Example:
         self.contact_mu = contact_mu
         self.contact_margin = contact_margin
         self.contact_gap = contact_gap
+        self.show_contacts = bool(show_contacts)
         self._apply_contact_tuning()
 
         if extra_drop_height:
             self._shift_cable_z(float(extra_drop_height))
+
+        if self.scene_kind != "cable_assembly":
+            _apply_simple_cable_shape_colors(self.model)
 
         anchored_body_indices: list[int] = []
         if self.anchor_first:
@@ -389,6 +638,8 @@ class Example:
 
         self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
+        if self.scene_kind != "cable_assembly" and str(self.cable_params.get("crossSectionType")) == "flatRect":
+            self._show_ribbon_overlay = True
 
         self.capture()
         self._print_bundle_summary(extra_drop_height)
@@ -440,11 +691,42 @@ class Example:
         _assign_full("shape_gap", self.contact_gap)
 
     def _shift_cable_z(self, dz: float) -> None:
-        """Lift every cable segment by ``dz`` in world +Z."""
-        for state in (self.state_0, self.state_1):
-            body_q = state.body_q.numpy().copy()
+        """Lift every cable segment by ``dz`` in world +Z.
+
+        For VBD rigid bodies this is a teleport, so the model rest pose,
+        previous-step pose, and velocities need to be kept in sync as well.
+        """
+
+        def _shift_body_q(array: wp.array[wp.transform] | None) -> np.ndarray | None:
+            if array is None:
+                return None
+            body_q = array.numpy().copy()
             body_q[:, 2] += dz
-            state.body_q.assign(body_q)
+            array.assign(body_q)
+            return body_q
+
+        def _zero_body_qd(array: wp.array | None) -> None:
+            if array is None:
+                return
+            body_qd = array.numpy().copy()
+            body_qd[...] = 0.0
+            array.assign(body_qd)
+
+        shifted_body_q = None
+        for state in (self.state_0, self.state_1):
+            shifted_body_q = _shift_body_q(state.body_q)
+            _zero_body_qd(state.body_qd)
+
+        _shift_body_q(getattr(self.model, "body_q", None))
+
+        body_q_prev = getattr(self.solver, "body_q_prev", None)
+        if body_q_prev is not None:
+            _shift_body_q(body_q_prev)
+
+        # Keep the inertial target aligned with the teleported state when present.
+        body_inertia_q = getattr(self.solver, "body_inertia_q", None)
+        if body_inertia_q is not None and shifted_body_q is not None:
+            body_inertia_q.assign(shifted_body_q)
 
     def _make_body_kinematic(self, body_index: int) -> None:
         """Freeze one cable segment by zeroing its mass and inertia."""
@@ -526,9 +808,19 @@ class Example:
             f"torsion={float(params['torsionDamping']):.3g}"
         )
         if self.centerline_points:
+            shifted_points = _shift_points_z(self.centerline_points, extra_drop_height)
+            start_point = shifted_points[0]
+            end_point = shifted_points[-1]
             print(
                 f"        authored centerline points={len(self.centerline_points)}  "
                 f"dropHeight={float(params['dropHeight']):.3f}m  twistTotal={float(params['twistTotal']):.3f}rad"
+            )
+            print(
+                "        centerline: "
+                f"start=({start_point[0]:.3f},{start_point[1]:.3f},{start_point[2]:.3f})  "
+                f"end=({end_point[0]:.3f},{end_point[1]:.3f},{end_point[2]:.3f})  "
+                f"bounds_min=({shifted_points[:, 0].min():.3f},{shifted_points[:, 1].min():.3f},{shifted_points[:, 2].min():.3f})  "
+                f"bounds_max=({shifted_points[:, 0].max():.3f},{shifted_points[:, 1].max():.3f},{shifted_points[:, 2].max():.3f})"
             )
         print(
             "        contact: "
@@ -537,10 +829,23 @@ class Example:
             f"margin={self.contact_margin!s}  gap={self.contact_gap!s}"
         )
         if self.obstacle_box:
+            if self.centerline_points:
+                shifted_points = _shift_points_z(self.centerline_points, extra_drop_height)
+                box_center = _compute_obstacle_box_center(shifted_points, self.obstacle_box_hz)
+            else:
+                body_points = self.state_0.body_q.numpy()[:, 0:3]
+                box_center = _compute_obstacle_box_center(body_points, self.obstacle_box_hz)
             print(
                 "        obstacle_box: "
                 f"hx={self.obstacle_box_hx:.3f}m  hy={self.obstacle_box_hy:.3f}m  hz={self.obstacle_box_hz:.3f}m"
             )
+            print(
+                "        obstacle_box_pose: "
+                f"center=({box_center[0]:.3f},{box_center[1]:.3f},{box_center[2]:.3f})  "
+                f"top_z={box_center[2] + self.obstacle_box_hz:.3f}m"
+            )
+        if self._show_ribbon_overlay:
+            print("        ribbon_overlay: enabled")
 
     def simulate(self) -> None:
         for _ in range(self.sim_substeps):
@@ -572,7 +877,22 @@ class Example:
             return
         self.viewer.begin_frame(self.sim_time)
         self.viewer.log_state(self.state_0)
-        self.viewer.log_contacts(self.contacts, self.state_0)
+        if self._show_ribbon_overlay:
+            vertices, indices = _build_ribbon_overlay_mesh(
+                self.state_0.body_q.numpy(),
+                self.cable_params,
+            )
+            self.viewer.log_mesh(
+                "palatial/ribbon_overlay",
+                wp.array(vertices, dtype=wp.vec3, device=self.model.device),
+                wp.array(indices, dtype=wp.int32, device=self.model.device),
+                color=_RIBBON_OVERLAY_COLOR,
+                backface_culling=False,
+                roughness=0.85,
+                metallic=0.0,
+            )
+        if self.show_contacts:
+            self.viewer.log_contacts(self.contacts, self.state_0)
         self.viewer.end_frame()
 
 
@@ -647,6 +967,12 @@ def main(argv=None) -> int:
     parser.add_argument("--contact-margin", type=float, default=None, help="Override per-shape contact margin [m].")
     parser.add_argument("--contact-gap", type=float, default=None, help="Override per-shape contact gap [m].")
     parser.add_argument(
+        "--show-contacts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Render contact markers in the viewer. Disabled by default to keep cable scenes clearer and lighter.",
+    )
+    parser.add_argument(
         "--no-auto-camera",
         action="store_true",
         help="Skip the recording auto-camera so the viewer keeps its default camera",
@@ -688,13 +1014,41 @@ def main(argv=None) -> int:
         contact_mu=args.contact_mu,
         contact_margin=args.contact_margin,
         contact_gap=args.contact_gap,
+        show_contacts=args.show_contacts,
     )
 
     body_points = example.state_0.body_q.numpy()[:, 0:3]
-    if args.top_view and hasattr(example.viewer, "set_camera"):
-        _set_top_camera(example.viewer, body_points)
-    elif args.record_mp4 and not args.no_auto_camera and hasattr(example.viewer, "set_camera"):
-        _set_front_camera(example.viewer, body_points)
+    if hasattr(example.viewer, "set_camera"):
+        cable_kind = str(example.cable_params.get("crossSectionType", "")) if example.scene_kind != "cable_assembly" else ""
+        if args.top_view:
+            if args.obstacle_box:
+                box_center = _compute_obstacle_box_center(body_points, args.obstacle_box_hz)
+                scene_points = np.vstack(
+                    [
+                        body_points,
+                        _box_corners(box_center, args.obstacle_box_hx, args.obstacle_box_hy, args.obstacle_box_hz),
+                    ]
+                )
+                _set_top_camera(example.viewer, scene_points)
+            else:
+                _set_top_camera(example.viewer, body_points)
+        elif not args.no_auto_camera and cable_kind == "flatRect":
+            if args.obstacle_box:
+                box_center = _compute_obstacle_box_center(body_points, args.obstacle_box_hz)
+                extra_points = _box_corners(box_center, args.obstacle_box_hx, args.obstacle_box_hy, args.obstacle_box_hz)
+                _set_ribbon_camera(example.viewer, body_points, extra_points)
+            else:
+                _set_ribbon_camera(example.viewer, body_points)
+        elif not args.no_auto_camera and args.obstacle_box:
+            _set_obstacle_camera(
+                example.viewer,
+                body_points,
+                obstacle_box_hx=args.obstacle_box_hx,
+                obstacle_box_hy=args.obstacle_box_hy,
+                obstacle_box_hz=args.obstacle_box_hz,
+            )
+        elif not args.no_auto_camera:
+            _set_front_camera(example.viewer, body_points)
 
     ffmpeg_proc = None
     if args.record_mp4:

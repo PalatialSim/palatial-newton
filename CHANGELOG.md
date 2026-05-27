@@ -60,6 +60,10 @@
 
 - Route `shape_type="box"` rods and palatial `flatRect` cables through box
   segment geometry instead of collapsing them to capsule proxies
+- Initialize generated and loaded palatial `flatRect` ribbons with an extra
+  +90 degree roll about the cable tangent so their broad face starts upward;
+  scripts that previously pre-rolled the same ribbon should subtract that
+  offset to preserve the old edge-up orientation
 - Use pre-computed local AABB for `CONVEX_MESH` shapes in `compute_shape_aabbs`, avoiding a per-frame support-function AABB computation
 - Build mesh SDFs via the texture-based sparse path only; sample via `SDF.texture_data` instead of `SDF.sparse_volume` / `SDF.coarse_volume`.
 - Change implicit MPM default `solver` from `"gs"` to `"auto"`, which selects `"gs"` for trilinear bases and `"gs-batched"` for higher-order ones. Set `solver="gs"` explicitly to restore the previous behavior.

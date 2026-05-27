@@ -341,6 +341,7 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     from newton import utils as newton_utils
 
     from .cable import (
+        create_cable_quaternions,
         extract_cable_points,
         find_cable_prim_path,
         get_cable_reference_transform_matrix,
@@ -387,8 +388,9 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     if len(points) < 2:
         raise RuntimeError(f"Cable asset {usd_path} must provide at least 2 centerline points")
 
-    quaternions = newton_utils.create_parallel_transport_cable_quaternions(
+    quaternions = create_cable_quaternions(
         points,
+        cross_section_type=str(params["crossSectionType"]),
         twist_total=float(params["twistTotal"]),
     )
     cfg = newton.ModelBuilder.ShapeConfig(density=float(params["density"]))

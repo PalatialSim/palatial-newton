@@ -17,9 +17,11 @@ from newton.examples.palatial.cable_presets import (
     get_anisotropic_cable_preset,
     list_anisotropic_cable_presets,
 )
-from newton.examples.palatial.example_palatial_cable import _resolve_input_usd
+import newton.viewer as viewer
+from newton.examples.palatial.example_palatial_cable import Example, _resolve_input_usd
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import (
+    create_cable_quaternions,
     extract_cable_points,
     find_cable_centerline_prim_path,
     find_cable_prim_path,
@@ -414,8 +416,9 @@ class TestPalatialCable(unittest.TestCase):
             bundle = load(str(usd_path), device="cpu")
             body_q = bundle.model.body_q.numpy()
             expected_points = extract_cable_points(str(usd_path), world_space=True)
-            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+            expected_quaternions = create_cable_quaternions(
                 expected_points,
+                cross_section_type="flatRect",
                 twist_total=0.25,
             )
 
@@ -447,8 +450,9 @@ class TestPalatialCable(unittest.TestCase):
                 length=1.5,
                 num_segments=3,
             )
-            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+            expected_quaternions = create_cable_quaternions(
                 expected_points,
+                cross_section_type="roundSolid",
                 twist_total=0.5,
             )
 
@@ -492,8 +496,9 @@ class TestPalatialCable(unittest.TestCase):
                 wp.vec3(*matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2]))))
                 for point in local_points
             ]
-            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+            expected_quaternions = create_cable_quaternions(
                 expected_points,
+                cross_section_type="roundSolid",
                 twist_total=0.5,
             )
 
@@ -546,6 +551,43 @@ class TestPalatialCable(unittest.TestCase):
             shape_types = bundle.model.shape_type.numpy().tolist()
             self.assertEqual(shape_types.count(int(newton.GeoType.BOX)), 16)
             self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 0)
+
+    def test_create_cable_quaternions_rolls_flat_rect_ribbon_face_up(self):
+        points = newton.utils.create_straight_cable_points(
+            start=wp.vec3(0.0, 0.0, 0.0),
+            direction=wp.vec3(1.0, 0.0, 0.0),
+            length=1.0,
+            num_segments=2,
+        )
+
+        quaternion = create_cable_quaternions(
+            points,
+            cross_section_type="flatRect",
+            twist_total=0.0,
+        )[0]
+
+        width_axis = wp.quat_rotate(quaternion, wp.vec3(1.0, 0.0, 0.0))
+        thickness_axis = wp.quat_rotate(quaternion, wp.vec3(0.0, 1.0, 0.0))
+        tangent_axis = wp.quat_rotate(quaternion, wp.vec3(0.0, 0.0, 1.0))
+
+        np.testing.assert_allclose(
+            np.array(width_axis, dtype=np.float32),
+            np.array([0.0, 1.0, 0.0], dtype=np.float32),
+            atol=1.0e-6,
+            rtol=0.0,
+        )
+        np.testing.assert_allclose(
+            np.array(thickness_axis, dtype=np.float32),
+            np.array([0.0, 0.0, 1.0], dtype=np.float32),
+            atol=1.0e-6,
+            rtol=0.0,
+        )
+        np.testing.assert_allclose(
+            np.array(tangent_axis, dtype=np.float32),
+            np.array([1.0, 0.0, 0.0], dtype=np.float32),
+            atol=1.0e-6,
+            rtol=0.0,
+        )
 
     def test_generator_can_author_round_asset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -665,6 +707,53 @@ class TestPalatialCable(unittest.TestCase):
                 bundle.model.joint_type.numpy().tolist(),
                 [int(newton.JointType.ANISOTROPIC_CABLE)] * 15,
             )
+
+    def test_example_extra_drop_height_does_not_launch_unanchored_cable(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            usd_path = Path(tmp_dir) / "free_drop.newton.usda"
+            author_cable_usd(
+                usd_path,
+                cross_section_type="flatRect",
+                length=1.2,
+                segment_count=12,
+                drop_height=0.55,
+                width=0.04,
+                thickness=0.01,
+                stretch_stiffness=1.0e5,
+                stretch_damping=0.05,
+                compress_stiffness=1.0e5,
+                compress_damping=0.05,
+                bend_y_stiffness=8.0e2,
+                bend_y_damping=0.1,
+                bend_z_stiffness=1.6e3,
+                bend_z_damping=0.1,
+                torsion_stiffness=4.0e2,
+                torsion_damping=0.05,
+                solver="vbd_palatial",
+                solver_substeps=6,
+            )
+
+            example = Example(
+                viewer.ViewerNull(),
+                str(usd_path),
+                device="cpu",
+                solver_override="vbd_palatial",
+                substeps=6,
+                anchor_first=False,
+                spin_rate=0.0,
+                extra_drop_height=0.25,
+                obstacle_box=True,
+                obstacle_box_hx=0.14,
+                obstacle_box_hy=0.10,
+                obstacle_box_hz=0.08,
+            )
+
+            z0 = float(example.state_0.body_q.numpy()[:, 2].mean())
+            example.step()
+            z1 = float(example.state_0.body_q.numpy()[:, 2].mean())
+
+            self.assertTrue(np.isfinite(z1))
+            self.assertLess(abs(z1 - z0), 0.05)
 
 
 if __name__ == "__main__":

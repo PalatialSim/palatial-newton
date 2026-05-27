@@ -8,6 +8,9 @@ import newton  # noqa: F401
 
 from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
 
+import math
+from collections.abc import Sequence
+
 import warp as wp
 from pxr import Gf, Usd, UsdGeom, UsdShade
 
@@ -36,6 +39,48 @@ DEFAULTS = {
     "torsionStiffness": 1.0e3,
     "torsionDamping": 0.0,
 }
+
+
+def create_cable_quaternions(
+    points: Sequence[wp.vec3],
+    *,
+    cross_section_type: str = "roundSolid",
+    twist_total: float = 0.0,
+) -> list[wp.quat]:
+    """Create per-segment cable orientations for a Palatial cable asset.
+
+    This helper builds the usual parallel-transport tangent frames from the
+    cable centerline and then applies the Palatial ribbon convention for
+    ``flatRect`` cables: an additional +90 degree roll about each segment
+    tangent so the wide face starts upward for a straight cable authored along
+    world +X.
+
+    Args:
+        points: Cable centerline points in world space.
+        cross_section_type: Cable cross-section token. ``"flatRect"`` applies
+            the ribbon roll offset; other values preserve the round-rod frame.
+        twist_total: Total twist [rad] distributed along the cable tangent.
+
+    Returns:
+        Per-segment world-space quaternions aligned to the cable centerline.
+    """
+
+    quaternions = list(
+        newton.utils.create_parallel_transport_cable_quaternions(
+            points,
+            twist_total=float(twist_total),
+        )
+    )
+    if str(cross_section_type) != "flatRect":
+        return quaternions
+
+    ribbon_roll = 0.5 * math.pi
+    out: list[wp.quat] = []
+    for quaternion in quaternions:
+        tangent = wp.normalize(wp.quat_rotate(quaternion, wp.vec3(0.0, 0.0, 1.0)))
+        roll = wp.quat_from_axis_angle(tangent, ribbon_roll)
+        out.append(wp.mul(roll, quaternion))
+    return out
 
 
 def _applied_schema_tokens(prim: Usd.Prim) -> set[str]:

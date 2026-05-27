@@ -17,7 +17,7 @@ from newton.examples.palatial.cable_presets import (
     get_anisotropic_cable_preset,
     list_anisotropic_cable_presets,
 )
-from newton.palatial import read_cable_params
+from newton.palatial import create_cable_quaternions, read_cable_params
 
 DEFAULT_OUTPUT_PATH = Path("palatial_cable_example.newton.usda")
 DEFAULT_ROOT_PATH = "/Cable"
@@ -267,8 +267,9 @@ def _author_surface_mesh(
 ) -> None:
     points_wp = _as_wp_points(centerline_points)
     quaternions = list(
-        newton.utils.create_parallel_transport_cable_quaternions(
+        create_cable_quaternions(
             points_wp,
+            cross_section_type=cross_section_type,
             twist_total=float(twist_total),
         )
     )

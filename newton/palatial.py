@@ -22,6 +22,7 @@ can distinguish plain cable bundles from assembly bundles.
 
 from ._src.palatial.load import NewtonBundle, load
 from ._src.palatial.cable import (
+    create_cable_quaternions,
     extract_cable_points,
     find_cable_centerline_prim_path,
     find_cable_prim_path,
@@ -33,6 +34,7 @@ from ._src.palatial.cloth import find_cloth_prim_path
 __all__ = [
     "NewtonBundle",
     "load",
+    "create_cable_quaternions",
     "extract_cable_points",
     "find_cable_centerline_prim_path",
     "find_cable_prim_path",
