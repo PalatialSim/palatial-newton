@@ -179,6 +179,94 @@ The same example also accepts the v1 Power cable assembly source USDA:
   --device cuda:0 --gui --substeps 10
 ```
 
+### Scenario recipes (3 boundary conditions x 3 input types)
+
+Generate the simple inputs first:
+
+```bash
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  D:\Temp\flat_default.newton.usda \
+  --cross-section-type flatRect \
+  --length 1.5 --segment-count 16 \
+  --drop-height 0.3 \
+  --width 0.012 --thickness 0.004 \
+  --stretch-stiffness 1.0e5 --stretch-damping 0.05 \
+  --compress-stiffness 1.0e5 --compress-damping 0.05 \
+  --bend-y-stiffness 8.0e2 --bend-y-damping 0.1 \
+  --bend-z-stiffness 1.6e3 --bend-z-damping 0.1 \
+  --torsion-stiffness 4.0e2 --torsion-damping 0.05 \
+  --solver vbd_palatial --solver-substeps 4
+
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  D:\Temp\round_default.newton.usda \
+  --cross-section-type roundSolid \
+  --length 1.6 --segment-count 16 \
+  --drop-height 0.3 \
+  --radius 0.006 \
+  --stretch-stiffness 1.0e5 --stretch-damping 0.05 \
+  --compress-stiffness 1.0e5 --compress-damping 0.05 \
+  --bend-y-stiffness 1.2e3 --bend-y-damping 0.1 \
+  --bend-z-stiffness 1.2e3 --bend-z-damping 0.1 \
+  --torsion-stiffness 2.0e2 --torsion-damping 0.05 \
+  --solver vbd_palatial --solver-substeps 4
+```
+
+1. One end fixed, natural bend
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\flat_default.newton.usda \
+  --device cuda:0 --gui --substeps 4 --spin-rate 0.0
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\round_default.newton.usda \
+  --device cuda:0 --gui --substeps 4 --spin-rate 0.0
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\palatial-sim-newton-solvers-usd\02_WorkingFiles\Cables.usda \
+  --device cuda:0 --gui --substeps 10 --spin-rate 0.0
+```
+
+2. Both ends fixed and twisted
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\flat_default.newton.usda \
+  --device cuda:0 --gui --substeps 4 \
+  --anchor-last --spin-rate 0.4 --spin-last-rate -0.4
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\round_default.newton.usda \
+  --device cuda:0 --gui --substeps 5 \
+  --anchor-last --spin-rate 0.4 --spin-last-rate -0.4
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\palatial-sim-newton-solvers-usd\02_WorkingFiles\Cables.usda \
+  --device cuda:0 --gui --substeps 10 \
+  --anchor-last --spin-rate 0.3 --spin-last-rate -0.3
+```
+
+3. Drop onto a box obstacle
+
+```bash
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\flat_default.newton.usda \
+  --device cuda:0 --gui --substeps 6 \
+  --no-anchor-first --spin-rate 0.0 \
+  --obstacle-box --extra-drop-height 0.2
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\Temp\round_default.newton.usda \
+  --device cuda:0 --gui --substeps 6 \
+  --no-anchor-first --spin-rate 0.0 \
+  --obstacle-box --extra-drop-height 0.2
+
+... -m newton.examples.palatial.example_palatial_cable \
+  D:\palatial-sim-newton-solvers-usd\02_WorkingFiles\Cables.usda \
+  --device cuda:0 --gui --substeps 10 \
+  --no-anchor-first --spin-rate 0.0 --extra-drop-height 0.2
+```
+
 ---
 
 ## Camera conventions

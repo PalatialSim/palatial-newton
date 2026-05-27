@@ -31,6 +31,10 @@ DEFAULT_SIMPLE_CABLE_CONTACT_KF = 1.0e3
 DEFAULT_SIMPLE_CABLE_CONTACT_MU = 1.0
 DEFAULT_SIMPLE_CABLE_CONTACT_MARGIN = 2.5e-4
 DEFAULT_SIMPLE_CABLE_CONTACT_GAP = 1.0e-3
+DEFAULT_OBSTACLE_BOX_HX = 0.18
+DEFAULT_OBSTACLE_BOX_HY = 0.12
+DEFAULT_OBSTACLE_BOX_HZ = 0.10
+_IDENTITY_QUAT = wp.quat(0.0, 0.0, 0.0, 1.0)
 
 
 @wp.kernel
@@ -140,6 +144,98 @@ def _resolve_input_usd(
     return str(generated_path)
 
 
+def _reconstruct_cable_points_from_bundle(bundle, params: dict[str, object]) -> list[wp.vec3]:
+    """Reconstruct centerline points from the loaded cable body transforms."""
+
+    body_q = bundle.model.body_q.numpy()
+    if body_q.shape[0] <= 0:
+        raise RuntimeError("Cable bundle has zero rigid bodies")
+
+    points = [
+        wp.vec3(float(body_q[index, 0]), float(body_q[index, 1]), float(body_q[index, 2]))
+        for index in range(body_q.shape[0])
+    ]
+    segment_count = max(1, int(params["segmentCount"]))
+    segment_length = float(params["length"]) / float(segment_count)
+    last_rotation = wp.quat(
+        float(body_q[-1, 3]),
+        float(body_q[-1, 4]),
+        float(body_q[-1, 5]),
+        float(body_q[-1, 6]),
+    )
+    tip_point = points[-1] + wp.quat_rotate(last_rotation, wp.vec3(0.0, 0.0, segment_length))
+    points.append(tip_point)
+    return points
+
+
+def _build_simple_cable_model(
+    *,
+    bundle,
+    usd_path: str,
+    params: dict[str, object],
+    device: str | None,
+    obstacle_box: bool,
+    obstacle_box_hx: float,
+    obstacle_box_hy: float,
+    obstacle_box_hz: float,
+) -> newton.Model:
+    """Build a simple cable model for the example, optionally with a static obstacle box."""
+
+    points = extract_cable_points(usd_path, world_space=True)
+    if not points:
+        points = _reconstruct_cable_points_from_bundle(bundle, params)
+
+    quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+        points,
+        twist_total=float(params["twistTotal"]),
+    )
+    cfg = newton.ModelBuilder.ShapeConfig(density=float(params["density"]))
+
+    with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
+        builder = newton.ModelBuilder()
+        builder.add_ground_plane()
+        shape_type = "box" if str(params["crossSectionType"]) == "flatRect" else "capsule"
+        builder.add_rod(
+            positions=points,
+            quaternions=quaternions,
+            radius=float(params["radius"]),
+            cfg=cfg,
+            stretch_stiffness=float(params["stretchStiffness"]),
+            stretch_damping=float(params["stretchDamping"]),
+            bend_y_stiffness=float(params["bendYStiffness"]),
+            bend_y_damping=float(params["bendYDamping"]),
+            bend_z_stiffness=float(params["bendZStiffness"]),
+            bend_z_damping=float(params["bendZDamping"]),
+            torsion_stiffness=float(params["torsionStiffness"]),
+            torsion_damping=float(params["torsionDamping"]),
+            closed=bool(params["closed"]),
+            label="cable",
+            shape_type=shape_type,
+            width=float(params["width"]),
+            thickness=float(params["thickness"]),
+        )
+        if obstacle_box:
+            point_array = np.asarray([(float(point[0]), float(point[1]), float(point[2])) for point in points], dtype=float)
+            box_center = wp.vec3(
+                float((point_array[:, 0].min() + point_array[:, 0].max()) * 0.5),
+                float(point_array[:, 1].mean()),
+                float(obstacle_box_hz),
+            )
+            builder.add_shape_box(
+                body=-1,
+                xform=wp.transform(box_center, _IDENTITY_QUAT),
+                hx=float(obstacle_box_hx),
+                hy=float(obstacle_box_hy),
+                hz=float(obstacle_box_hz),
+                label="cable_drop_box",
+            )
+        try:
+            builder.color()
+        except Exception:
+            pass
+        return builder.finalize()
+
+
 class Example:
     def __init__(
         self,
@@ -150,8 +246,14 @@ class Example:
         device: str | None = None,
         solver_override: str | None = None,
         anchor_first: bool = True,
+        anchor_last: bool = False,
         spin_rate: float = 0.5,
+        spin_last_rate: float = 0.0,
         extra_drop_height: float = 0.0,
+        obstacle_box: bool = False,
+        obstacle_box_hx: float = DEFAULT_OBSTACLE_BOX_HX,
+        obstacle_box_hy: float = DEFAULT_OBSTACLE_BOX_HY,
+        obstacle_box_hz: float = DEFAULT_OBSTACLE_BOX_HZ,
         contact_ke: float | None = None,
         contact_kd: float | None = None,
         contact_kf: float | None = None,
@@ -170,12 +272,6 @@ class Example:
 
         self.bundle = bundle
         self.scene_kind = bundle.scene_kind or bundle.body_type
-        self.model = bundle.model
-        self.solver = bundle.solver
-        self.state_0 = bundle.state_in
-        self.state_1 = bundle.state_out
-        self.control = bundle.control
-        self.contacts = bundle.model.contacts()
 
         if self.scene_kind == "cable_assembly":
             self.cable_params = {}
@@ -183,12 +279,50 @@ class Example:
         else:
             self.cable_params = read_cable_params(usd_path)
             self.centerline_points = extract_cable_points(usd_path, world_space=True)
-        self._solver_kwargs = _filter_solver_kwargs(type(self.solver), bundle.solver_params)
+
+        self.obstacle_box = bool(obstacle_box)
+        self.obstacle_box_hx = float(obstacle_box_hx)
+        self.obstacle_box_hy = float(obstacle_box_hy)
+        self.obstacle_box_hz = float(obstacle_box_hz)
+        self._solver_kwargs = _filter_solver_kwargs(type(bundle.solver), bundle.solver_params)
+
+        if self.scene_kind != "cable_assembly" and self.obstacle_box:
+            self.model = _build_simple_cable_model(
+                bundle=bundle,
+                usd_path=usd_path,
+                params=self.cable_params,
+                device=device,
+                obstacle_box=self.obstacle_box,
+                obstacle_box_hx=self.obstacle_box_hx,
+                obstacle_box_hy=self.obstacle_box_hy,
+                obstacle_box_hz=self.obstacle_box_hz,
+            )
+            self.solver = type(bundle.solver)(self.model, **self._solver_kwargs)
+            self.state_0 = self.model.state()
+            self.state_1 = self.model.state()
+            self.control = self.model.control()
+            self.contacts = self.model.contacts()
+            self.bundle.model = self.model
+            self.bundle.solver = self.solver
+            self.bundle.state_in = self.state_0
+            self.bundle.state_out = self.state_1
+            self.bundle.control = self.control
+        else:
+            self.model = bundle.model
+            self.solver = bundle.solver
+            self.state_0 = bundle.state_in
+            self.state_1 = bundle.state_out
+            self.control = bundle.control
+            self.contacts = self.model.contacts()
 
         self.anchor_first = bool(anchor_first)
+        self.anchor_last = bool(anchor_last)
         self.spin_rate = float(spin_rate)
+        self.spin_last_rate = float(spin_last_rate)
         if abs(self.spin_rate) > 0.0 and not self.anchor_first:
             raise RuntimeError("--spin-rate requires --anchor-first so the driven segment stays kinematic")
+        if abs(self.spin_last_rate) > 0.0 and not self.anchor_last:
+            raise RuntimeError("--spin-last-rate requires --anchor-last so the driven segment stays kinematic")
 
         body_count = int(self.model.body_count)
         if body_count <= 0:
@@ -221,8 +355,14 @@ class Example:
         if extra_drop_height:
             self._shift_cable_z(float(extra_drop_height))
 
+        anchored_body_indices: list[int] = []
         if self.anchor_first:
-            self._make_body_kinematic(self.anchor_body_index)
+            anchored_body_indices.append(self.anchor_body_index)
+        if self.anchor_last and self.tip_body_index not in anchored_body_indices:
+            anchored_body_indices.append(self.tip_body_index)
+        for body_index in anchored_body_indices:
+            self._make_body_kinematic(body_index)
+        if anchored_body_indices:
             self._rebuild_solver()
 
         self.fps = bundle.fps
@@ -235,8 +375,17 @@ class Example:
         self.sim_time = 0.0
 
         body_device = self.state_0.body_q.device if self.state_0.body_q is not None else self.model.device
-        self.spin_body_indices = wp.array([self.anchor_body_index], dtype=wp.int32, device=body_device)
-        self.spin_rates = wp.array([self.spin_rate], dtype=wp.float32, device=body_device)
+        spin_rate_by_body: dict[int, float] = {}
+        if abs(self.spin_rate) > 0.0:
+            spin_rate_by_body[self.anchor_body_index] = spin_rate_by_body.get(self.anchor_body_index, 0.0) + self.spin_rate
+        if abs(self.spin_last_rate) > 0.0:
+            spin_rate_by_body[self.tip_body_index] = spin_rate_by_body.get(self.tip_body_index, 0.0) + self.spin_last_rate
+        if spin_rate_by_body:
+            self.spin_body_indices = wp.array(list(spin_rate_by_body.keys()), dtype=wp.int32, device=body_device)
+            self.spin_rates = wp.array(list(spin_rate_by_body.values()), dtype=wp.float32, device=body_device)
+        else:
+            self.spin_body_indices = wp.zeros(0, dtype=wp.int32, device=body_device)
+            self.spin_rates = wp.zeros(0, dtype=wp.float32, device=body_device)
 
         self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
@@ -326,7 +475,8 @@ class Example:
             )
             print(
                 f"        connector_meshes={mesh_count}  static_boxes={box_count}  "
-                f"anchor_first={self.anchor_first}  spin_rate={self.spin_rate:.3f}rad/s  "
+                f"anchor_first={self.anchor_first}  anchor_last={self.anchor_last}  "
+                f"spin_rate={self.spin_rate:.3f}rad/s  spin_last_rate={self.spin_last_rate:.3f}rad/s  "
                 f"extra_drop={extra_drop_height:.3f}m"
             )
             if any(value is not None for value in (self.contact_ke, self.contact_kd, self.contact_kf, self.contact_mu)):
@@ -357,7 +507,8 @@ class Example:
         print(
             f"        {cross_section_summary}  "
             f"length={float(params['length']):.4f}m  segments={int(params['segmentCount'])}  "
-            f"anchor_first={self.anchor_first}  spin_rate={self.spin_rate:.3f}rad/s  "
+            f"anchor_first={self.anchor_first}  anchor_last={self.anchor_last}  "
+            f"spin_rate={self.spin_rate:.3f}rad/s  spin_last_rate={self.spin_last_rate:.3f}rad/s  "
             f"extra_drop={extra_drop_height:.3f}m"
         )
         print(
@@ -385,12 +536,17 @@ class Example:
             f"kf={self.contact_kf!s}  mu={self.contact_mu!s}  "
             f"margin={self.contact_margin!s}  gap={self.contact_gap!s}"
         )
+        if self.obstacle_box:
+            print(
+                "        obstacle_box: "
+                f"hx={self.obstacle_box_hx:.3f}m  hy={self.obstacle_box_hy:.3f}m  hz={self.obstacle_box_hz:.3f}m"
+            )
 
     def simulate(self) -> None:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
 
-            if abs(self.spin_rate) > 0.0:
+            if self.spin_body_indices.shape[0] > 0:
                 wp.launch(
                     kernel=spin_first_capsules_kernel,
                     dim=self.spin_body_indices.shape[0],
@@ -445,10 +601,22 @@ def main(argv=None) -> int:
         help="Freeze the first cable segment so the bundle hangs from one end",
     )
     parser.add_argument(
+        "--anchor-last",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Freeze the last cable segment as well, useful for two-end twist cases.",
+    )
+    parser.add_argument(
         "--spin-rate",
         type=float,
         default=0.5,
         help="Angular speed [rad/s] applied to the anchored first segment around the cable axis",
+    )
+    parser.add_argument(
+        "--spin-last-rate",
+        type=float,
+        default=0.0,
+        help="Angular speed [rad/s] applied to the anchored last segment around the cable axis.",
     )
     parser.add_argument(
         "--extra-drop-height",
@@ -456,6 +624,15 @@ def main(argv=None) -> int:
         default=0.0,
         help="Additional world-space lift [m] applied to the cable before simulation",
     )
+    parser.add_argument(
+        "--obstacle-box",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="For simple ribbon or rod assets, add a static box above the ground so the cable can drop onto it.",
+    )
+    parser.add_argument("--obstacle-box-hx", type=float, default=DEFAULT_OBSTACLE_BOX_HX, help="Obstacle box half-width in X [m].")
+    parser.add_argument("--obstacle-box-hy", type=float, default=DEFAULT_OBSTACLE_BOX_HY, help="Obstacle box half-width in Y [m].")
+    parser.add_argument("--obstacle-box-hz", type=float, default=DEFAULT_OBSTACLE_BOX_HZ, help="Obstacle box half-height in Z [m].")
     parser.add_argument(
         "--record-mp4",
         default=None,
@@ -497,8 +674,14 @@ def main(argv=None) -> int:
         device=args.device,
         solver_override=args.solver_override,
         anchor_first=args.anchor_first,
+        anchor_last=args.anchor_last,
         spin_rate=args.spin_rate,
+        spin_last_rate=args.spin_last_rate,
         extra_drop_height=args.extra_drop_height,
+        obstacle_box=args.obstacle_box,
+        obstacle_box_hx=args.obstacle_box_hx,
+        obstacle_box_hy=args.obstacle_box_hy,
+        obstacle_box_hz=args.obstacle_box_hz,
         contact_ke=args.contact_ke,
         contact_kd=args.contact_kd,
         contact_kf=args.contact_kf,
