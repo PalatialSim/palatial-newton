@@ -25,6 +25,13 @@ import newton
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import extract_cable_points, load, read_cable_params
 
+DEFAULT_SIMPLE_CABLE_CONTACT_KE = 1.0e4
+DEFAULT_SIMPLE_CABLE_CONTACT_KD = 0.0
+DEFAULT_SIMPLE_CABLE_CONTACT_KF = 1.0e3
+DEFAULT_SIMPLE_CABLE_CONTACT_MU = 1.0
+DEFAULT_SIMPLE_CABLE_CONTACT_MARGIN = 2.5e-4
+DEFAULT_SIMPLE_CABLE_CONTACT_GAP = 1.0e-3
+
 
 @wp.kernel
 def spin_first_capsules_kernel(
@@ -73,6 +80,18 @@ def _filter_solver_kwargs(solver_cls: type, solver_params: dict[str, object]) ->
         if py_name in accepted:
             kwargs[py_name] = value
     return kwargs
+
+
+def _viewer_running(viewer) -> bool:
+    """Normalize ``viewer.is_running`` across ViewerGL, ViewerNull, and wrappers."""
+
+    is_running_attr = getattr(viewer, "is_running", True)
+    if callable(is_running_attr):
+        try:
+            return bool(is_running_attr())
+        except Exception:
+            return True
+    return bool(is_running_attr)
 
 
 def _set_front_camera(viewer, points: np.ndarray) -> None:
@@ -133,6 +152,12 @@ class Example:
         anchor_first: bool = True,
         spin_rate: float = 0.5,
         extra_drop_height: float = 0.0,
+        contact_ke: float | None = None,
+        contact_kd: float | None = None,
+        contact_kf: float | None = None,
+        contact_mu: float | None = None,
+        contact_margin: float | None = None,
+        contact_gap: float | None = None,
     ):
         self.viewer = viewer
         self.usd_path = usd_path
@@ -171,6 +196,28 @@ class Example:
         self.anchor_body_index = 0
         self.tip_body_index = body_count - 1
 
+        if self.scene_kind != "cable_assembly":
+            if contact_ke is None:
+                contact_ke = DEFAULT_SIMPLE_CABLE_CONTACT_KE
+            if contact_kd is None:
+                contact_kd = DEFAULT_SIMPLE_CABLE_CONTACT_KD
+            if contact_kf is None:
+                contact_kf = DEFAULT_SIMPLE_CABLE_CONTACT_KF
+            if contact_mu is None:
+                contact_mu = DEFAULT_SIMPLE_CABLE_CONTACT_MU
+            if contact_margin is None:
+                contact_margin = DEFAULT_SIMPLE_CABLE_CONTACT_MARGIN
+            if contact_gap is None:
+                contact_gap = DEFAULT_SIMPLE_CABLE_CONTACT_GAP
+
+        self.contact_ke = contact_ke
+        self.contact_kd = contact_kd
+        self.contact_kf = contact_kf
+        self.contact_mu = contact_mu
+        self.contact_margin = contact_margin
+        self.contact_gap = contact_gap
+        self._apply_contact_tuning()
+
         if extra_drop_height:
             self._shift_cable_z(float(extra_drop_height))
 
@@ -208,6 +255,40 @@ class Example:
 
     def _rebuild_solver(self) -> None:
         self.solver = type(self.solver)(self.model, **self._solver_kwargs)
+
+    def _apply_contact_tuning(self) -> None:
+        """Apply per-shape contact tuning overrides directly to the finalized model."""
+
+        tuning = {
+            "contact_ke": self.contact_ke,
+            "contact_kd": self.contact_kd,
+            "contact_kf": self.contact_kf,
+            "contact_mu": self.contact_mu,
+            "contact_margin": self.contact_margin,
+            "contact_gap": self.contact_gap,
+        }
+        for name, value in tuning.items():
+            if value is not None and float(value) < 0.0:
+                raise RuntimeError(f"{name} must be >= 0, got {value}")
+
+        shape_count = int(self.model.shape_count)
+        if shape_count <= 0:
+            return
+
+        def _assign_full(attr_name: str, value: float | None) -> None:
+            if value is None:
+                return
+            array = getattr(self.model, attr_name, None)
+            if array is None:
+                return
+            array.assign(np.full(shape_count, float(value), dtype=np.float32))
+
+        _assign_full("shape_material_ke", self.contact_ke)
+        _assign_full("shape_material_kd", self.contact_kd)
+        _assign_full("shape_material_kf", self.contact_kf)
+        _assign_full("shape_material_mu", self.contact_mu)
+        _assign_full("shape_margin", self.contact_margin)
+        _assign_full("shape_gap", self.contact_gap)
 
     def _shift_cable_z(self, dz: float) -> None:
         """Lift every cable segment by ``dz`` in world +Z."""
@@ -248,6 +329,13 @@ class Example:
                 f"anchor_first={self.anchor_first}  spin_rate={self.spin_rate:.3f}rad/s  "
                 f"extra_drop={extra_drop_height:.3f}m"
             )
+            if any(value is not None for value in (self.contact_ke, self.contact_kd, self.contact_kf, self.contact_mu)):
+                print(
+                    "        contact: "
+                    f"ke={self.contact_ke!s}  kd={self.contact_kd!s}  "
+                    f"kf={self.contact_kf!s}  mu={self.contact_mu!s}  "
+                    f"margin={self.contact_margin!s}  gap={self.contact_gap!s}"
+                )
             return
 
         params = self.cable_params
@@ -291,6 +379,12 @@ class Example:
                 f"        authored centerline points={len(self.centerline_points)}  "
                 f"dropHeight={float(params['dropHeight']):.3f}m  twistTotal={float(params['twistTotal']):.3f}rad"
             )
+        print(
+            "        contact: "
+            f"ke={self.contact_ke!s}  kd={self.contact_kd!s}  "
+            f"kf={self.contact_kf!s}  mu={self.contact_mu!s}  "
+            f"margin={self.contact_margin!s}  gap={self.contact_gap!s}"
+        )
 
     def simulate(self) -> None:
         for _ in range(self.sim_substeps):
@@ -318,6 +412,8 @@ class Example:
         self.sim_time += self.frame_dt
 
     def render(self) -> None:
+        if not _viewer_running(self.viewer):
+            return
         self.viewer.begin_frame(self.sim_time)
         self.viewer.log_state(self.state_0)
         self.viewer.log_contacts(self.contacts, self.state_0)
@@ -367,6 +463,12 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--mp4-fps", type=int, default=60, help="Output mp4 framerate (default 60)")
     parser.add_argument("--top-view", action="store_true", help="Place camera straight above the cable looking down")
+    parser.add_argument("--contact-ke", type=float, default=None, help="Override rigid contact stiffness for all shapes.")
+    parser.add_argument("--contact-kd", type=float, default=None, help="Override rigid contact damping for all shapes.")
+    parser.add_argument("--contact-kf", type=float, default=None, help="Override friction damping for all shapes.")
+    parser.add_argument("--contact-mu", type=float, default=None, help="Override Coulomb friction for all shapes.")
+    parser.add_argument("--contact-margin", type=float, default=None, help="Override per-shape contact margin [m].")
+    parser.add_argument("--contact-gap", type=float, default=None, help="Override per-shape contact gap [m].")
     parser.add_argument(
         "--no-auto-camera",
         action="store_true",
@@ -397,6 +499,12 @@ def main(argv=None) -> int:
         anchor_first=args.anchor_first,
         spin_rate=args.spin_rate,
         extra_drop_height=args.extra_drop_height,
+        contact_ke=args.contact_ke,
+        contact_kd=args.contact_kd,
+        contact_kf=args.contact_kf,
+        contact_mu=args.contact_mu,
+        contact_margin=args.contact_margin,
+        contact_gap=args.contact_gap,
     )
 
     body_points = example.state_0.body_q.numpy()[:, 0:3]
@@ -450,12 +558,10 @@ def main(argv=None) -> int:
     use_step_count = bool(args.record_mp4) or not args.gui
     try:
         while True:
-            if use_step_count:
-                if frame_index >= args.steps:
-                    break
-            else:
-                if not getattr(viewer, "is_running", True):
-                    break
+            if not _viewer_running(viewer):
+                break
+            if use_step_count and frame_index >= args.steps:
+                break
             example.step()
             example.render()
             if ffmpeg_proc is not None:

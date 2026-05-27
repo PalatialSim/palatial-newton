@@ -13,6 +13,10 @@ import newton  # noqa: F401
 import numpy as np
 import warp as wp
 
+from newton.examples.palatial.cable_presets import (
+    get_anisotropic_cable_preset,
+    list_anisotropic_cable_presets,
+)
 from newton.examples.palatial.example_palatial_cable import _resolve_input_usd
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import (
@@ -223,6 +227,21 @@ def _assert_same_quaternion(
     if float(np.dot(actual_xyzw, expected_xyzw)) < 0.0:
         expected_xyzw = -expected_xyzw
     np.testing.assert_allclose(actual_xyzw, expected_xyzw, atol=atol, rtol=0.0)
+
+
+def _assert_close_param(
+    test: unittest.TestCase,
+    params: dict[str, object],
+    key: str,
+    expected: object,
+) -> None:
+    actual = params[key]
+    if isinstance(expected, str):
+        test.assertEqual(str(actual), expected)
+    elif isinstance(expected, int):
+        test.assertEqual(int(actual), expected)
+    else:
+        test.assertAlmostEqual(float(actual), float(expected), places=6)
 
 
 @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
@@ -572,6 +591,53 @@ class TestPalatialCable(unittest.TestCase):
             )
             shape_types = bundle.model.shape_type.numpy().tolist()
             self.assertEqual(shape_types.count(int(newton.GeoType.CAPSULE)), 6)
+
+    def test_named_anisotropic_presets_generate_loadable_bundles(self):
+        for preset_name in list_anisotropic_cable_presets():
+            with self.subTest(preset=preset_name), tempfile.TemporaryDirectory() as tmp_dir:
+                usd_path = Path(tmp_dir) / f"{preset_name}.newton.usda"
+                preset = get_anisotropic_cable_preset(preset_name)
+
+                author_cable_usd(usd_path, **preset)
+                params = read_cable_params(str(usd_path))
+                bundle = load(str(usd_path), device="cpu")
+
+                _assert_close_param(self, params, "crossSectionType", preset["cross_section_type"])
+                _assert_close_param(self, params, "length", preset["length"])
+                _assert_close_param(self, params, "segmentCount", preset["segment_count"])
+                _assert_close_param(self, params, "dropHeight", preset["drop_height"])
+                _assert_close_param(self, params, "twistTotal", preset["twist_total"])
+                _assert_close_param(self, params, "stretchStiffness", preset["stretch_stiffness"])
+                _assert_close_param(self, params, "bendYStiffness", preset["bend_y_stiffness"])
+                _assert_close_param(self, params, "bendZStiffness", preset["bend_z_stiffness"])
+                _assert_close_param(self, params, "torsionStiffness", preset["torsion_stiffness"])
+                if str(preset["cross_section_type"]) == "flatRect":
+                    _assert_close_param(self, params, "width", preset["width"])
+                    _assert_close_param(self, params, "thickness", preset["thickness"])
+                else:
+                    _assert_close_param(self, params, "radius", preset["radius"])
+
+                self.assertEqual(bundle.body_type, "cable")
+                self.assertEqual(bundle.solver_name, preset["solver"])
+                self.assertEqual(bundle.fps, int(preset["fps"]))
+                self.assertEqual(bundle.solver_params.get("iterations"), int(preset["solver_iterations"]))
+                self.assertEqual(bundle.solver_params.get("substeps"), int(preset["solver_substeps"]))
+                self.assertTrue(
+                    all(
+                        joint_type == int(newton.JointType.ANISOTROPIC_CABLE)
+                        for joint_type in bundle.model.joint_type.numpy().tolist()
+                    )
+                )
+                stiffness_values = (
+                    float(params["bendYStiffness"]),
+                    float(params["bendZStiffness"]),
+                    float(params["torsionStiffness"]),
+                )
+                self.assertGreater(max(stiffness_values) - min(stiffness_values), 0.0)
+
+    def test_unknown_anisotropic_preset_raises(self):
+        with self.assertRaisesRegex(ValueError, "Unknown anisotropic cable preset"):
+            get_anisotropic_cable_preset("not_a_real_preset")
 
     def test_example_can_generate_default_flat_rect_asset(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

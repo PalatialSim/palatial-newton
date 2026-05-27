@@ -43,6 +43,36 @@ Or let the example generate its own temporary flatRect ribbon asset:
   --device cuda:0 --gui --steps 1000
 ```
 
+Named anisotropic presets are also available for quick VBDPalatial checks:
+
+```bash
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  ~/flat_balanced_demo.newton.usda \
+  --preset flat_balanced_demo
+
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  ~/flat_bend_z_dominant.newton.usda \
+  --preset flat_bend_z_dominant
+
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  ~/flat_bend_y_dominant.newton.usda \
+  --preset flat_bend_y_dominant
+
+... -m newton.examples.palatial.generate_palatial_cable_usd \
+  ~/round_low_torsion_demo.newton.usda \
+  --preset round_low_torsion_demo
+```
+
+Good starting ranges for generated anisotropic cables:
+
+- `segment_count`: `12` to `24`
+- `stretch_stiffness`: `8e4` to `2e5` for demos, up to `1e6` for stiffer cables
+- `bend_y_stiffness`, `bend_z_stiffness`: `4e2` to `3e3`
+- `torsion_stiffness`: `8e1` to `4e2` for torsion-soft ribbons, up to `1e3`
+- `width`: `8e-3` to `2e-2` m and `thickness`: `2.5e-3` to `6e-3` m for flat cables
+- `radius`: `5e-3` to `6e-3` m for round demo cables
+- `solver_substeps`: `4` to `6` when using `vbd_palatial`
+
 ---
 
 ## 1. `example_palatial_load` — generic settle / drop

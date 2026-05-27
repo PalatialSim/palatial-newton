@@ -13,6 +13,10 @@ from typing import Any
 import newton  # noqa: F401
 import warp as wp
 
+from newton.examples.palatial.cable_presets import (
+    get_anisotropic_cable_preset,
+    list_anisotropic_cable_presets,
+)
 from newton.palatial import read_cable_params
 
 DEFAULT_OUTPUT_PATH = Path("palatial_cable_example.newton.usda")
@@ -20,6 +24,31 @@ DEFAULT_ROOT_PATH = "/Cable"
 DEFAULT_CENTERLINE_PATH = f"{DEFAULT_ROOT_PATH}/Centerline"
 DEFAULT_SURFACE_PATH = f"{DEFAULT_ROOT_PATH}/Surface"
 DEFAULT_MATERIAL_PATH = "/Materials/CableMaterial"
+_AUTHOR_KWARG_NAMES = (
+    "cross_section_type",
+    "length",
+    "segment_count",
+    "drop_height",
+    "twist_total",
+    "radius",
+    "width",
+    "thickness",
+    "density",
+    "stretch_stiffness",
+    "stretch_damping",
+    "compress_stiffness",
+    "compress_damping",
+    "bend_y_stiffness",
+    "bend_y_damping",
+    "bend_z_stiffness",
+    "bend_z_damping",
+    "torsion_stiffness",
+    "torsion_damping",
+    "fps",
+    "solver",
+    "solver_iterations",
+    "solver_substeps",
+)
 
 
 def _usd_modules() -> tuple[Any, Any, Any, Any, Any, Any]:
@@ -465,51 +494,57 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Destination *.newton.usda path.",
     )
     parser.add_argument(
+        "--preset",
+        choices=list_anisotropic_cable_presets(),
+        default=None,
+        help="Start from a named anisotropic cable preset before applying any explicit overrides.",
+    )
+    parser.add_argument(
         "--cross-section-type",
         choices=("flatRect", "roundSolid"),
-        default="flatRect",
+        default=None,
         help="Cable cross-section authored into NewtonRodAPI.",
     )
-    parser.add_argument("--length", type=float, default=1.5, help="Cable length [m].")
-    parser.add_argument("--segment-count", type=int, default=16, help="Cable segment count.")
+    parser.add_argument("--length", type=float, default=None, help="Cable length [m].")
+    parser.add_argument("--segment-count", type=int, default=None, help="Cable segment count.")
     parser.add_argument(
         "--drop-height",
         type=float,
-        default=0.3,
+        default=None,
         help="Lift baked into the authored centerline and mirrored in newton:rod:dropHeight [m].",
     )
-    parser.add_argument("--twist-total", type=float, default=0.0, help="Authored total twist [rad].")
-    parser.add_argument("--radius", type=float, default=0.005, help="Round cable radius [m].")
-    parser.add_argument("--width", type=float, default=0.012, help="Flat cable width [m].")
-    parser.add_argument("--thickness", type=float, default=0.004, help="Flat cable thickness [m].")
-    parser.add_argument("--density", type=float, default=1000.0, help="Cable density [kg/m^3].")
-    parser.add_argument("--stretch-stiffness", type=float, default=1.0e5, help="Stretch stiffness [N/m].")
-    parser.add_argument("--stretch-damping", type=float, default=0.05, help="Stretch damping.")
-    parser.add_argument("--compress-stiffness", type=float, default=1.0e5, help="Compression stiffness [N/m].")
-    parser.add_argument("--compress-damping", type=float, default=0.05, help="Compression damping.")
-    parser.add_argument("--bend-y-stiffness", type=float, default=8.0e2, help="Bend-Y stiffness [N*m].")
-    parser.add_argument("--bend-y-damping", type=float, default=0.1, help="Bend-Y damping.")
-    parser.add_argument("--bend-z-stiffness", type=float, default=1.6e3, help="Bend-Z stiffness [N*m].")
-    parser.add_argument("--bend-z-damping", type=float, default=0.1, help="Bend-Z damping.")
-    parser.add_argument("--torsion-stiffness", type=float, default=4.0e2, help="Torsion stiffness [N*m].")
-    parser.add_argument("--torsion-damping", type=float, default=0.05, help="Torsion damping.")
-    parser.add_argument("--fps", type=int, default=120, help="Authored simulation rate [Hz].")
+    parser.add_argument("--twist-total", type=float, default=None, help="Authored total twist [rad].")
+    parser.add_argument("--radius", type=float, default=None, help="Round cable radius [m].")
+    parser.add_argument("--width", type=float, default=None, help="Flat cable width [m].")
+    parser.add_argument("--thickness", type=float, default=None, help="Flat cable thickness [m].")
+    parser.add_argument("--density", type=float, default=None, help="Cable density [kg/m^3].")
+    parser.add_argument("--stretch-stiffness", type=float, default=None, help="Stretch stiffness [N/m].")
+    parser.add_argument("--stretch-damping", type=float, default=None, help="Stretch damping.")
+    parser.add_argument("--compress-stiffness", type=float, default=None, help="Compression stiffness [N/m].")
+    parser.add_argument("--compress-damping", type=float, default=None, help="Compression damping.")
+    parser.add_argument("--bend-y-stiffness", type=float, default=None, help="Bend-Y stiffness [N*m].")
+    parser.add_argument("--bend-y-damping", type=float, default=None, help="Bend-Y damping.")
+    parser.add_argument("--bend-z-stiffness", type=float, default=None, help="Bend-Z stiffness [N*m].")
+    parser.add_argument("--bend-z-damping", type=float, default=None, help="Bend-Z damping.")
+    parser.add_argument("--torsion-stiffness", type=float, default=None, help="Torsion stiffness [N*m].")
+    parser.add_argument("--torsion-damping", type=float, default=None, help="Torsion damping.")
+    parser.add_argument("--fps", type=int, default=None, help="Authored simulation rate [Hz].")
     parser.add_argument(
         "--solver",
         choices=("vbd", "vbd_palatial"),
-        default="vbd",
+        default=None,
         help="Authored solver token written onto /physicsScene.",
     )
     parser.add_argument(
         "--solver-iterations",
         type=int,
-        default=2,
+        default=None,
         help="Authored newton:solver:iterations value.",
     )
     parser.add_argument(
         "--solver-substeps",
         type=int,
-        default=2,
+        default=None,
         help="Authored newton:solver:substeps value.",
     )
     return parser
@@ -517,40 +552,25 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
+    author_kwargs = get_anisotropic_cable_preset(args.preset) if args.preset else {}
+    for kwarg_name in _AUTHOR_KWARG_NAMES:
+        cli_name = kwarg_name.replace("_", "-")
+        value = getattr(args, cli_name.replace("-", "_"))
+        if value is not None:
+            author_kwargs[kwarg_name] = value
 
-    output_path = author_cable_usd(
-        args.output_usd,
-        cross_section_type=args.cross_section_type,
-        length=args.length,
-        segment_count=args.segment_count,
-        drop_height=args.drop_height,
-        twist_total=args.twist_total,
-        radius=args.radius,
-        width=args.width,
-        thickness=args.thickness,
-        density=args.density,
-        stretch_stiffness=args.stretch_stiffness,
-        stretch_damping=args.stretch_damping,
-        compress_stiffness=args.compress_stiffness,
-        compress_damping=args.compress_damping,
-        bend_y_stiffness=args.bend_y_stiffness,
-        bend_y_damping=args.bend_y_damping,
-        bend_z_stiffness=args.bend_z_stiffness,
-        bend_z_damping=args.bend_z_damping,
-        torsion_stiffness=args.torsion_stiffness,
-        torsion_damping=args.torsion_damping,
-        fps=args.fps,
-        solver=args.solver,
-        solver_iterations=args.solver_iterations,
-        solver_substeps=args.solver_substeps,
-    )
+    output_path = author_cable_usd(args.output_usd, **author_kwargs)
     params = read_cable_params(str(output_path))
+    applied_fps = int(author_kwargs.get("fps", 120))
+    applied_solver = str(author_kwargs.get("solver", "vbd"))
 
     print(f"[write] {output_path}")
+    if args.preset:
+        print(f"[preset] {args.preset}")
     print(
         f"[cable] cross_section={params['crossSectionType']} length={float(params['length']):.3f}m "
         f"segments={int(params['segmentCount'])} radius={float(params['radius']):.4f}m "
-        f"fps={args.fps} solver={args.solver}"
+        f"fps={applied_fps} solver={applied_solver}"
     )
     print("Run:")
     print(
