@@ -755,6 +755,16 @@ class TestPalatialCable(unittest.TestCase):
             self.assertTrue(np.isfinite(z1))
             self.assertLess(abs(z1 - z0), 0.05)
 
+            for _ in range(119):
+                example.step()
+
+            z_final = float(example.state_0.body_q.numpy()[:, 2].mean())
+            contact_count = int(example.contacts.rigid_contact_count.numpy()[0])
+
+            self.assertTrue(np.isfinite(z_final))
+            self.assertGreater(z_final, 0.08)
+            self.assertGreater(contact_count, 0)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
