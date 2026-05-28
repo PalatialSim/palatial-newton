@@ -348,6 +348,14 @@ class TestPalatialRod(unittest.TestCase):
             right_root = label_to_idx["/World/RightStrainReliefBoot"]
             rod_start = label_to_idx["RodGuide_edge_body_0"]
             rod_end = label_to_idx["RodGuide_edge_body_4"]
+            body_q = bundle.state_in.body_q.numpy()
+            params = read_rod_params(str(usd_path))
+            self.assertAlmostEqual(float(body_q[rod_start, 0]), params["points"][0][0], places=6)
+            self.assertAlmostEqual(float(body_q[rod_start, 1]), params["points"][0][1], places=6)
+            self.assertAlmostEqual(float(body_q[rod_start, 2]), params["points"][0][2], places=6)
+            self.assertAlmostEqual(float(body_q[rod_end, 0]), params["points"][-2][0], places=6)
+            self.assertAlmostEqual(float(body_q[rod_end, 1]), params["points"][-2][1], places=6)
+            self.assertAlmostEqual(float(body_q[rod_end, 2]), params["points"][-2][2], places=6)
 
             parent = bundle.model.joint_parent.numpy()
             child = bundle.model.joint_child.numpy()
@@ -364,6 +372,17 @@ class TestPalatialRod(unittest.TestCase):
             self.assertEqual(pair_types[(rod_start, left_root)], int(newton.JointType.FIXED))
             self.assertEqual(pair_types[(rod_end, right_root)], int(newton.JointType.FIXED))
 
+            rod_shape_indices = [
+                shape_idx
+                for shape_idx, shape_label in enumerate(bundle.model.shape_label)
+                if "RodGuide_edge_capsule_" in shape_label
+            ]
+            self.assertEqual(len(rod_shape_indices), 5)
+            filter_pairs = set(bundle.model.shape_collision_filter_pairs)
+            for i, shape_a in enumerate(rod_shape_indices):
+                for shape_b in rod_shape_indices[i + 1:]:
+                    self.assertIn((min(shape_a, shape_b), max(shape_a, shape_b)), filter_pairs)
+
             flags = bundle.model.shape_flags.numpy()
             attached_shape_names = (
                 "LeftStrainReliefBoot",
@@ -375,7 +394,6 @@ class TestPalatialRod(unittest.TestCase):
                 if any(name in shape_label for name in attached_shape_names):
                     self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_SHAPES))
 
-            body_q = bundle.state_in.body_q.numpy()
             self.assertGreater(float(abs(body_q[left_root, 0])), 0.01)
             self.assertGreater(float(abs(body_q[right_root, 0])), 0.01)
 

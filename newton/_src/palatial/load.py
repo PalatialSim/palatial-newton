@@ -51,6 +51,8 @@ from typing import Any
 import numpy as np
 import warp as wp
 
+_TransformParts = tuple[wp.vec3, wp.quat]
+
 
 def _build_solver(name: str, model: Any, params: dict) -> Any:
     """Construct a solver, forwarding only kwargs the solver actually accepts."""
@@ -113,7 +115,9 @@ class _RodAttachmentComponent:
     body_paths: set[str]
     joint_paths: set[str]
     endpoint_name: str
-    relative_xform: tuple[wp.vec3, wp.quat]
+    relative_xform: _TransformParts
+    parent_xform: _TransformParts
+    child_xform: _TransformParts
 
 
 @dataclass
@@ -501,7 +505,7 @@ def _component_relative_xform(
     to_newton_world: Any,
     matrix_transform_points: Any,
     read_mesh_world_points: Any,
-) -> tuple[wp.vec3, wp.quat]:
+) -> tuple[_TransformParts, _TransformParts, _TransformParts]:
     """Return the root-body transform that aligns a connector mouth to a rod end."""
     root_prim = stage.GetPrimAtPath(root_body_path)
     root_world = _rigid_transform_to_newton(
@@ -543,10 +547,15 @@ def _component_relative_xform(
 
     if endpoint_name == "start":
         parent_world = wp.transform(wp.vec3(*points[0].tolist()), quaternions[0])
+        parent_anchor = wp.transform_identity()
     else:
         parent_world = wp.transform(wp.vec3(*points[-2].tolist()), quaternions[-1])
+        segment_length = float(np.linalg.norm(points[-1] - points[-2]))
+        parent_anchor = wp.transform(wp.vec3(0.0, 0.0, segment_length), wp.quat_identity())
+    endpoint_frame_world = parent_world * parent_anchor
+    child_anchor = wp.transform_inverse(desired_root_world) * endpoint_frame_world
     relative = wp.transform_inverse(parent_world) * desired_root_world
-    return relative.p, relative.q
+    return (relative.p, relative.q), (parent_anchor.p, parent_anchor.q), (child_anchor.p, child_anchor.q)
 
 
 def _collect_component_paths(
@@ -636,6 +645,17 @@ def _disable_shape_collisions(builder: Any, shape_indices: range | list[int]) ->
         builder.shape_collision_group[shape_idx] = 0
 
 
+def _filter_body_self_collisions(builder: Any, body_indices: list[int]) -> None:
+    """Disable collisions among shapes attached to the given bodies."""
+    shape_indices: list[int] = []
+    for body_idx in body_indices:
+        shape_indices.extend(int(shape_idx) for shape_idx in builder.body_shapes.get(int(body_idx), ()))
+
+    for i, shape_a in enumerate(shape_indices):
+        for shape_b in shape_indices[i + 1:]:
+            builder.add_shape_collision_filter_pair(shape_a, shape_b)
+
+
 def _plan_rod_rigid_imports(
     usd_path: str,
     params: dict,
@@ -714,7 +734,7 @@ def _plan_rod_rigid_imports(
                 component_points.append(points_world)
         merged_points = np.concatenate(component_points, axis=0) if component_points else np.empty((0, 3), dtype=np.float64)
         endpoint_name = _component_endpoint_name(points, merged_points)
-        relative_xform = _component_relative_xform(
+        relative_xform, parent_xform, child_xform = _component_relative_xform(
             stage=stage,
             root_body_path=root_path,
             endpoint_name=endpoint_name,
@@ -734,6 +754,8 @@ def _plan_rod_rigid_imports(
                 joint_paths=joint_paths,
                 endpoint_name=endpoint_name,
                 relative_xform=relative_xform,
+                parent_xform=parent_xform,
+                child_xform=child_xform,
             )
         )
         visited_bodies.update(body_paths)
@@ -790,6 +812,7 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             bend_damping=float(params["bendDamping"]),
             label=label,
         )
+        _filter_body_self_collisions(builder, rod_bodies)
 
         for component in components:
             ignore_paths = _subset_ignore_paths(
@@ -805,8 +828,10 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 if component.endpoint_name == "start"
                 else wp.transform(positions[-2], quaternions[-1])
             )
-            parent_xform = wp.transform(*component.relative_xform)
-            world_xform = parent_world * parent_xform
+            root_relative_xform = wp.transform(*component.relative_xform)
+            world_xform = parent_world * root_relative_xform
+            parent_anchor_xform = wp.transform(*component.parent_xform)
+            child_anchor_xform = wp.transform(*component.child_xform)
             parent_articulation = builder._find_articulation_for_body(parent_body)
             joints_before = len(builder.joint_type)
             articulations_before = len(builder.articulation_start)
@@ -838,8 +863,8 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 root_joint_idx = builder.add_joint_fixed(
                     parent=parent_body,
                     child=int(root_body),
-                    parent_xform=parent_xform,
-                    child_xform=wp.transform_identity(),
+                    parent_xform=parent_anchor_xform,
+                    child_xform=child_anchor_xform,
                     label=f"{component.root_body_path}__rod_attach",
                 )
                 new_joint_indices.append(root_joint_idx)
@@ -853,8 +878,8 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                     builder,
                     joint_idx=root_joint_idx,
                     parent_body=parent_body,
-                    parent_xform=parent_xform,
-                    child_xform=wp.transform_identity(),
+                    parent_xform=parent_anchor_xform,
+                    child_xform=child_anchor_xform,
                     label=f"{component.root_body_path}__rod_attach",
                 )
 
@@ -955,11 +980,6 @@ def load(usd_path: str, *, solver_override: str | None = None,
     solver = _build_solver(solver_name, model, solver_params)
     state_in = model.state()
     state_out = model.state()
-    if body_type == "rod" and int(model.joint_count) > 0:
-        try:
-            newton.eval_fk(model, state_in.joint_q, state_in.joint_qd, state_in)
-        except Exception:
-            pass
 
     return NewtonBundle(
         usd_path=usd_path,
