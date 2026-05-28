@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 
 # IMPORTANT: import newton stack BEFORE any pxr.Usd usage in the same process.
@@ -86,6 +87,7 @@ class Example:
     def __init__(self, viewer, usd_path: str, substeps: int | None = None,
                  drop_height: float = 0.0, device: str | None = None,
                  zero_gravity: bool = False,
+                 gravity_scale: float = 1.0,
                  cloth_particle_radius: float = 0.008,
                  soft_contact_ke: float = 100.0,
                  soft_contact_kd: float = 2e-3,
@@ -118,6 +120,14 @@ class Example:
 
         if zero_gravity:
             self.model.set_gravity((0.0, 0.0, 0.0))
+        elif gravity_scale != 1.0:
+            if not math.isfinite(gravity_scale):
+                raise ValueError(f"gravity_scale must be finite, got {gravity_scale}")
+            if gravity_scale < 0.0:
+                raise ValueError(f"gravity_scale must be >= 0, got {gravity_scale}")
+            gravity = self.model.gravity.numpy() * float(gravity_scale)
+            self.model.set_gravity(gravity)
+            print(f"  gravity-scale: x{gravity_scale:g}")
 
         def _sync_body_pose_teleport() -> None:
             if int(self.model.body_count) <= 0 or self.state_0.body_q is None:
@@ -489,6 +499,9 @@ def main(argv=None) -> int:
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
     p.add_argument("--zero-gravity", action="store_true",
                    help="Override the loaded scene gravity with (0, 0, 0)")
+    p.add_argument("--gravity-scale", type=float, default=1.0,
+                   help="Scale the loaded scene gravity by this factor "
+                        "(ignored when --zero-gravity is set)")
 
     # Optional physics JSON: overrides --cloth-particle-radius from
     # solver.vbd_particle_self_contact_radius and --bending-ke from
@@ -591,6 +604,7 @@ def main(argv=None) -> int:
     ex = Example(viewer, args.usd, substeps=args.substeps,
                  drop_height=args.drop_height, device=args.device,
                  zero_gravity=args.zero_gravity,
+                 gravity_scale=args.gravity_scale,
                  cloth_particle_radius=args.cloth_particle_radius,
                  soft_contact_ke=args.soft_contact_ke,
                  soft_contact_kd=args.soft_contact_kd,
