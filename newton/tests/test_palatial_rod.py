@@ -4,11 +4,40 @@
 import tempfile
 import textwrap
 import unittest
+import math
 from pathlib import Path
 
 import newton
 from newton.palatial import find_rod_prim_path, load, read_rod_params
 from newton.tests.unittest_utils import USD_AVAILABLE
+
+
+def _quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    )
+
+
+def _quat_conj(q):
+    return (-q[0], -q[1], -q[2], q[3])
+
+
+def _quat_angle(q) -> float:
+    norm = math.sqrt(sum(float(v) * float(v) for v in q))
+    w = abs(float(q[3])) / norm if norm > 0.0 else 1.0
+    w = max(-1.0, min(1.0, w))
+    return 2.0 * math.acos(w)
+
+
+def _joint_relative_quat(body_q, joint_X_p, joint_X_c, parent: int, child: int):
+    q_wp = _quat_mul(body_q[parent, 3:7], joint_X_p[3:7])
+    q_wc = _quat_mul(body_q[child, 3:7], joint_X_c[3:7])
+    return _quat_mul(_quat_conj(q_wp), q_wc)
 
 
 def _format_point(point: tuple[float, float, float]) -> str:
@@ -359,6 +388,7 @@ class TestPalatialRod(unittest.TestCase):
             rod_start = label_to_idx["RodGuide_edge_body_0"]
             rod_end = label_to_idx["RodGuide_edge_body_4"]
             body_q = bundle.state_in.body_q.numpy()
+            rest_body_q = bundle.model.body_q.numpy()
             params = read_rod_params(str(usd_path))
             self.assertAlmostEqual(float(body_q[rod_start, 0]), params["points"][0][0], places=6)
             self.assertAlmostEqual(float(body_q[rod_start, 1]), params["points"][0][1], places=6)
@@ -370,6 +400,7 @@ class TestPalatialRod(unittest.TestCase):
             parent = bundle.model.joint_parent.numpy()
             child = bundle.model.joint_child.numpy()
             joint_type = bundle.model.joint_type.numpy()
+            joint_X_p = bundle.model.joint_X_p.numpy()
             joint_X_c = bundle.model.joint_X_c.numpy()
             pairs = {(int(parent[i]), int(child[i])) for i in range(int(bundle.model.joint_count))}
             pair_types = {
@@ -385,6 +416,54 @@ class TestPalatialRod(unittest.TestCase):
             for joint_idx, joint_label in enumerate(bundle.model.joint_label):
                 if joint_label.endswith("__rod_attach"):
                     self.assertLess(max(abs(float(v)) for v in joint_X_c[joint_idx, :3]), 0.2)
+
+            max_rest_cable_angle = 0.0
+            max_initial_cable_angle = 0.0
+            for joint_idx, joint_label in enumerate(bundle.model.joint_label):
+                if "RodGuide_cable_" not in joint_label:
+                    continue
+                parent_idx = int(parent[joint_idx])
+                child_idx = int(child[joint_idx])
+                rest_relative = _joint_relative_quat(
+                    rest_body_q,
+                    joint_X_p[joint_idx],
+                    joint_X_c[joint_idx],
+                    parent_idx,
+                    child_idx,
+                )
+                initial_relative = _joint_relative_quat(
+                    body_q,
+                    joint_X_p[joint_idx],
+                    joint_X_c[joint_idx],
+                    parent_idx,
+                    child_idx,
+                )
+                max_rest_cable_angle = max(max_rest_cable_angle, _quat_angle(rest_relative))
+                max_initial_cable_angle = max(max_initial_cable_angle, _quat_angle(initial_relative))
+            self.assertLess(max_rest_cable_angle, 1.0e-5)
+            self.assertGreater(max_initial_cable_angle, 0.05)
+
+            for joint_idx, joint_label in enumerate(bundle.model.joint_label):
+                if not joint_label.endswith("__rod_attach"):
+                    continue
+                parent_idx = int(parent[joint_idx])
+                child_idx = int(child[joint_idx])
+                rest_relative = _joint_relative_quat(
+                    rest_body_q,
+                    joint_X_p[joint_idx],
+                    joint_X_c[joint_idx],
+                    parent_idx,
+                    child_idx,
+                )
+                initial_relative = _joint_relative_quat(
+                    body_q,
+                    joint_X_p[joint_idx],
+                    joint_X_c[joint_idx],
+                    parent_idx,
+                    child_idx,
+                )
+                error = _quat_mul(initial_relative, _quat_conj(rest_relative))
+                self.assertLess(_quat_angle(error), 1.0e-4)
 
             rod_shape_indices = [
                 shape_idx

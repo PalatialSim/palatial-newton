@@ -122,6 +122,14 @@ class _RodAttachmentComponent:
 
 
 @dataclass
+class _RodBuildResult:
+    """Rod model plus the curved input pose used as the initial state."""
+
+    model: Any
+    initial_body_q: Any
+
+
+@dataclass
 class NewtonBundle:
     """Everything needed to step the converted asset in Newton."""
     usd_path: str
@@ -890,6 +898,51 @@ def _hide_oversized_connector_visuals(builder: Any, body_indices: list[int]) -> 
                 builder.shape_color[shape_idx] = (1.0, 1.0, 1.0)
 
 
+def _copy_transform(xform: wp.transform) -> wp.transform:
+    """Return a value copy of a Warp transform."""
+    return wp.transform(
+        wp.vec3(float(xform.p[0]), float(xform.p[1]), float(xform.p[2])),
+        wp.quat(float(xform.q[0]), float(xform.q[1]), float(xform.q[2]), float(xform.q[3])),
+    )
+
+
+def _set_rod_zero_curvature_rest_poses(
+    builder: Any,
+    *,
+    rod_bodies: list[int],
+    points: np.ndarray,
+    attached_components: list[tuple[int, list[int]]],
+) -> list[wp.transform]:
+    """Make the rod's rest pose straight while preserving the curved initial pose."""
+    initial_body_q = [_copy_transform(xform) for xform in builder.body_q]
+    rest_body_q = [_copy_transform(xform) for xform in builder.body_q]
+
+    if not rod_bodies:
+        return initial_body_q
+
+    segment_lengths = np.linalg.norm(points[1:] - points[:-1], axis=1)
+    fallback_tangent = points[1] - points[0] if len(points) > 1 else np.asarray((1.0, 0.0, 0.0))
+    rest_direction = _normalize_vector(points[-1] - points[0], fallback_tangent)
+    distances = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    rest_points_np = points[0] + distances[:, None] * rest_direction[None, :]
+    rest_positions = [
+        wp.vec3(float(point[0]), float(point[1]), float(point[2]))
+        for point in rest_points_np
+    ]
+    rest_quaternions = newton.utils.create_parallel_transport_cable_quaternions(rest_positions)
+
+    for i, body_idx in enumerate(rod_bodies):
+        rest_body_q[int(body_idx)] = wp.transform(rest_positions[i], rest_quaternions[i])
+
+    for parent_body, body_indices in attached_components:
+        rest_from_initial = rest_body_q[int(parent_body)] * wp.transform_inverse(initial_body_q[int(parent_body)])
+        for body_idx in body_indices:
+            rest_body_q[int(body_idx)] = rest_from_initial * initial_body_q[int(body_idx)]
+
+    builder.body_q[:] = rest_body_q
+    return initial_body_q
+
+
 def _plan_rod_rigid_imports(
     usd_path: str,
     params: dict,
@@ -1021,7 +1074,7 @@ def _plan_rod_rigid_imports(
     return components, remaining_body_paths, remaining_joint_paths, rigid_body_paths, all_joint_paths
 
 
-def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
+def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
     """Build an isotropic rod model from a NewtonRodAPI-authored USDA."""
     from .rod import read_rod_params
 
@@ -1065,6 +1118,7 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             label=label,
         )
         _filter_body_self_collisions(builder, rod_bodies)
+        attached_component_bodies: list[tuple[int, list[int]]] = []
 
         for component in components:
             ignore_paths = _subset_ignore_paths(
@@ -1112,6 +1166,7 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             if root_body_offset is not None:
                 child_anchor_xform = _shift_transform_translation(child_anchor_xform, root_body_offset)
             _hide_oversized_connector_visuals(builder, component_body_indices)
+            attached_component_bodies.append((int(parent_body), component_body_indices))
             joints_after = len(builder.joint_type)
             new_joint_indices = list(range(joints_before, joints_after))
             root_joint_idx = next(
@@ -1210,8 +1265,18 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             )
             _untint_textured_shapes(builder)
 
+        initial_body_q = _set_rod_zero_curvature_rest_poses(
+            builder,
+            rod_bodies=rod_bodies,
+            points=points_np,
+            attached_components=attached_component_bodies,
+        )
         builder.color()
-        return builder.finalize()
+        model = builder.finalize()
+        return _RodBuildResult(
+            model=model,
+            initial_body_q=wp.array(initial_body_q, dtype=wp.transform, device=model.body_q.device),
+        )
 
 
 def _scene_pins_solver(stage: Usd.Stage) -> bool:
@@ -1272,16 +1337,29 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if device is None:
         device = str(wp.get_preferred_device())
 
+    rod_initial_body_q = None
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name)
     elif body_type == "rod":
-        model = _build_rod(usd_path, device=device)
+        rod_result = _build_rod(usd_path, device=device)
+        model = rod_result.model
+        rod_initial_body_q = rod_result.initial_body_q
     else:
         model = _build_rigid(usd_path, device=device, fix_base=fix_base)
 
     solver = _build_solver(solver_name, model, solver_params)
     state_in = model.state()
     state_out = model.state()
+    if rod_initial_body_q is not None:
+        wp.copy(state_in.body_q, rod_initial_body_q)
+        wp.copy(state_out.body_q, rod_initial_body_q)
+        if state_in.body_qd is not None:
+            state_in.body_qd.zero_()
+        if state_out.body_qd is not None:
+            state_out.body_qd.zero_()
+        body_q_prev = getattr(solver, "body_q_prev", None)
+        if body_q_prev is not None:
+            wp.copy(body_q_prev, rod_initial_body_q)
 
     return NewtonBundle(
         usd_path=usd_path,
