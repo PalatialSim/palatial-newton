@@ -57,8 +57,10 @@ def _rigid_body_block(
     name: str,
     centers: list[tuple[float, float, float]],
     radius: float,
+    visual_points: list[tuple[float, float, float]] | None = None,
 ) -> str:
-    visual_points = _visual_mesh_points(centers[0], radius=radius)
+    if visual_points is None:
+        visual_points = _visual_mesh_points(centers[0], radius=radius)
     meshes = []
     for i, center in enumerate(centers):
         meshes.append(_mesh_block(f"Collider_{i}", _point_cloud(center, radius=radius)))
@@ -161,6 +163,14 @@ def _rod_test_stage() -> str:
 
 
 def _rod_attachment_stage() -> str:
+    right_boot_visual_points = _point_cloud((0.75, 0.00, 0.08), radius=0.030, along=0.40)
+    right_boot_block = _rigid_body_block(
+        "RightStrainReliefBoot",
+        [(1.08, 0.00, 0.08)],
+        radius=0.030,
+        visual_points=right_boot_visual_points,
+    )
+
     return textwrap.dedent(
         f"""
         #usda 1.0
@@ -207,7 +217,7 @@ def _rod_attachment_stage() -> str:
 
             {_rigid_body_block("LeftStrainReliefBoot", [(-0.08, 0.00, 0.08)], radius=0.030)}
             {_rigid_body_block("LeftPlugShell", [(-0.16, 0.00, 0.08)], radius=0.040)}
-            {_rigid_body_block("RightStrainReliefBoot", [(1.08, 0.00, 0.08)], radius=0.030)}
+            {right_boot_block}
             {_rigid_body_block("RightPlugShell", [(1.16, 0.00, 0.08)], radius=0.040)}
             {_rigid_body_block("ConnectorShell", [(1.300000, 0.000000, 0.100000)], radius=0.050)}
 
@@ -360,6 +370,7 @@ class TestPalatialRod(unittest.TestCase):
             parent = bundle.model.joint_parent.numpy()
             child = bundle.model.joint_child.numpy()
             joint_type = bundle.model.joint_type.numpy()
+            joint_X_c = bundle.model.joint_X_c.numpy()
             pairs = {(int(parent[i]), int(child[i])) for i in range(int(bundle.model.joint_count))}
             pair_types = {
                 (int(parent[i]), int(child[i])): int(joint_type[i])
@@ -371,6 +382,9 @@ class TestPalatialRod(unittest.TestCase):
             self.assertNotIn((-1, right_root), pairs)
             self.assertEqual(pair_types[(rod_start, left_root)], int(newton.JointType.FIXED))
             self.assertEqual(pair_types[(rod_end, right_root)], int(newton.JointType.FIXED))
+            for joint_idx, joint_label in enumerate(bundle.model.joint_label):
+                if joint_label.endswith("__rod_attach"):
+                    self.assertLess(max(abs(float(v)) for v in joint_X_c[joint_idx, :3]), 0.2)
 
             rod_shape_indices = [
                 shape_idx
@@ -386,6 +400,8 @@ class TestPalatialRod(unittest.TestCase):
             flags = bundle.model.shape_flags.numpy()
             shape_body = bundle.model.shape_body.numpy()
             shape_scale = bundle.model.shape_scale.numpy()
+            visible_bit = int(newton.ShapeFlags.VISIBLE)
+            collide_bit = int(newton.ShapeFlags.COLLIDE_SHAPES)
             proxy_indices = [
                 shape_idx
                 for shape_idx, shape_label in enumerate(bundle.model.shape_label)
@@ -393,10 +409,26 @@ class TestPalatialRod(unittest.TestCase):
             ]
             self.assertEqual(len(proxy_indices), 4)
             for shape_idx in proxy_indices:
-                self.assertTrue(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_SHAPES))
+                self.assertTrue(flags[shape_idx] & collide_bit)
                 self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_PARTICLES))
-                self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.VISIBLE))
+                self.assertFalse(flags[shape_idx] & visible_bit)
                 self.assertTrue(all(float(axis) > 0.0 for axis in shape_scale[shape_idx]))
+
+            right_boot_visual = next(
+                shape_idx
+                for shape_idx, shape_label in enumerate(bundle.model.shape_label)
+                if shape_label == "/World/RightStrainReliefBoot/RightStrainReliefBoot"
+            )
+            right_boot_colliders = [
+                shape_idx
+                for shape_idx, shape_label in enumerate(bundle.model.shape_label)
+                if shape_label.startswith("/World/RightStrainReliefBoot/Colliders_")
+            ]
+            self.assertFalse(flags[right_boot_visual] & visible_bit)
+            self.assertTrue(right_boot_colliders)
+            self.assertTrue(any(flags[shape_idx] & visible_bit for shape_idx in right_boot_colliders))
+            for shape_idx in right_boot_colliders:
+                self.assertFalse(flags[shape_idx] & collide_bit)
 
             attached_shape_names = (
                 "LeftStrainReliefBoot",

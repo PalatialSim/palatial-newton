@@ -519,6 +519,49 @@ def _component_proxy_bounds(component_points: np.ndarray, root_world: wp.transfo
     )
 
 
+def _component_mouth_anchor(
+    root_points: np.ndarray,
+    *,
+    tangent: np.ndarray,
+    endpoint_name: str,
+    rod_radius: float,
+    fallback: np.ndarray,
+) -> np.ndarray:
+    """Return the centered connector mouth point nearest the rod endpoint."""
+    if root_points.size == 0:
+        return np.asarray(fallback, dtype=np.float64)
+
+    valid_points = np.asarray(root_points, dtype=np.float64)
+    valid_points = valid_points[np.isfinite(valid_points).all(axis=1)]
+    if valid_points.size == 0:
+        return np.asarray(fallback, dtype=np.float64)
+
+    projections = valid_points @ tangent
+    extreme_projection = float(np.max(projections) if endpoint_name == "start" else np.min(projections))
+    span = float(np.max(projections) - np.min(projections))
+    base_band = max(float(rod_radius), 1.0e-4)
+    target_count = min(4, len(valid_points))
+    mouth_mask = np.zeros(len(valid_points), dtype=bool)
+
+    for multiplier in (1.0, 2.0, 4.0):
+        band = min(base_band * multiplier, span) if span > 0.0 else base_band * multiplier
+        if endpoint_name == "start":
+            mouth_mask = projections >= extreme_projection - band
+        else:
+            mouth_mask = projections <= extreme_projection + band
+        if int(mouth_mask.sum()) >= target_count:
+            break
+
+    if not mouth_mask.any():
+        mouth_mask[int(np.argmax(projections) if endpoint_name == "start" else np.argmin(projections))] = True
+
+    mouth_points = valid_points[mouth_mask]
+    mouth_projections = projections[mouth_mask]
+    transverse_points = mouth_points - mouth_projections[:, None] * tangent[None, :]
+    transverse_center = transverse_points.mean(axis=0)
+    return transverse_center + extreme_projection * tangent
+
+
 def _component_relative_xform(
     *,
     stage: Usd.Stage,
@@ -526,6 +569,7 @@ def _component_relative_xform(
     endpoint_name: str,
     points: np.ndarray,
     quaternions: list[wp.quat],
+    rod_radius: float,
     meters_per_unit: float,
     up_axis: str,
     xform_cache: UsdGeom.XformCache,
@@ -559,11 +603,13 @@ def _component_relative_xform(
     else:
         tangent = _normalize_vector(points[-1] - points[-2], np.asarray((1.0, 0.0, 0.0), dtype=np.float64))
 
-    if root_points.size > 0:
-        projections = root_points @ tangent
-        anchor_world = root_points[int(np.argmax(projections))] if endpoint_name == "start" else root_points[int(np.argmin(projections))]
-    else:
-        anchor_world = np.asarray(root_world.p, dtype=np.float64)
+    anchor_world = _component_mouth_anchor(
+        root_points,
+        tangent=tangent,
+        endpoint_name=endpoint_name,
+        rod_radius=rod_radius,
+        fallback=np.asarray(root_world.p, dtype=np.float64),
+    )
 
     endpoint_world = points[0] if endpoint_name == "start" else points[-1]
     root_translation = np.asarray(root_world.p, dtype=np.float64) + (endpoint_world - anchor_world)
@@ -696,6 +742,154 @@ def _filter_shapes_against_bodies(builder: Any, shape_indices: list[int], body_i
             builder.add_shape_collision_filter_pair(shape_idx, body_shape_idx)
 
 
+def _shift_transform_translation(xform: wp.transform, offset: np.ndarray) -> wp.transform:
+    """Return an equivalent local transform after moving its body origin by offset."""
+    p = np.asarray((float(xform.p[0]), float(xform.p[1]), float(xform.p[2])), dtype=np.float64) - offset
+    return wp.transform(wp.vec3(float(p[0]), float(p[1]), float(p[2])), xform.q)
+
+
+def _shape_local_points(builder: Any, shape_idx: int) -> np.ndarray:
+    """Return representative shape points in its body-local frame."""
+    xform = builder.shape_transform[shape_idx]
+    scale = builder.shape_scale[shape_idx]
+    src = builder.shape_source[shape_idx]
+    vertices = getattr(src, "vertices", None)
+    if vertices is not None:
+        points = np.asarray(vertices, dtype=np.float64).reshape(-1, 3)
+        if points.size == 0:
+            return np.empty((0, 3), dtype=np.float64)
+        scaled = points * np.asarray((float(scale[0]), float(scale[1]), float(scale[2])), dtype=np.float64)
+    else:
+        hx, hy, hz = float(scale[0]), float(scale[1]), float(scale[2])
+        scaled = np.asarray(
+            [
+                (sx * hx, sy * hy, sz * hz)
+                for sx in (-1.0, 1.0)
+                for sy in (-1.0, 1.0)
+                for sz in (-1.0, 1.0)
+            ],
+            dtype=np.float64,
+        )
+
+    local_points = []
+    for point in scaled:
+        p_local = wp.transform_point(xform, wp.vec3(float(point[0]), float(point[1]), float(point[2])))
+        local_points.append((float(p_local[0]), float(p_local[1]), float(p_local[2])))
+    return np.asarray(local_points, dtype=np.float64)
+
+
+def _recenter_body_frames(builder: Any, body_indices: list[int]) -> dict[int, np.ndarray]:
+    """Move imported body origins to local geometry centers while preserving world geometry."""
+    offsets: dict[int, np.ndarray] = {}
+    local_coms: dict[int, np.ndarray] = {}
+    for body_idx in body_indices:
+        body_points: list[np.ndarray] = []
+        shape_indices = list(builder.body_shapes.get(int(body_idx), ()))
+        collider_shape_indices = [
+            int(shape_idx)
+            for shape_idx in shape_indices
+            if "/Colliders" in str(builder.shape_label[int(shape_idx)])
+            or "/Collider" in str(builder.shape_label[int(shape_idx)])
+        ]
+        for shape_idx in collider_shape_indices or shape_indices:
+            points = _shape_local_points(builder, int(shape_idx))
+            if points.size > 0:
+                body_points.append(points)
+        if not body_points:
+            continue
+
+        points_np = np.concatenate(body_points, axis=0)
+        points_np = points_np[np.isfinite(points_np).all(axis=1)]
+        if points_np.size == 0:
+            continue
+
+        offset = 0.5 * (points_np.min(axis=0) + points_np.max(axis=0))
+        if float(np.linalg.norm(offset)) <= 1.0e-8:
+            continue
+        offsets[int(body_idx)] = offset
+        local_coms[int(body_idx)] = points_np.mean(axis=0) - offset
+
+    for body_idx, offset in offsets.items():
+        old_body_xform = builder.body_q[body_idx]
+        new_body_p = wp.transform_point(old_body_xform, wp.vec3(float(offset[0]), float(offset[1]), float(offset[2])))
+        builder.body_q[body_idx] = wp.transform(new_body_p, old_body_xform.q)
+
+        local_com = local_coms[body_idx]
+        builder.body_com[body_idx] = wp.vec3(
+            float(local_com[0]),
+            float(local_com[1]),
+            float(local_com[2]),
+        )
+
+        for shape_idx in builder.body_shapes.get(body_idx, ()):
+            builder.shape_transform[int(shape_idx)] = _shift_transform_translation(
+                builder.shape_transform[int(shape_idx)],
+                offset,
+            )
+
+    for joint_idx in range(len(builder.joint_type)):
+        parent_body = int(builder.joint_parent[joint_idx])
+        child_body = int(builder.joint_child[joint_idx])
+        if parent_body in offsets:
+            builder.joint_X_p[joint_idx] = _shift_transform_translation(
+                builder.joint_X_p[joint_idx],
+                offsets[parent_body],
+            )
+        if child_body in offsets:
+            builder.joint_X_c[joint_idx] = _shift_transform_translation(
+                builder.joint_X_c[joint_idx],
+                offsets[child_body],
+            )
+
+    return offsets
+
+
+def _hide_oversized_connector_visuals(builder: Any, body_indices: list[int]) -> None:
+    """Hide polluted connector visuals and show their clean collider fallback."""
+    visible_bit = int(newton.ShapeFlags.VISIBLE)
+    for body_idx in body_indices:
+        shape_indices = [int(shape_idx) for shape_idx in builder.body_shapes.get(int(body_idx), ())]
+        collider_shape_indices = [
+            shape_idx
+            for shape_idx in shape_indices
+            if "/Colliders" in str(builder.shape_label[shape_idx])
+            or "/Collider" in str(builder.shape_label[shape_idx])
+        ]
+        if not collider_shape_indices:
+            continue
+
+        collider_points = [
+            points
+            for shape_idx in collider_shape_indices
+            if (points := _shape_local_points(builder, shape_idx)).size > 0
+        ]
+        if not collider_points:
+            continue
+        collider_np = np.concatenate(collider_points, axis=0)
+        collider_extent = float(np.max(collider_np.max(axis=0) - collider_np.min(axis=0)))
+        if collider_extent <= 0.0:
+            continue
+
+        hidden_visual = False
+        for shape_idx in shape_indices:
+            if shape_idx in collider_shape_indices:
+                continue
+            if not int(builder.shape_flags[shape_idx]) & visible_bit:
+                continue
+            visual_points = _shape_local_points(builder, shape_idx)
+            if visual_points.size == 0:
+                continue
+            visual_extent = float(np.max(visual_points.max(axis=0) - visual_points.min(axis=0)))
+            if visual_extent > max(collider_extent * 6.0, collider_extent + 0.25):
+                builder.shape_flags[shape_idx] = int(builder.shape_flags[shape_idx]) & ~visible_bit
+                hidden_visual = True
+
+        if hidden_visual:
+            for shape_idx in collider_shape_indices:
+                builder.shape_flags[shape_idx] = int(builder.shape_flags[shape_idx]) | visible_bit
+                builder.shape_color[shape_idx] = (1.0, 1.0, 1.0)
+
+
 def _plan_rod_rigid_imports(
     usd_path: str,
     params: dict,
@@ -783,7 +977,11 @@ def _plan_rod_rigid_imports(
                 bounds = _component_proxy_bounds(points_world, body_world)
                 if bounds is not None:
                     proxy_bounds[body_path] = bounds
-        merged_points = np.concatenate(component_points, axis=0) if component_points else np.empty((0, 3), dtype=np.float64)
+        merged_points = (
+            np.concatenate(component_points, axis=0)
+            if component_points
+            else np.empty((0, 3), dtype=np.float64)
+        )
         endpoint_name = _component_endpoint_name(points, merged_points)
         relative_xform, parent_xform, child_xform = _component_relative_xform(
             stage=stage,
@@ -791,6 +989,7 @@ def _plan_rod_rigid_imports(
             endpoint_name=endpoint_name,
             points=points,
             quaternions=quaternions,
+            rod_radius=float(params["radius"]),
             meters_per_unit=meters_per_unit,
             up_axis=up_axis,
             xform_cache=xform_cache,
@@ -903,13 +1102,24 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             root_body = path_body_map.get(component.root_body_path)
             if root_body is None:
                 raise RuntimeError(f"Failed to import rod connector root body: {component.root_body_path}")
+            component_body_indices = [
+                int(body_idx)
+                for body_path in sorted(component.body_paths)
+                if (body_idx := path_body_map.get(body_path)) is not None
+            ]
+            body_frame_offsets = _recenter_body_frames(builder, component_body_indices)
+            root_body_offset = body_frame_offsets.get(int(root_body))
+            if root_body_offset is not None:
+                child_anchor_xform = _shift_transform_translation(child_anchor_xform, root_body_offset)
+            _hide_oversized_connector_visuals(builder, component_body_indices)
             joints_after = len(builder.joint_type)
             new_joint_indices = list(range(joints_before, joints_after))
             root_joint_idx = next(
                 (
                     joint_idx
                     for joint_idx in new_joint_indices
-                    if int(builder.joint_child[joint_idx]) == int(root_body) and int(builder.joint_parent[joint_idx]) == -1
+                    if int(builder.joint_child[joint_idx]) == int(root_body)
+                    and int(builder.joint_parent[joint_idx]) == -1
                 ),
                 None,
             )
@@ -962,6 +1172,13 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                     if body_idx is None:
                         continue
                     proxy_center, proxy_half_extents = component.proxy_bounds[body_path]
+                    body_offset = body_frame_offsets.get(int(body_idx))
+                    if body_offset is not None:
+                        proxy_center = wp.vec3(
+                            float(proxy_center[0]) - float(body_offset[0]),
+                            float(proxy_center[1]) - float(body_offset[1]),
+                            float(proxy_center[2]) - float(body_offset[2]),
+                        )
                     proxy_shape_indices.append(
                         builder.add_shape_box(
                             int(body_idx),
