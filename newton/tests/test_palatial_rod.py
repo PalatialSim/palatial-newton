@@ -80,6 +80,22 @@ def _rigid_body_block(
     ).strip()
 
 
+def _fixed_joint_block(name: str, body0: str, body1: str) -> str:
+    return textwrap.dedent(
+        f"""
+        def PhysicsFixedJoint "{name}"
+        {{
+            rel physics:body0 = <{body0}>
+            rel physics:body1 = <{body1}>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }}
+        """
+    ).strip()
+
+
 def _rod_test_stage() -> str:
     ordered_centers = [
         (0.10, 0.00, 0.00),
@@ -139,6 +155,69 @@ def _rod_test_stage() -> str:
             {_rigid_body_block("CableJacket", shuffled_centers, radius=0.032)}
 
             {_rigid_body_block("ConnectorShell", [(1.200000, 0.000000, 0.100000)], radius=0.050)}
+        }}
+        """
+    ).strip() + "\n"
+
+
+def _rod_attachment_stage() -> str:
+    return textwrap.dedent(
+        f"""
+        #usda 1.0
+        (
+            defaultPrim = "World"
+            metersPerUnit = 1
+            upAxis = "Z"
+        )
+
+        def Xform "World"
+        {{
+            def PhysicsScene "physicsScene"
+            {{
+                int newton:timeStepsPerSecond = 120
+            }}
+
+            def Material "RodMaterial" (
+                prepend apiSchemas = ["NewtonRodMaterialAPI"]
+            )
+            {{
+                float newton:rod:stretchStiffness = 1234
+                float newton:rod:stretchDamping = 5.5
+                float newton:rod:bendYStiffness = 12
+                float newton:rod:bendZStiffness = 18
+                float newton:rod:torsionStiffness = 30
+            }}
+
+            def BasisCurves "RodGuide" (
+                prepend apiSchemas = ["NewtonRodAPI", "MaterialBindingAPI"]
+            )
+            {{
+                token type = "linear"
+                int[] curveVertexCounts = [2]
+                point3f[] points = [(0.000000, 0.000000, 0.000000), (1.000000, 0.000000, 0.100000)]
+                float[] widths = [0.020000, 0.020000]
+                int newton:rod:segmentCount = 5
+                token newton:deformable:simulationIntent = "rod"
+                rel material:binding = </World/RodMaterial>
+            }}
+
+            {_rigid_body_block("CablePath", [(0.10, 0.00, 0.00), (0.30, 0.10, 0.02), (0.50, 0.18, 0.04), (0.72, 0.12, 0.06), (0.90, 0.02, 0.08)], radius=0.012)}
+
+            {_rigid_body_block("CableJacket", [(0.10, 0.00, 0.00), (0.30, 0.10, 0.02), (0.50, 0.18, 0.04), (0.72, 0.12, 0.06), (0.90, 0.02, 0.08)], radius=0.032)}
+
+            {_rigid_body_block("LeftStrainReliefBoot", [(-0.08, 0.00, 0.08)], radius=0.030)}
+            {_rigid_body_block("LeftPlugShell", [(-0.16, 0.00, 0.08)], radius=0.040)}
+            {_rigid_body_block("RightStrainReliefBoot", [(1.08, 0.00, 0.08)], radius=0.030)}
+            {_rigid_body_block("RightPlugShell", [(1.16, 0.00, 0.08)], radius=0.040)}
+            {_rigid_body_block("ConnectorShell", [(1.300000, 0.000000, 0.100000)], radius=0.050)}
+
+            def Scope "Joints"
+            {{
+                {_fixed_joint_block("joint_cablejacket__leftstrainreliefboot", "/World/CableJacket", "/World/LeftStrainReliefBoot")}
+                {_fixed_joint_block("joint_leftstrainreliefboot__leftplugshell", "/World/LeftStrainReliefBoot", "/World/LeftPlugShell")}
+                {_fixed_joint_block("joint_cablejacket__rightstrainreliefboot", "/World/CableJacket", "/World/RightStrainReliefBoot")}
+                {_fixed_joint_block("joint_rightstrainreliefboot__rightplugshell", "/World/RightStrainReliefBoot", "/World/RightPlugShell")}
+            }}
         }}
         """
     ).strip() + "\n"
@@ -251,8 +330,8 @@ class TestPalatialRod(unittest.TestCase):
 
     def test_load_builds_rod_bundle(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            usd_path = Path(tmpdir) / "rod_asset.usda"
-            usd_path.write_text(_rod_test_stage(), encoding="utf-8")
+            usd_path = Path(tmpdir) / "rod_attachment_asset.usda"
+            usd_path.write_text(_rod_attachment_stage(), encoding="utf-8")
 
             bundle = load(str(usd_path), device="cpu")
 
@@ -260,9 +339,27 @@ class TestPalatialRod(unittest.TestCase):
             self.assertEqual(bundle.fps, 120)
             expected_solver = "vbd" if getattr(newton.solvers, "SolverVBD", None) else "xpbd"
             self.assertEqual(bundle.solver_name, expected_solver)
-            self.assertEqual(int(bundle.model.body_count), 6)
-            self.assertEqual(int(bundle.model.joint_count), 4)
-            self.assertEqual(bundle.state_in.body_q.shape[0], 6)
+            self.assertEqual(int(bundle.model.body_count), 10)
+            self.assertEqual(int(bundle.model.joint_count), 8)
+            self.assertEqual(bundle.state_in.body_q.shape[0], 10)
+
+            label_to_idx = {label: i for i, label in enumerate(bundle.model.body_label)}
+            left_root = label_to_idx["/World/LeftStrainReliefBoot"]
+            right_root = label_to_idx["/World/RightStrainReliefBoot"]
+            rod_start = label_to_idx["RodGuide_edge_body_0"]
+            rod_end = label_to_idx["RodGuide_edge_body_4"]
+
+            parent = bundle.model.joint_parent.numpy()
+            child = bundle.model.joint_child.numpy()
+            pairs = {(int(parent[i]), int(child[i])) for i in range(int(bundle.model.joint_count))}
+            self.assertIn((rod_start, left_root), pairs)
+            self.assertIn((rod_end, right_root), pairs)
+            self.assertNotIn((-1, left_root), pairs)
+            self.assertNotIn((-1, right_root), pairs)
+
+            body_q = bundle.state_in.body_q.numpy()
+            self.assertGreater(float(abs(body_q[left_root, 0])), 0.01)
+            self.assertGreater(float(abs(body_q[right_root, 0])), 0.01)
 
 
 if __name__ == "__main__":
