@@ -16,12 +16,19 @@ from __future__ import annotations
 import newton  # noqa: F401
 
 from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
+from .usd_utils import (
+    has_api_schema,
+    matrix_transform_points,
+    read_mesh_world_points,
+    stage_units,
+    to_newton_world,
+)
 
 from dataclasses import dataclass
 import math
 
 import numpy as np
-from pxr import Gf, Usd, UsdGeom, UsdShade
+from pxr import Usd, UsdGeom, UsdShade
 
 
 DEFAULTS = {
@@ -64,24 +71,12 @@ class _RigidBodyCandidate:
 
 def _has_rod_api(prim: Usd.Prim) -> bool:
     """True iff the prim carries NewtonRodAPI."""
-    applied = set(prim.GetAppliedSchemas())
-    raw = prim.GetMetadata("apiSchemas")
-    if raw is not None:
-        for items_attr in ("prependedItems", "appendedItems", "explicitItems"):
-            for tok in getattr(raw, items_attr, []) or []:
-                applied.add(str(tok))
-    return "NewtonRodAPI" in applied
+    return has_api_schema(prim, "NewtonRodAPI")
 
 
 def _has_rod_material_api(prim: Usd.Prim) -> bool:
     """True iff the prim carries NewtonRodMaterialAPI."""
-    applied = set(prim.GetAppliedSchemas())
-    raw = prim.GetMetadata("apiSchemas")
-    if raw is not None:
-        for items_attr in ("prependedItems", "appendedItems", "explicitItems"):
-            for tok in getattr(raw, items_attr, []) or []:
-                applied.add(str(tok))
-    return "NewtonRodMaterialAPI" in applied
+    return has_api_schema(prim, "NewtonRodMaterialAPI")
 
 
 def _find_rod_prim(stage: Usd.Stage) -> Usd.Prim | None:
@@ -135,34 +130,6 @@ def _bound_rod_material_prims(rod_prim: Usd.Prim) -> list[Usd.Prim]:
     return out
 
 
-def _stage_units(stage: Usd.Stage) -> tuple[float, str]:
-    """Return (meters_per_unit, up_axis)."""
-    meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
-    up_axis = str(UsdGeom.GetStageUpAxis(stage) or "Z")
-    return meters_per_unit, up_axis
-
-
-def _to_newton_world(points: np.ndarray, meters_per_unit: float, up_axis: str) -> np.ndarray:
-    """Convert USD world-space points into Newton world coordinates."""
-    if points.size == 0:
-        return points
-    out = np.asarray(points, dtype=np.float64) * float(meters_per_unit)
-    if up_axis == "Y":
-        out = np.stack([out[:, 0], -out[:, 2], out[:, 1]], axis=1)
-    return out
-
-
-def _matrix_transform_points(matrix: Gf.Matrix4d, points: np.ndarray) -> np.ndarray:
-    """Apply a USD transform matrix to a point cloud."""
-    if points.size == 0:
-        return points
-    world = np.empty_like(points, dtype=np.float64)
-    for i, point in enumerate(points):
-        value = matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2])))
-        world[i] = (float(value[0]), float(value[1]), float(value[2]))
-    return world
-
-
 def _read_basis_curve_points(
     stage: Usd.Stage,
     prim: Usd.Prim,
@@ -190,28 +157,9 @@ def _read_basis_curve_points(
         dtype=np.float64,
     )
     matrix = xform_cache.GetLocalToWorldTransform(prim)
-    world = _matrix_transform_points(matrix, local)
-    world = _to_newton_world(world, meters_per_unit, up_axis)
+    world = matrix_transform_points(matrix, local)
+    world = to_newton_world(world, meters_per_unit, up_axis)
     return [(float(point[0]), float(point[1]), float(point[2])) for point in world]
-
-
-def _read_mesh_world_points(
-    stage: Usd.Stage,
-    prim: Usd.Prim,
-    *,
-    meters_per_unit: float,
-    up_axis: str,
-    xform_cache: UsdGeom.XformCache,
-) -> np.ndarray:
-    """Read mesh points in Newton world coordinates."""
-    mesh = UsdGeom.Mesh(prim)
-    points = mesh.GetPointsAttr().Get()
-    if points is None:
-        return np.empty((0, 3), dtype=np.float64)
-    local = np.asarray([(float(point[0]), float(point[1]), float(point[2])) for point in points], dtype=np.float64)
-    matrix = xform_cache.GetLocalToWorldTransform(prim)
-    world = _matrix_transform_points(matrix, local)
-    return _to_newton_world(world, meters_per_unit, up_axis)
 
 
 def _collect_rigid_body_candidates(
@@ -239,7 +187,7 @@ def _collect_rigid_body_candidates(
         visual_points: list[np.ndarray] = []
         for child in prim.GetChildren():
             if child.IsA(UsdGeom.Mesh):
-                points = _read_mesh_world_points(
+                points = read_mesh_world_points(
                     stage,
                     child,
                     meters_per_unit=meters_per_unit,
@@ -255,7 +203,7 @@ def _collect_rigid_body_candidates(
             for mesh_prim in child.GetChildren():
                 if not mesh_prim.IsA(UsdGeom.Mesh):
                     continue
-                points = _read_mesh_world_points(
+                points = read_mesh_world_points(
                     stage,
                     mesh_prim,
                     meters_per_unit=meters_per_unit,
@@ -540,7 +488,7 @@ def _estimate_radius_from_visual_bbox(candidate: _RigidBodyCandidate) -> float |
 
 def _read_centerline_spec(stage: Usd.Stage, rod_prim: Usd.Prim, segment_count: int | None) -> RodCenterlineSpec:
     """Resolve the rod centerline and isotropic radius from guide + helper meshes."""
-    meters_per_unit, up_axis = _stage_units(stage)
+    meters_per_unit, up_axis = stage_units(stage)
     xform_cache = UsdGeom.XformCache()
 
     guide_points_list = _read_basis_curve_points(

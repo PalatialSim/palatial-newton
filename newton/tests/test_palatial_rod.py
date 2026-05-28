@@ -8,6 +8,12 @@ import math
 from pathlib import Path
 
 import newton
+import numpy as np
+from newton.examples.palatial.example_palatial_load import (
+    _find_longest_rod_body_chain,
+    _infer_rod_endpoint_bodies,
+    _infer_rod_twist_targets,
+)
 from newton.palatial import find_rod_prim_path, load, read_rod_params
 from newton.tests.unittest_utils import USD_AVAILABLE
 
@@ -32,6 +38,19 @@ def _quat_angle(q) -> float:
     w = abs(float(q[3])) / norm if norm > 0.0 else 1.0
     w = max(-1.0, min(1.0, w))
     return 2.0 * math.acos(w)
+
+
+def _quat_rotate(q, v):
+    qx, qy, qz, qw = q
+    vec = np.asarray(v, dtype=np.float64)
+    xyz = np.asarray((qx, qy, qz), dtype=np.float64)
+    uv = np.cross(xyz, vec)
+    uuv = np.cross(xyz, uv)
+    return vec + 2.0 * (float(qw) * uv + uuv)
+
+
+def _transform_point(body_q_row, local_point):
+    return np.asarray(body_q_row[:3], dtype=np.float64) + _quat_rotate(body_q_row[3:7], local_point)
 
 
 def _joint_relative_quat(body_q, joint_X_p, joint_X_c, parent: int, child: int):
@@ -312,6 +331,19 @@ def _straight_rod_stage() -> str:
 
 @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
 class TestPalatialRod(unittest.TestCase):
+    def test_find_longest_rod_body_chain(self):
+        labels = [
+            "/World/LeftStrainReliefBoot",
+            "ShortRod_edge_body_0",
+            "ShortRod_edge_body_1",
+            "LongRod_edge_body_0",
+            "LongRod_edge_body_1",
+            "LongRod_edge_body_2",
+            "/World/RightStrainReliefBoot",
+        ]
+        self.assertEqual(_find_longest_rod_body_chain(labels), [3, 4, 5])
+        self.assertEqual(_infer_rod_endpoint_bodies(labels), [3, 5])
+
     def test_find_and_read_rod_params(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             usd_path = Path(tmpdir) / "rod_asset.usda"
@@ -416,6 +448,20 @@ class TestPalatialRod(unittest.TestCase):
             for joint_idx, joint_label in enumerate(bundle.model.joint_label):
                 if joint_label.endswith("__rod_attach"):
                     self.assertLess(max(abs(float(v)) for v in joint_X_c[joint_idx, :3]), 0.2)
+            twist_targets = _infer_rod_twist_targets(bundle.model, body_q)
+            self.assertEqual([target.body_index for target in twist_targets], [left_root, right_root])
+            self.assertEqual(len(twist_targets), 2)
+            for target in twist_targets:
+                self.assertTrue(np.isfinite(target.local_axis).all())
+                self.assertTrue(np.isfinite(target.local_pivot).all())
+                self.assertTrue(np.isfinite(target.world_axis).all())
+                self.assertTrue(np.isfinite(target.world_pivot).all())
+                self.assertGreater(float(np.linalg.norm(target.local_axis)), 0.9)
+                self.assertGreater(float(np.linalg.norm(target.world_axis)), 0.9)
+                self.assertLess(
+                    float(np.linalg.norm(_transform_point(body_q[target.body_index], target.local_pivot) - target.world_pivot)),
+                    1.0e-6,
+                )
 
             max_rest_cable_angle = 0.0
             max_initial_cable_angle = 0.0
@@ -486,7 +532,7 @@ class TestPalatialRod(unittest.TestCase):
                 for shape_idx, shape_label in enumerate(bundle.model.shape_label)
                 if shape_label.endswith("__contact_proxy")
             ]
-            self.assertEqual(len(proxy_indices), 4)
+            self.assertEqual(len(proxy_indices), 2)
             for shape_idx in proxy_indices:
                 self.assertTrue(flags[shape_idx] & collide_bit)
                 self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_PARTICLES))
@@ -535,13 +581,15 @@ class TestPalatialRod(unittest.TestCase):
                 for shape_idx in proxy_indices
                 if bundle.model.shape_label[shape_idx] == "/World/RightStrainReliefBoot__contact_proxy"
             )
+            self.assertEqual(int(shape_body[left_proxy]), left_root)
+            self.assertEqual(int(shape_body[right_proxy]), right_root)
             for rod_shape in rod_start_shapes:
                 self.assertIn((min(rod_shape, left_proxy), max(rod_shape, left_proxy)), filter_pairs)
             for rod_shape in rod_end_shapes:
                 self.assertIn((min(rod_shape, right_proxy), max(rod_shape, right_proxy)), filter_pairs)
 
-            self.assertGreater(float(abs(body_q[left_root, 0])), 0.01)
-            self.assertGreater(float(abs(body_q[right_root, 0])), 0.01)
+            self.assertLess(float(body_q[left_root, 0]), params["points"][0][0])
+            self.assertGreater(float(body_q[right_root, 0]), params["points"][-1][0])
 
 
 if __name__ == "__main__":
