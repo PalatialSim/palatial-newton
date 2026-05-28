@@ -90,6 +90,7 @@
 ### Fixed
 
 - Fix `remesh_convex_hull` raising `QhullError` on degenerate (coincident, collinear, or coplanar) point clouds; it now returns a zero-volume fallback mesh with a `UserWarning`, raises `ValueError` on empty input, and retries Qhull with `QJ` joggle as a last resort on the 3D path
+- Fix palatial rod connector contact loading by adding simple hidden connector proxies and using a rod-scale rigid contact gap.
 - Fix narrow-phase CPU launches using GPU-sized block dimensions with kernels that observe `wp.block_dim() == 1`, avoiding out-of-bounds tile and strided-loop indexing until Warp GH-1413 is fixed
 - Fix `ViewerGL` Step button remaining clickable while the simulation is running; the button is now greyed out when not paused
 - Fix `ViewerGL` `Plots` window opening on top of the `Performance Stats` overlay by anchoring its default position to the bottom-right corner; user-dragged positions persisted in `imgui.ini` are unaffected

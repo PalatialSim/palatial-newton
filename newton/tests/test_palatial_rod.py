@@ -384,6 +384,20 @@ class TestPalatialRod(unittest.TestCase):
                     self.assertIn((min(shape_a, shape_b), max(shape_a, shape_b)), filter_pairs)
 
             flags = bundle.model.shape_flags.numpy()
+            shape_body = bundle.model.shape_body.numpy()
+            shape_scale = bundle.model.shape_scale.numpy()
+            proxy_indices = [
+                shape_idx
+                for shape_idx, shape_label in enumerate(bundle.model.shape_label)
+                if shape_label.endswith("__contact_proxy")
+            ]
+            self.assertEqual(len(proxy_indices), 4)
+            for shape_idx in proxy_indices:
+                self.assertTrue(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_SHAPES))
+                self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_PARTICLES))
+                self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.VISIBLE))
+                self.assertTrue(all(float(axis) > 0.0 for axis in shape_scale[shape_idx]))
+
             attached_shape_names = (
                 "LeftStrainReliefBoot",
                 "LeftPlugShell",
@@ -391,8 +405,29 @@ class TestPalatialRod(unittest.TestCase):
                 "RightPlugShell",
             )
             for shape_idx, shape_label in enumerate(bundle.model.shape_label):
+                if shape_idx in proxy_indices:
+                    continue
                 if any(name in shape_label for name in attached_shape_names):
                     self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_SHAPES))
+
+            rod_start_shapes = [
+                shape_idx for shape_idx, body_idx in enumerate(shape_body) if int(body_idx) == rod_start
+            ]
+            rod_end_shapes = [shape_idx for shape_idx, body_idx in enumerate(shape_body) if int(body_idx) == rod_end]
+            left_proxy = next(
+                shape_idx
+                for shape_idx in proxy_indices
+                if bundle.model.shape_label[shape_idx] == "/World/LeftStrainReliefBoot__contact_proxy"
+            )
+            right_proxy = next(
+                shape_idx
+                for shape_idx in proxy_indices
+                if bundle.model.shape_label[shape_idx] == "/World/RightStrainReliefBoot__contact_proxy"
+            )
+            for rod_shape in rod_start_shapes:
+                self.assertIn((min(rod_shape, left_proxy), max(rod_shape, left_proxy)), filter_pairs)
+            for rod_shape in rod_end_shapes:
+                self.assertIn((min(rod_shape, right_proxy), max(rod_shape, right_proxy)), filter_pairs)
 
             self.assertGreater(float(abs(body_q[left_root, 0])), 0.01)
             self.assertGreater(float(abs(body_q[right_root, 0])), 0.01)

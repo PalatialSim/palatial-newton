@@ -118,6 +118,7 @@ class _RodAttachmentComponent:
     relative_xform: _TransformParts
     parent_xform: _TransformParts
     child_xform: _TransformParts
+    proxy_bounds: dict[str, tuple[wp.vec3, wp.vec3]]
 
 
 @dataclass
@@ -492,6 +493,32 @@ def _component_endpoint_name(points: np.ndarray, component_points: np.ndarray) -
     return "start" if start_dist <= end_dist else "end"
 
 
+def _component_proxy_bounds(component_points: np.ndarray, root_world: wp.transform) -> tuple[wp.vec3, wp.vec3] | None:
+    """Return a connector contact proxy box in root-body local space."""
+    if component_points.size == 0:
+        return None
+
+    root_to_local = wp.transform_inverse(root_world)
+    local_points = []
+    for point in component_points:
+        p_local = wp.transform_point(root_to_local, wp.vec3(float(point[0]), float(point[1]), float(point[2])))
+        local_points.append((float(p_local[0]), float(p_local[1]), float(p_local[2])))
+
+    local_np = np.asarray(local_points, dtype=np.float64)
+    local_np = local_np[np.isfinite(local_np).all(axis=1)]
+    if local_np.size == 0:
+        return None
+
+    bounds_min = local_np.min(axis=0)
+    bounds_max = local_np.max(axis=0)
+    center = 0.5 * (bounds_min + bounds_max)
+    half_extents = np.maximum(0.5 * (bounds_max - bounds_min), 1.0e-4)
+    return (
+        wp.vec3(float(center[0]), float(center[1]), float(center[2])),
+        wp.vec3(float(half_extents[0]), float(half_extents[1]), float(half_extents[2])),
+    )
+
+
 def _component_relative_xform(
     *,
     stage: Usd.Stage,
@@ -656,6 +683,19 @@ def _filter_body_self_collisions(builder: Any, body_indices: list[int]) -> None:
             builder.add_shape_collision_filter_pair(shape_a, shape_b)
 
 
+def _filter_shapes_against_bodies(builder: Any, shape_indices: list[int], body_indices: list[int]) -> None:
+    """Disable collisions between selected shapes and all shapes on selected bodies."""
+    body_shape_indices: list[int] = []
+    for body_idx in body_indices:
+        body_shape_indices.extend(int(shape_idx) for shape_idx in builder.body_shapes.get(int(body_idx), ()))
+
+    for shape_idx in shape_indices:
+        for body_shape_idx in body_shape_indices:
+            if shape_idx == body_shape_idx:
+                continue
+            builder.add_shape_collision_filter_pair(shape_idx, body_shape_idx)
+
+
 def _plan_rod_rigid_imports(
     usd_path: str,
     params: dict,
@@ -719,6 +759,7 @@ def _plan_rod_rigid_imports(
             continue
 
         component_points: list[np.ndarray] = []
+        proxy_bounds: dict[str, tuple[wp.vec3, wp.vec3]] = {}
         for body_path in sorted(body_paths):
             prim = stage.GetPrimAtPath(body_path)
             points_world = _read_rigid_body_points(
@@ -732,6 +773,16 @@ def _plan_rod_rigid_imports(
             )
             if points_world.size > 0:
                 component_points.append(points_world)
+                body_world = _rigid_transform_to_newton(
+                    xform_cache.GetLocalToWorldTransform(prim),
+                    meters_per_unit=meters_per_unit,
+                    up_axis=up_axis,
+                    to_newton_world=_to_newton_world,
+                    matrix_transform_points=_matrix_transform_points,
+                )
+                bounds = _component_proxy_bounds(points_world, body_world)
+                if bounds is not None:
+                    proxy_bounds[body_path] = bounds
         merged_points = np.concatenate(component_points, axis=0) if component_points else np.empty((0, 3), dtype=np.float64)
         endpoint_name = _component_endpoint_name(points, merged_points)
         relative_xform, parent_xform, child_xform = _component_relative_xform(
@@ -756,6 +807,7 @@ def _plan_rod_rigid_imports(
                 relative_xform=relative_xform,
                 parent_xform=parent_xform,
                 child_xform=child_xform,
+                proxy_bounds=proxy_bounds,
             )
         )
         visited_bodies.update(body_paths)
@@ -801,6 +853,7 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
 
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
+        builder.rigid_gap = max(float(params["radius"]) * 0.25, 1.0e-4)
         builder.add_ground_plane()
         rod_bodies, _ = builder.add_rod(
             positions=positions,
@@ -846,7 +899,8 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 ignore_paths=ignore_paths,
             )
             component_shape_indices = range(shapes_before, len(builder.shape_flags))
-            root_body = result.get("path_body_map", {}).get(component.root_body_path)
+            path_body_map = result.get("path_body_map", {})
+            root_body = path_body_map.get(component.root_body_path)
             if root_body is None:
                 raise RuntimeError(f"Failed to import rod connector root body: {component.root_body_path}")
             joints_after = len(builder.joint_type)
@@ -892,6 +946,37 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 del builder.articulation_world[articulations_before:]
             _untint_textured_shapes(builder)
             _disable_shape_collisions(builder, component_shape_indices)
+            if component.proxy_bounds:
+                proxy_cfg = newton.ModelBuilder.ShapeConfig(
+                    density=0.0,
+                    gap=0.0,
+                    has_shape_collision=True,
+                    has_particle_collision=False,
+                    is_visible=False,
+                    mu=1.0,
+                    collision_group=1,
+                )
+                proxy_shape_indices: list[int] = []
+                for body_path in sorted(component.proxy_bounds):
+                    body_idx = path_body_map.get(body_path)
+                    if body_idx is None:
+                        continue
+                    proxy_center, proxy_half_extents = component.proxy_bounds[body_path]
+                    proxy_shape_indices.append(
+                        builder.add_shape_box(
+                            int(body_idx),
+                            xform=wp.transform(proxy_center, wp.quat_identity()),
+                            hx=float(proxy_half_extents[0]),
+                            hy=float(proxy_half_extents[1]),
+                            hz=float(proxy_half_extents[2]),
+                            cfg=proxy_cfg,
+                            label=f"{body_path}__contact_proxy",
+                        )
+                    )
+                for i, shape_a in enumerate(proxy_shape_indices):
+                    for shape_b in proxy_shape_indices[i + 1:]:
+                        builder.add_shape_collision_filter_pair(shape_a, shape_b)
+                _filter_shapes_against_bodies(builder, proxy_shape_indices, rod_bodies)
 
         if remaining_body_paths or remaining_joint_paths:
             ignore_paths = _subset_ignore_paths(
