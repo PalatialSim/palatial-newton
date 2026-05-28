@@ -612,6 +612,7 @@ def _reparent_existing_joint(
     builder.joint_X_p[joint_idx] = parent_xform
     builder.joint_X_c[joint_idx] = child_xform
     builder.joint_label[joint_idx] = label
+    builder.joint_collision_filter_parent[joint_idx] = True
 
     child_parents = builder.joint_parents.get(child_body, [])
     builder.joint_parents[child_body] = [
@@ -625,6 +626,14 @@ def _reparent_existing_joint(
         if not builder.joint_children[old_parent]:
             del builder.joint_children[old_parent]
     builder.joint_children.setdefault(parent_body, []).append((child_body, joint_idx))
+
+
+def _disable_shape_collisions(builder: Any, shape_indices: range | list[int]) -> None:
+    """Disable imported connector collisions for the minimal rod path."""
+    collision_bits = int(newton.ShapeFlags.COLLIDE_SHAPES) | int(newton.ShapeFlags.COLLIDE_PARTICLES)
+    for shape_idx in shape_indices:
+        builder.shape_flags[shape_idx] = int(builder.shape_flags[shape_idx]) & ~collision_bits
+        builder.shape_collision_group[shape_idx] = 0
 
 
 def _plan_rod_rigid_imports(
@@ -801,12 +810,17 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
             parent_articulation = builder._find_articulation_for_body(parent_body)
             joints_before = len(builder.joint_type)
             articulations_before = len(builder.articulation_start)
+            shapes_before = len(builder.shape_flags)
             result = builder.add_usd(
                 usd_path,
                 xform=(world_xform.p, world_xform.q),
+                floating=False,
                 skip_mesh_approximation=True,
+                enable_self_collisions=False,
+                hide_collision_shapes=True,
                 ignore_paths=ignore_paths,
             )
+            component_shape_indices = range(shapes_before, len(builder.shape_flags))
             root_body = result.get("path_body_map", {}).get(component.root_body_path)
             if root_body is None:
                 raise RuntimeError(f"Failed to import rod connector root body: {component.root_body_path}")
@@ -830,6 +844,11 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 )
                 new_joint_indices.append(root_joint_idx)
             else:
+                if int(builder.joint_type[root_joint_idx]) != int(newton.JointType.FIXED):
+                    raise RuntimeError(
+                        f"Rod connector root joint must be fixed, got {builder.joint_type[root_joint_idx]}: "
+                        f"{component.root_body_path}"
+                    )
                 _reparent_existing_joint(
                     builder,
                     joint_idx=root_joint_idx,
@@ -847,6 +866,7 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> Any:
                 del builder.articulation_label[articulations_before:]
                 del builder.articulation_world[articulations_before:]
             _untint_textured_shapes(builder)
+            _disable_shape_collisions(builder, component_shape_indices)
 
         if remaining_body_paths or remaining_joint_paths:
             ignore_paths = _subset_ignore_paths(

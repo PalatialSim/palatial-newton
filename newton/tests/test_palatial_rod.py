@@ -351,11 +351,29 @@ class TestPalatialRod(unittest.TestCase):
 
             parent = bundle.model.joint_parent.numpy()
             child = bundle.model.joint_child.numpy()
+            joint_type = bundle.model.joint_type.numpy()
             pairs = {(int(parent[i]), int(child[i])) for i in range(int(bundle.model.joint_count))}
+            pair_types = {
+                (int(parent[i]), int(child[i])): int(joint_type[i])
+                for i in range(int(bundle.model.joint_count))
+            }
             self.assertIn((rod_start, left_root), pairs)
             self.assertIn((rod_end, right_root), pairs)
             self.assertNotIn((-1, left_root), pairs)
             self.assertNotIn((-1, right_root), pairs)
+            self.assertEqual(pair_types[(rod_start, left_root)], int(newton.JointType.FIXED))
+            self.assertEqual(pair_types[(rod_end, right_root)], int(newton.JointType.FIXED))
+
+            flags = bundle.model.shape_flags.numpy()
+            attached_shape_names = (
+                "LeftStrainReliefBoot",
+                "LeftPlugShell",
+                "RightStrainReliefBoot",
+                "RightPlugShell",
+            )
+            for shape_idx, shape_label in enumerate(bundle.model.shape_label):
+                if any(name in shape_label for name in attached_shape_names):
+                    self.assertFalse(flags[shape_idx] & int(newton.ShapeFlags.COLLIDE_SHAPES))
 
             body_q = bundle.state_in.body_q.numpy()
             self.assertGreater(float(abs(body_q[left_root, 0])), 0.01)

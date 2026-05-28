@@ -119,6 +119,19 @@ class Example:
         if zero_gravity:
             self.model.set_gravity((0.0, 0.0, 0.0))
 
+        def _sync_body_pose_teleport() -> None:
+            if int(self.model.body_count) <= 0 or self.state_0.body_q is None:
+                return
+            if self.state_1.body_q is not None:
+                wp.copy(self.state_1.body_q, self.state_0.body_q)
+            if self.state_0.body_qd is not None:
+                self.state_0.body_qd.zero_()
+            if self.state_1.body_qd is not None:
+                self.state_1.body_qd.zero_()
+            body_q_prev = getattr(self.solver, "body_q_prev", None)
+            if body_q_prev is not None:
+                wp.copy(body_q_prev, self.state_0.body_q)
+
         # ---- Optional rotation of the asset around world axes (degrees) ----
         # Runs BEFORE drop_height so the lift always ends up along world +z,
         # regardless of which axis the user rotates around.
@@ -206,6 +219,8 @@ class Example:
                 applied_to.append(f"body_q×{n_b}")
 
             print(f"  rotate: x={rotate_x_deg} y={rotate_y_deg} z={rotate_z_deg} deg → {applied_to or 'no targets'}")
+            if n_b > 0:
+                _sync_body_pose_teleport()
 
         # Drop height: lift the asset by drop_height meters in z.
         # For articulated assets with a floating base, world pose lives in
@@ -236,17 +251,20 @@ class Example:
                         # Re-derive body_q from the new joint_q via forward kinematics.
                         newton.eval_fk(self.model, self.state_0.joint_q,
                                        self.state_0.joint_qd, self.state_0)
+                        _sync_body_pose_teleport()
 
                 # 2. Otherwise (no free joints, plain rigid): lift body_q directly.
                 elif n_bodies > 0:
                     q = self.state_0.body_q.numpy().copy()
                     q[:, 2] += float(drop_height)
                     self.state_0.body_q.assign(q)
+                    _sync_body_pose_teleport()
 
             elif bundle.body_type == "rod" and n_bodies > 0:
                 q = self.state_0.body_q.numpy().copy()
                 q[:, 2] += float(drop_height)
                 self.state_0.body_q.assign(q)
+                _sync_body_pose_teleport()
 
             elif bundle.body_type == "cloth" and n_particles > 0:
                 pq = self.state_0.particle_q.numpy().copy()
