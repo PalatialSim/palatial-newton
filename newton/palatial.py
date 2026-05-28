@@ -20,6 +20,7 @@ Example
 from ._src.palatial.load import NewtonBundle, load
 from ._src.palatial.shell import find_shell_prim_path, read_shell_params
 from ._src.palatial.cloth import find_cloth_prim_path
+from ._src.palatial.rod import find_rod_prim_path, read_rod_params
 
 __all__ = [
     "NewtonBundle",
@@ -27,4 +28,6 @@ __all__ = [
     "read_shell_params",
     "find_shell_prim_path",
     "find_cloth_prim_path",
+    "find_rod_prim_path",
+    "read_rod_params",
 ]

@@ -10,8 +10,8 @@
 #   - cloth density / drop height / friction / restitution
 #
 # So this example does NOT hand-pick a solver or stiffness — it reads the
-# bundle from the asset and steps. Same code works for the rigid mug or the
-# cloth t-shirt.
+# bundle from the asset and steps. Same code works for a rigid mug, a rod
+# cable, or a cloth t-shirt.
 #
 # Usage:
 #   python -m newton.examples.palatial.example_palatial_load <converted.usda>
@@ -29,9 +29,63 @@ import newton
 from newton.palatial import load
 
 
+def _to_newton_points(points, meters_per_unit: float, up_axis: str):
+    import numpy as _np
+
+    pts = _np.asarray(points, dtype=_np.float32) * float(meters_per_unit)
+    if up_axis == "Y":
+        pts = _np.stack([pts[:, 0], -pts[:, 2], pts[:, 1]], axis=1)
+    return pts
+
+
+def _read_usd_geometry_bounds(usd_path: str):
+    try:
+        from pxr import Gf, Usd, UsdGeom  # noqa: PLC0415
+    except Exception:
+        return None
+
+    stage = Usd.Stage.Open(usd_path)
+    if not stage:
+        return None
+
+    meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
+    up_axis = str(UsdGeom.GetStageUpAxis(stage) or "Z")
+    cache = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_])
+
+    bounds = []
+    for prim in stage.Traverse():
+        if not (prim.IsA(UsdGeom.Mesh) or prim.IsA(UsdGeom.BasisCurves)):
+            continue
+        box = cache.ComputeWorldBound(prim).ComputeAlignedBox()
+        if box.IsEmpty():
+            continue
+        mn = box.GetMin()
+        mx = box.GetMax()
+        corners = [
+            (mn[0], mn[1], mn[2]),
+            (mn[0], mn[1], mx[2]),
+            (mn[0], mx[1], mn[2]),
+            (mn[0], mx[1], mx[2]),
+            (mx[0], mn[1], mn[2]),
+            (mx[0], mn[1], mx[2]),
+            (mx[0], mx[1], mn[2]),
+            (mx[0], mx[1], mx[2]),
+        ]
+        bounds.append(_to_newton_points(corners, meters_per_unit, up_axis))
+
+    if not bounds:
+        return None
+
+    import numpy as _np
+
+    merged = _np.concatenate(bounds, axis=0)
+    return merged.min(axis=0), merged.max(axis=0)
+
+
 class Example:
     def __init__(self, viewer, usd_path: str, substeps: int | None = None,
                  drop_height: float = 0.0, device: str | None = None,
+                 zero_gravity: bool = False,
                  cloth_particle_radius: float = 0.008,
                  soft_contact_ke: float = 100.0,
                  soft_contact_kd: float = 2e-3,
@@ -61,6 +115,9 @@ class Example:
         self.state_0 = bundle.state_in
         self.state_1 = bundle.state_out
         self.control = bundle.control
+
+        if zero_gravity:
+            self.model.set_gravity((0.0, 0.0, 0.0))
 
         # ---- Optional rotation of the asset around world axes (degrees) ----
         # Runs BEFORE drop_height so the lift always ends up along world +z,
@@ -115,7 +172,7 @@ class Example:
                 applied_to.append(f"particle_q×{n_p}")
 
             # Rigid articulated: rotate FREE root joint quaternion(s).
-            elif n_j > 0:
+            elif bundle.body_type == "rigid" and n_j > 0:
                 free = int(newton.JointType.FREE)
                 jtypes = self.model.joint_type.numpy()
                 jq_start = self.model.joint_q_start.numpy()
@@ -136,7 +193,7 @@ class Example:
                     self.state_0.joint_q.assign(jq)
                     applied_to.append(f"FREE root joint(s)×{n_rot}")
 
-            # Plain rigid (no joints): rotate body_q.
+            # Rods and plain rigid bodies: rotate body poses directly.
             elif n_b > 0:
                 bq = self.state_0.body_q.numpy().copy()
                 for i in range(bq.shape[0]):
@@ -185,6 +242,11 @@ class Example:
                     q = self.state_0.body_q.numpy().copy()
                     q[:, 2] += float(drop_height)
                     self.state_0.body_q.assign(q)
+
+            elif bundle.body_type == "rod" and n_bodies > 0:
+                q = self.state_0.body_q.numpy().copy()
+                q[:, 2] += float(drop_height)
+                self.state_0.body_q.assign(q)
 
             elif bundle.body_type == "cloth" and n_particles > 0:
                 pq = self.state_0.particle_q.numpy().copy()
@@ -275,8 +337,8 @@ class Example:
         except Exception as _e:
             print(f"  diag: print failed: {_e}")
 
-        # ---- Sync body_q with joint_q via FK so MuJoCo/XPBD don't snap on first step ----
-        if int(self.model.joint_count) > 0:
+        # ---- Sync body_q with joint_q via FK so rigid articulations don't snap on first step ----
+        if bundle.body_type == "rigid" and int(self.model.joint_count) > 0:
             try:
                 newton.eval_fk(self.model, self.state_0.joint_q,
                                self.state_0.joint_qd, self.state_0)
@@ -288,7 +350,7 @@ class Example:
         # ---- Joint introspection / overrides ----
         n_joints = int(self.model.joint_count)
         self.joint_target_overrides: dict[int, float] = dict(joint_target_overrides or {})
-        if n_joints > 0:
+        if bundle.body_type == "rigid" and n_joints > 0:
             import numpy as _np
             jtypes = self.model.joint_type.numpy()
             jq_start = self.model.joint_q_start.numpy()
@@ -403,10 +465,12 @@ def main(argv=None) -> int:
     p.add_argument("--gui", action="store_true",
                    help="Open ViewerGL and run until the window is closed")
     p.add_argument("--drop-height", type=float, default=0.0,
-                   help="Lift rigid bodies by this many meters in z before sim "
+                   help="Lift rigid or rod bodies by this many meters in z before sim "
                         "(ignored for cloth — cloth drop height is baked into the USDA)")
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
+    p.add_argument("--zero-gravity", action="store_true",
+                   help="Override the loaded scene gravity with (0, 0, 0)")
 
     # Optional physics JSON: overrides --cloth-particle-radius from
     # solver.vbd_particle_self_contact_radius and --bending-ke from
@@ -508,6 +572,7 @@ def main(argv=None) -> int:
 
     ex = Example(viewer, args.usd, substeps=args.substeps,
                  drop_height=args.drop_height, device=args.device,
+                 zero_gravity=args.zero_gravity,
                  cloth_particle_radius=args.cloth_particle_radius,
                  soft_contact_ke=args.soft_contact_ke,
                  soft_contact_kd=args.soft_contact_kd,
@@ -528,36 +593,42 @@ def main(argv=None) -> int:
                  rotate_y_deg=args.rotate_y,
                  rotate_z_deg=args.rotate_z)
 
-    # ---- Top-down camera (ViewerGL only) ----
-    if args.top_view and hasattr(ex.viewer, "set_camera"):
+    usd_bounds = _read_usd_geometry_bounds(args.usd)
+
+    def _camera_bounds():
+        import numpy as _np
+
+        if usd_bounds is not None:
+            return usd_bounds
         n_p = int(ex.model.particle_count)
         if n_p > 0:
-            pq = ex.state_0.particle_q.numpy()
+            pts = ex.state_0.particle_q.numpy()
         else:
-            pq = ex.state_0.body_q.numpy()[:, 0:3]
-        cx, cy = float(pq[:, 0].mean()), float(pq[:, 1].mean())
-        zmax = float(pq[:, 2].max())
-        ext_x = float(pq[:, 0].max() - pq[:, 0].min())
-        ext_y = float(pq[:, 1].max() - pq[:, 1].min())
+            pts = ex.state_0.body_q.numpy()[:, 0:3]
+        return _np.asarray(pts.min(axis=0), dtype=float), _np.asarray(pts.max(axis=0), dtype=float)
+
+    # ---- Top-down camera (ViewerGL only) ----
+    if args.top_view and hasattr(ex.viewer, "set_camera"):
+        bounds_min, bounds_max = _camera_bounds()
+        cx = float(0.5 * (bounds_min[0] + bounds_max[0]))
+        cy = float(0.5 * (bounds_min[1] + bounds_max[1]))
+        zmax = float(bounds_max[2])
+        ext_x = float(bounds_max[0] - bounds_min[0])
+        ext_y = float(bounds_max[1] - bounds_min[1])
         height = zmax + max(ext_x, ext_y, 1.0) * 1.5
         # pitch -90 looks straight down, yaw 0 keeps +Y up in image.
         ex.viewer.set_camera(wp.vec3(cx, cy, height), -90.0, 0.0)
         print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
 
-    # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
-    elif args.record_mp4 and not args.no_auto_camera and hasattr(ex.viewer, "set_camera"):
-        import numpy as _np
-        n_p = int(ex.model.particle_count)
-        if n_p > 0:
-            pq = ex.state_0.particle_q.numpy()
-        else:
-            pq = ex.state_0.body_q.numpy()[:, 0:3]
-        cx = float(pq[:, 0].mean())
-        cy = float(pq[:, 1].mean())
-        cz_mid = float((pq[:, 2].min() + pq[:, 2].max()) * 0.5)
-        ext_x = float(pq[:, 0].max() - pq[:, 0].min())
-        ext_y = float(pq[:, 1].max() - pq[:, 1].min())
-        ext_z = float(pq[:, 2].max() - pq[:, 2].min())
+    # ---- Front-facing auto-camera for GUI / mp4 (ViewerGL only) ----
+    elif (args.record_mp4 or args.gui) and not args.no_auto_camera and hasattr(ex.viewer, "set_camera"):
+        bounds_min, bounds_max = _camera_bounds()
+        cx = float(0.5 * (bounds_min[0] + bounds_max[0]))
+        cy = float(0.5 * (bounds_min[1] + bounds_max[1]))
+        cz_mid = float(0.5 * (bounds_min[2] + bounds_max[2]))
+        ext_x = float(bounds_max[0] - bounds_min[0])
+        ext_y = float(bounds_max[1] - bounds_min[1])
+        ext_z = float(bounds_max[2] - bounds_min[2])
         dist = max(ext_x, ext_y, ext_z, 1.0) * 2.2
         # Z-up: camera in -Y, looking toward +Y → yaw=90, pitch=0.
         ex.viewer.set_camera(wp.vec3(cx, cy - dist, cz_mid), 0.0, 90.0)

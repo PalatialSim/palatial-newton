@@ -1,8 +1,9 @@
 #usda 1.0
 (
-    "Newton 2D-deformable (cloth/shell) USD API schemas. Sibling plugin to "
+    "Newton deformable USD API schemas. Sibling plugin to "
     "newton-usd-schemas. Defines NewtonDeformableAPI, NewtonShellAPI, "
-    "NewtonShellMaterialAPI, NewtonClothAPI. See "
+    "NewtonShellMaterialAPI, NewtonClothAPI, NewtonRodAPI, "
+    "NewtonRodMaterialAPI. See "
     "newton_usd/shell_skill/SKILL.md for the design rationale."
 )
 
@@ -135,4 +136,62 @@ class "NewtonClothAPI" (
     NewtonShellAPI for new authoring."""
 )
 {
+}
+
+class "NewtonRodAPI" (
+    doc = """1D-deformable rod/cable geometry. Apply on a BasisCurves prim
+    whose points represent the rod centerline. Material-response attributes
+    live on the bound Material via NewtonRodMaterialAPI."""
+)
+{
+    int newton:rod:segmentCount = 10 (
+        doc = """Number of simulation segments. When the authored centerline
+        is sparse, the loader resamples it to segmentCount + 1 points before
+        building the rod model."""
+    )
+}
+
+class "NewtonRodMaterialAPI" (
+    doc = """1D-deformable rod/cable material response. Apply on a
+    UsdShade.Material prim and bind the material to the rod guide via
+    MaterialBindingAPI (physics purpose)."""
+)
+{
+    float newton:rod:stretchStiffness = 100000.0 (
+        doc = """Axial stretch stiffness (N/m)."""
+    )
+
+    float newton:rod:stretchDamping = 0.0 (
+        doc = """Axial stretch damping."""
+    )
+
+    float newton:rod:compressStiffness = 100000.0 (
+        doc = """Axial compression stiffness (N/m). Current isotropic runtime
+        path falls back to stretch stiffness when compression is not modeled
+        separately."""
+    )
+
+    float newton:rod:bendYStiffness = 0.0 (
+        doc = """Bending stiffness about the local Y axis (N*m)."""
+    )
+
+    float newton:rod:bendYDamping = 0.0 (
+        doc = """Bending damping about the local Y axis."""
+    )
+
+    float newton:rod:bendZStiffness = 0.0 (
+        doc = """Bending stiffness about the local Z axis (N*m)."""
+    )
+
+    float newton:rod:bendZDamping = 0.0 (
+        doc = """Bending damping about the local Z axis."""
+    )
+
+    float newton:rod:torsionStiffness = 0.0 (
+        doc = """Torsional stiffness about the rod tangent (N*m)."""
+    )
+
+    float newton:rod:torsionDamping = 0.0 (
+        doc = """Torsional damping about the rod tangent."""
+    )
 }

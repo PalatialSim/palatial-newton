@@ -16,6 +16,7 @@
 - Import per-shape authored color from USD stages into `ModelBuilder.shape_color`
 - Add `TRIANGLE_PRISM` support-function type for heightfield triangles, extruding 1 m along the heightfield's local -Z so GJK/MPR naturally resolves shapes on the back side
 - Add `ViewerGL.log_scalar()` for live scalar time-series plots in the viewer
+- Add `newton.palatial` rod loading support, including `find_rod_prim_path()`, `read_rod_params()`, and automatic isotropic `load()` handling for `NewtonRodAPI` assets
 - Add `Mesh.is_watertight` property (cached) that reports whether every geometric edge is shared by exactly two triangles
 - Add `HydroelasticSDF.Config.mc_edge_clamp_min` to expose the marching-cubes edge-interpolation clamp; default `0.02` matches the previous hard-coded value. Set to `0.0` to disable the clamp and recover faithful contact-surface dynamics for threading-style scenarios (#2702)
 - Add opt-in `validate_mesh` parameter to `ModelBuilder.add_cloth_mesh()`, `ModelBuilder.add_soft_mesh()`, and `style3d.add_cloth_mesh()` that warns on degenerate geometry; add public `newton.utils.validate_triangle_mesh()` and `newton.utils.validate_tet_mesh()` utilities
