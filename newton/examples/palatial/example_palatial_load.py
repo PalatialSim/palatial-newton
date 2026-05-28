@@ -689,15 +689,26 @@ def main(argv=None) -> int:
         print(f"  physics/video decimation: 1 mp4 frame per {physics_per_video} sim step(s) "
               f"(sim_fps={ex.fps}, mp4_fps={args.mp4_fps})")
 
+    def _viewer_running() -> bool:
+        is_running = getattr(viewer, "is_running", True)
+        if callable(is_running):
+            try:
+                return bool(is_running())
+            except Exception:
+                return True
+        return bool(is_running)
+
     i = 1 if ffmpeg_proc is not None else 0
     use_step_count = bool(args.record_mp4) or not args.gui
     try:
         while True:
+            if args.gui and not _viewer_running():
+                break
             if use_step_count:
                 if i >= args.steps:
                     break
             else:
-                if not getattr(viewer, "is_running", True):
+                if not _viewer_running():
                     break
             ex.step()
             ex.render()
