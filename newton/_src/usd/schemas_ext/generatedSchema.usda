@@ -144,10 +144,56 @@ class "NewtonRodAPI" (
     live on the bound Material via NewtonRodMaterialAPI."""
 )
 {
+    uniform token newton:rod:frameDefinition = "parallelTransport" (
+        allowedTokens = ["parallelTransport"]
+        doc = """Frame convention used when generating per-segment rod
+        orientations. The current isotropic palatial runtime supports
+        parallel-transport frames."""
+    )
+
+    bool newton:rod:closed = false (
+        doc = """If true, treat the authored rod as a closed loop."""
+    )
+
+    uniform token newton:rod:crossSectionType = "roundSolid" (
+        allowedTokens = ["roundSolid", "flatRect"]
+        doc = """Cross-section kind. The stock isotropic runtime uses a
+        round rod directly and approximates flat rectangular rods with an
+        equivalent isotropic proxy."""
+    )
+
+    float newton:rod:radius = 0.005 (
+        doc = """Round rod radius [m]."""
+    )
+
+    float newton:rod:width = 0.01 (
+        doc = """Flat rectangular rod width [m]."""
+    )
+
+    float newton:rod:thickness = 0.002 (
+        doc = """Flat rectangular rod thickness [m]."""
+    )
+
     int newton:rod:segmentCount = 10 (
         doc = """Number of simulation segments. When the authored centerline
         is sparse, the loader resamples it to segmentCount + 1 points before
         building the rod model."""
+    )
+
+    float newton:rod:length = 1.0 (
+        doc = """Straight-rod fallback length [m]. Used when the loader must
+        synthesize a centerline because no authored or helper centerline is
+        available."""
+    )
+
+    float newton:rod:dropHeight = 0.3 (
+        doc = """Straight-rod fallback spawn height [m]. Used together with
+        ``newton:rod:length`` when the loader must synthesize a centerline."""
+    )
+
+    float newton:rod:twistTotal = 0.0 (
+        doc = """Total distributed twist [rad] applied when generating
+        per-segment rod orientations from the centerline."""
     )
 }
 
@@ -157,6 +203,10 @@ class "NewtonRodMaterialAPI" (
     MaterialBindingAPI (physics purpose)."""
 )
 {
+    float newton:rod:density = 1000.0 (
+        doc = """Bulk density [kg/m^3]."""
+    )
+
     float newton:rod:stretchStiffness = 100000.0 (
         doc = """Axial stretch stiffness (N/m)."""
     )
@@ -166,32 +216,59 @@ class "NewtonRodMaterialAPI" (
     )
 
     float newton:rod:compressStiffness = 100000.0 (
-        doc = """Axial compression stiffness (N/m). Current isotropic runtime
-        path falls back to stretch stiffness when compression is not modeled
-        separately."""
+        doc = """Compatibility axial compression stiffness (N/m). The
+        isotropic runtime uses stretch stiffness as the single axial
+        stiffness and only falls back to this value when stretch stiffness is
+        not authored."""
+    )
+
+    float newton:rod:compressDamping = 0.0 (
+        doc = """Compatibility axial compression damping. The isotropic
+        runtime uses stretch damping as the single axial damping value and
+        only falls back to this value when stretch damping is not authored."""
+    )
+
+    float newton:rod:bendStiffness = 0.0 (
+        doc = """Isotropic bend/twist stiffness (N*m)."""
+    )
+
+    float newton:rod:bendDamping = 0.0 (
+        doc = """Isotropic bend/twist damping."""
     )
 
     float newton:rod:bendYStiffness = 0.0 (
-        doc = """Bending stiffness about the local Y axis (N*m)."""
+        doc = """Compatibility bending stiffness about the local Y axis
+        (N*m). The isotropic runtime only uses this as a fallback when
+        isotropic bend stiffness is not authored."""
     )
 
     float newton:rod:bendYDamping = 0.0 (
-        doc = """Bending damping about the local Y axis."""
+        doc = """Compatibility bending damping about the local Y axis. The
+        isotropic runtime only uses this as a fallback when isotropic bend
+        damping is not authored."""
     )
 
     float newton:rod:bendZStiffness = 0.0 (
-        doc = """Bending stiffness about the local Z axis (N*m)."""
+        doc = """Compatibility bending stiffness about the local Z axis
+        (N*m). The isotropic runtime only uses this as a fallback when
+        isotropic bend stiffness is not authored."""
     )
 
     float newton:rod:bendZDamping = 0.0 (
-        doc = """Bending damping about the local Z axis."""
+        doc = """Compatibility bending damping about the local Z axis. The
+        isotropic runtime only uses this as a fallback when isotropic bend
+        damping is not authored."""
     )
 
     float newton:rod:torsionStiffness = 0.0 (
-        doc = """Torsional stiffness about the rod tangent (N*m)."""
+        doc = """Compatibility torsional stiffness about the rod tangent
+        (N*m). The isotropic runtime only uses this as a fallback when
+        isotropic bend stiffness is not authored."""
     )
 
     float newton:rod:torsionDamping = 0.0 (
-        doc = """Torsional damping about the rod tangent."""
+        doc = """Compatibility torsional damping about the rod tangent. The
+        isotropic runtime only uses this as a fallback when isotropic bend
+        damping is not authored."""
     )
 }

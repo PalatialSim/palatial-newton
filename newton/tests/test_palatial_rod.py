@@ -9,6 +9,7 @@ from pathlib import Path
 
 import newton
 import numpy as np
+import warp as wp
 from newton.examples.palatial.example_palatial_load import (
     _find_longest_rod_body_chain,
     _infer_rod_endpoint_bodies,
@@ -241,9 +242,8 @@ def _rod_attachment_stage() -> str:
             {{
                 float newton:rod:stretchStiffness = 1234
                 float newton:rod:stretchDamping = 5.5
-                float newton:rod:bendYStiffness = 12
-                float newton:rod:bendZStiffness = 18
-                float newton:rod:torsionStiffness = 30
+                float newton:rod:bendStiffness = 20
+                float newton:rod:bendDamping = 2.5
             }}
 
             def BasisCurves "RodGuide" (
@@ -304,12 +304,8 @@ def _straight_rod_stage() -> str:
             {
                 float newton:rod:stretchStiffness = 999
                 float newton:rod:stretchDamping = 1.5
-                float newton:rod:bendYStiffness = 4
-                float newton:rod:bendYDamping = 0.1
-                float newton:rod:bendZStiffness = 5
-                float newton:rod:bendZDamping = 0.2
-                float newton:rod:torsionStiffness = 6
-                float newton:rod:torsionDamping = 0.3
+                float newton:rod:bendStiffness = 5
+                float newton:rod:bendDamping = 0.2
             }
 
             def BasisCurves "StraightRod" (
@@ -329,8 +325,156 @@ def _straight_rod_stage() -> str:
     ).strip() + "\n"
 
 
+def _schema_attr_rod_stage() -> str:
+    return textwrap.dedent(
+        """
+        #usda 1.0
+        (
+            defaultPrim = "World"
+            metersPerUnit = 1
+            upAxis = "Z"
+        )
+
+        def Xform "World"
+        {
+            def PhysicsScene "physicsScene"
+            {
+                int newton:timeStepsPerSecond = 90
+            }
+
+            def Material "RodMaterial" (
+                prepend apiSchemas = ["NewtonRodMaterialAPI"]
+            )
+            {
+                float newton:rod:density = 640
+                float newton:rod:stretchStiffness = 100
+                float newton:rod:stretchDamping = 0.2
+                float newton:rod:compressStiffness = 300
+                float newton:rod:compressDamping = 0.6
+                float newton:rod:bendStiffness = 6
+                float newton:rod:bendDamping = 0.3
+            }
+
+            def BasisCurves "FallbackRod" (
+                prepend apiSchemas = ["NewtonRodAPI", "MaterialBindingAPI"]
+            )
+            {
+                token type = "linear"
+                int[] curveVertexCounts = [0]
+                token newton:rod:frameDefinition = "parallelTransport"
+                bool newton:rod:closed = false
+                token newton:rod:crossSectionType = "flatRect"
+                float newton:rod:radius = 0.03
+                float newton:rod:width = 0.12
+                float newton:rod:thickness = 0.02
+                int newton:rod:segmentCount = 3
+                float newton:rod:length = 1.5
+                float newton:rod:dropHeight = 0.7
+                float newton:rod:twistTotal = 0.45
+                token newton:deformable:simulationIntent = "rod"
+                rel material:binding = </World/RodMaterial>
+            }
+        }
+        """
+    ).strip() + "\n"
+
+
+def _closed_rod_stage() -> str:
+    points = [
+        (0.30, 0.00, 0.40),
+        (0.00, 0.30, 0.40),
+        (-0.30, 0.00, 0.40),
+        (0.00, -0.30, 0.40),
+        (0.30, 0.00, 0.40),
+    ]
+    return textwrap.dedent(
+        f"""
+        #usda 1.0
+        (
+            defaultPrim = "World"
+            metersPerUnit = 1
+            upAxis = "Z"
+        )
+
+        def Xform "World"
+        {{
+            def PhysicsScene "physicsScene"
+            {{
+                int newton:timeStepsPerSecond = 90
+            }}
+
+            def Material "RodMaterial" (
+                prepend apiSchemas = ["NewtonRodMaterialAPI"]
+            )
+            {{
+                float newton:rod:density = 250
+                float newton:rod:stretchStiffness = 200
+                float newton:rod:compressDamping = 0.4
+                float newton:rod:bendStiffness = 9
+                float newton:rod:bendDamping = 0.4
+            }}
+
+            def BasisCurves "ClosedRod" (
+                prepend apiSchemas = ["NewtonRodAPI", "MaterialBindingAPI"]
+            )
+            {{
+                token type = "linear"
+                int[] curveVertexCounts = [5]
+                point3f[] points = [{", ".join(_format_point(point) for point in points)}]
+                bool newton:rod:closed = true
+                float newton:rod:radius = 0.02
+                int newton:rod:segmentCount = 4
+                token newton:deformable:simulationIntent = "rod"
+                rel material:binding = </World/RodMaterial>
+            }}
+        }}
+        """
+    ).strip() + "\n"
+
+
 @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
 class TestPalatialRod(unittest.TestCase):
+    def test_registered_rod_schema_restores_expected_attrs(self):
+        from pxr import Usd, UsdGeom, UsdShade
+
+        stage = Usd.Stage.CreateInMemory()
+        rod = UsdGeom.BasisCurves.Define(stage, "/RodGuide").GetPrim()
+        material = UsdShade.Material.Define(stage, "/RodMaterial").GetPrim()
+
+        rod.ApplyAPI("NewtonRodAPI")
+        material.ApplyAPI("NewtonRodMaterialAPI")
+
+        for attr_name in (
+            "newton:rod:frameDefinition",
+            "newton:rod:closed",
+            "newton:rod:crossSectionType",
+            "newton:rod:radius",
+            "newton:rod:width",
+            "newton:rod:thickness",
+            "newton:rod:segmentCount",
+            "newton:rod:length",
+            "newton:rod:dropHeight",
+            "newton:rod:twistTotal",
+        ):
+            self.assertTrue(rod.GetAttribute(attr_name).IsValid(), attr_name)
+
+        for attr_name in (
+            "newton:rod:density",
+            "newton:rod:stretchStiffness",
+            "newton:rod:stretchDamping",
+            "newton:rod:compressStiffness",
+            "newton:rod:compressDamping",
+            "newton:rod:bendStiffness",
+            "newton:rod:bendDamping",
+            "newton:rod:bendYStiffness",
+            "newton:rod:bendYDamping",
+            "newton:rod:bendZStiffness",
+            "newton:rod:bendZDamping",
+            "newton:rod:torsionStiffness",
+            "newton:rod:torsionDamping",
+        ):
+            self.assertTrue(material.GetAttribute(attr_name).IsValid(), attr_name)
+
     def test_find_longest_rod_body_chain(self):
         labels = [
             "/World/LeftStrainReliefBoot",
@@ -357,6 +501,9 @@ class TestPalatialRod(unittest.TestCase):
             self.assertEqual(params["radiusSourcePath"], "/World/CableJacket")
             self.assertEqual(params["segmentCount"], 5)
             self.assertEqual(params["intent"], "rod")
+            self.assertEqual(params["frameDefinition"], "parallelTransport")
+            self.assertFalse(params["closed"])
+            self.assertEqual(params["crossSectionType"], "roundSolid")
             self.assertEqual(len(params["points"]), 6)
             self.assertEqual(len(params["widths"]), 2)
             self.assertAlmostEqual(params["widths"][0], 0.02, places=6)
@@ -373,8 +520,117 @@ class TestPalatialRod(unittest.TestCase):
             self.assertAlmostEqual(params["stretchStiffness"], 1234.0)
             self.assertAlmostEqual(params["stretchDamping"], 5.5)
             self.assertAlmostEqual(params["compressStiffness"], 2345.0)
+            self.assertAlmostEqual(params["axialStiffness"], 1234.0)
+            self.assertAlmostEqual(params["axialDamping"], 5.5)
             self.assertAlmostEqual(params["bendStiffness"], 20.0)
             self.assertAlmostEqual(params["bendDamping"], 8.0 / 3.0)
+
+    def test_read_restored_schema_attrs_drive_params(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "schema_attr_rod.usda"
+            usd_path.write_text(_schema_attr_rod_stage(), encoding="utf-8")
+
+            params = read_rod_params(str(usd_path))
+
+            self.assertEqual(params["guidePrimPath"], "/World/FallbackRod")
+            self.assertEqual(params["centerlineSourcePath"], "/World/FallbackRod")
+            self.assertEqual(params["radiusSourcePath"], "/World/FallbackRod")
+            self.assertEqual(params["frameDefinition"], "parallelTransport")
+            self.assertFalse(params["closed"])
+            self.assertEqual(params["crossSectionType"], "flatRect")
+            self.assertEqual(params["segmentCount"], 3)
+            self.assertAlmostEqual(params["radius"], 0.03)
+            self.assertAlmostEqual(params["width"], 0.12)
+            self.assertAlmostEqual(params["thickness"], 0.02)
+            self.assertAlmostEqual(params["length"], 1.5)
+            self.assertAlmostEqual(params["dropHeight"], 0.7)
+            self.assertAlmostEqual(params["twistTotal"], 0.45)
+            self.assertEqual(len(params["points"]), 4)
+            self.assertAlmostEqual(params["points"][0][0], 0.0)
+            self.assertAlmostEqual(params["points"][0][2], 0.7)
+            self.assertAlmostEqual(params["points"][-1][0], 1.5)
+            self.assertAlmostEqual(params["points"][-1][2], 0.7)
+            self.assertAlmostEqual(params["density"], 640.0)
+            self.assertAlmostEqual(params["effectiveDensity"], 640.0 * (0.12 * 0.02) / (math.pi * 0.03 * 0.03))
+            self.assertAlmostEqual(params["stretchStiffness"], 100.0)
+            self.assertAlmostEqual(params["compressStiffness"], 300.0)
+            self.assertAlmostEqual(params["compressDamping"], 0.6)
+            self.assertAlmostEqual(params["axialStiffness"], 100.0)
+            self.assertAlmostEqual(params["axialDamping"], 0.2)
+            self.assertAlmostEqual(params["bendStiffness"], 6.0)
+            self.assertAlmostEqual(params["bendDamping"], 0.3)
+
+    def test_load_restored_schema_attrs_drive_isotropic_model(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "schema_attr_rod.usda"
+            usd_path.write_text(_schema_attr_rod_stage(), encoding="utf-8")
+
+            bundle = load(str(usd_path), device="cpu")
+
+            self.assertEqual(bundle.body_type, "rod")
+            self.assertEqual(int(bundle.model.body_count), 3)
+            self.assertEqual(int(bundle.model.joint_count), 2)
+
+            body_q = bundle.state_in.body_q.numpy()
+            for body_index, expected_x in enumerate((0.0, 0.5, 1.0)):
+                self.assertAlmostEqual(float(body_q[body_index, 0]), expected_x, places=6)
+                self.assertAlmostEqual(float(body_q[body_index, 1]), 0.0, places=6)
+                self.assertAlmostEqual(float(body_q[body_index, 2]), 0.7, places=6)
+
+            expected_points = [wp.vec3(0.0, 0.0, 0.7), wp.vec3(0.5, 0.0, 0.7), wp.vec3(1.0, 0.0, 0.7), wp.vec3(1.5, 0.0, 0.7)]
+            expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+                expected_points,
+                twist_total=0.45,
+            )
+            for body_index in range(3):
+                expected = np.array(expected_quaternions[body_index], dtype=np.float32)
+                actual = body_q[body_index, 3:7]
+                if float(np.dot(actual, expected)) < 0.0:
+                    expected = -expected
+                np.testing.assert_allclose(actual, expected, atol=1.0e-6, rtol=0.0)
+
+            np.testing.assert_allclose(
+                bundle.model.joint_target_ke.numpy(),
+                np.array([100.0, 6.0, 100.0, 6.0], dtype=np.float32),
+                atol=1.0e-6,
+                rtol=0.0,
+            )
+            np.testing.assert_allclose(
+                bundle.model.joint_target_kd.numpy(),
+                np.array([0.2, 0.3, 0.2, 0.3], dtype=np.float32),
+                atol=1.0e-6,
+                rtol=0.0,
+            )
+
+            effective_density = 640.0 * (0.12 * 0.02) / (math.pi * 0.03 * 0.03)
+            expected_mass = effective_density * ((4.0 / 3.0) * math.pi * 0.03**3 + math.pi * 0.03**2 * 0.5)
+            self.assertAlmostEqual(float(bundle.model.body_mass.numpy()[0]), expected_mass, places=5)
+
+    def test_load_closed_rod_uses_closed_flag_and_compat_damping(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            usd_path = Path(tmpdir) / "closed_rod.usda"
+            usd_path.write_text(_closed_rod_stage(), encoding="utf-8")
+
+            params = read_rod_params(str(usd_path))
+            self.assertTrue(params["closed"])
+            self.assertAlmostEqual(params["axialDamping"], 0.4)
+
+            bundle = load(str(usd_path), device="cpu")
+
+            self.assertEqual(int(bundle.model.body_count), 4)
+            self.assertEqual(int(bundle.model.joint_count), 4)
+            np.testing.assert_allclose(
+                bundle.model.joint_target_ke.numpy(),
+                np.array([200.0, 9.0, 200.0, 9.0, 200.0, 9.0, 200.0, 9.0], dtype=np.float32),
+                atol=1.0e-6,
+                rtol=0.0,
+            )
+            np.testing.assert_allclose(
+                bundle.model.joint_target_kd.numpy(),
+                np.full(8, 0.4, dtype=np.float32),
+                atol=1.0e-6,
+                rtol=0.0,
+            )
 
     def test_read_straight_rod_without_helper_meshes(self):
         with tempfile.TemporaryDirectory() as tmpdir:

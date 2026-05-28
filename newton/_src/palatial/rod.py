@@ -35,10 +35,22 @@ DEFAULTS = {
     # geometry
     "segmentCount": None,
     "radius": 0.01,
+    "frameDefinition": "parallelTransport",
+    "closed": False,
+    "crossSectionType": "roundSolid",
+    "width": 0.01,
+    "thickness": 0.002,
+    "length": 1.0,
+    "dropHeight": 0.3,
+    "twistTotal": 0.0,
     # material
+    "density": 1000.0,
     "stretchStiffness": 1.0e5,
     "stretchDamping": 0.0,
     "compressStiffness": 1.0e5,
+    "compressDamping": 0.0,
+    "bendStiffness": 0.0,
+    "bendDamping": 0.0,
     "bendYStiffness": 0.0,
     "bendYDamping": 0.0,
     "bendZStiffness": 0.0,
@@ -92,6 +104,30 @@ def _find_rod_prim(stage: Usd.Stage) -> Usd.Prim | None:
             found_intent = prim
             break
     return found_intent
+
+
+def _geometry_source_prims(rod_prim: Usd.Prim) -> list[Usd.Prim]:
+    """Return the rod guide plus ancestors that may carry rod attrs."""
+    out: list[Usd.Prim] = []
+    seen = set()
+    prim = rod_prim
+    while prim and prim.IsValid():
+        path = prim.GetPath()
+        if path not in seen:
+            seen.add(path)
+            out.append(prim)
+        prim = prim.GetParent()
+    return out
+
+
+def _authored_attribute_value(sources: list[Usd.Prim], *names: str) -> tuple[object | None, str | None]:
+    """Return the first authored attribute value plus the prim path that authored it."""
+    for prim in sources:
+        for name in names:
+            attr = prim.GetAttribute(name)
+            if attr and attr.HasAuthoredValue():
+                return attr.Get(), prim.GetPath().pathString
+    return None, None
 
 
 def find_rod_prim_path(usd_path: str) -> str | None:
@@ -363,6 +399,24 @@ def _resample_polyline(points: np.ndarray, point_count: int) -> np.ndarray:
     return out
 
 
+def _synthesize_straight_centerline(
+    *,
+    segment_count: int,
+    length: float,
+    drop_height: float,
+) -> np.ndarray:
+    """Create a straight fallback centerline along +X at the requested height."""
+    if segment_count < 1:
+        raise RuntimeError(f"Straight rod fallback requires segmentCount >= 1 (got {segment_count})")
+    if length <= 0.0:
+        raise RuntimeError(f"Straight rod fallback requires positive length (got {length})")
+
+    x = np.linspace(0.0, float(length), int(segment_count) + 1, dtype=np.float64)
+    y = np.zeros_like(x)
+    z = np.full_like(x, float(drop_height))
+    return np.stack((x, y, z), axis=1)
+
+
 def _candidate_cross_section(candidate: _RigidBodyCandidate) -> float:
     """Return a rough half-width used for candidate ranking."""
     dims = sorted(float(value) for value in candidate.bbox_size)
@@ -486,7 +540,14 @@ def _estimate_radius_from_visual_bbox(candidate: _RigidBodyCandidate) -> float |
     return 0.5 * min(dims)
 
 
-def _read_centerline_spec(stage: Usd.Stage, rod_prim: Usd.Prim, segment_count: int | None) -> RodCenterlineSpec:
+def _read_centerline_spec(
+    stage: Usd.Stage,
+    rod_prim: Usd.Prim,
+    *,
+    segment_count: int | None,
+    fallback_length: float,
+    fallback_drop_height: float,
+) -> RodCenterlineSpec:
     """Resolve the rod centerline and isotropic radius from guide + helper meshes."""
     meters_per_unit, up_axis = stage_units(stage)
     xform_cache = UsdGeom.XformCache()
@@ -530,7 +591,13 @@ def _read_centerline_spec(stage: Usd.Stage, rod_prim: Usd.Prim, segment_count: i
         centerline = guide_points
         centerline_source_path = rod_prim.GetPath().pathString
     else:
-        raise RuntimeError(f"No usable rod centerline found for {rod_prim.GetPath().pathString}")
+        fallback_segments = int(segment_count) if segment_count is not None else 10
+        centerline = _synthesize_straight_centerline(
+            segment_count=fallback_segments,
+            length=float(fallback_length),
+            drop_height=float(fallback_drop_height),
+        )
+        centerline_source_path = rod_prim.GetPath().pathString
 
     if segment_count is not None and segment_count >= 2:
         centerline = _resample_polyline(centerline, segment_count + 1)
@@ -572,6 +639,21 @@ def _average_nonempty(values: list[float]) -> float:
     return float(sum(finite) / len(finite))
 
 
+def _canonical_or_compat_average(
+    values: dict[str, float],
+    authored: dict[str, bool],
+    canonical_key: str,
+    compat_keys: list[str],
+) -> float:
+    """Use canonical isotropic value, or average authored compatibility values."""
+    if authored.get(canonical_key, False):
+        return float(values[canonical_key])
+    compat_values = [float(values[key]) for key in compat_keys if authored.get(key, False)]
+    if compat_values:
+        return _average_nonempty(compat_values)
+    return float(values[canonical_key])
+
+
 def read_rod_params(usd_path: str) -> dict:
     """Resolve rod geometry + material parameters into a normalized dict."""
     out = dict(DEFAULTS)
@@ -579,6 +661,9 @@ def read_rod_params(usd_path: str) -> dict:
     out["guidePrimPath"] = None
     out["centerlineSourcePath"] = None
     out["radiusSourcePath"] = None
+    out["effectiveDensity"] = float(DEFAULTS["density"])
+    out["axialStiffness"] = float(DEFAULTS["stretchStiffness"])
+    out["axialDamping"] = float(DEFAULTS["stretchDamping"])
 
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -588,47 +673,161 @@ def read_rod_params(usd_path: str) -> dict:
     if not rod_prim:
         return out
 
+    geometry_sources = _geometry_source_prims(rod_prim)
     materials = _bound_rod_material_prims(rod_prim)
-    sources = [rod_prim, *materials]
+    material_sources: list[Usd.Prim] = []
+    seen_material_sources = set()
+    for prim in [*materials, *geometry_sources]:
+        path = prim.GetPath()
+        if path in seen_material_sources:
+            continue
+        seen_material_sources.add(path)
+        material_sources.append(prim)
 
-    def _walk(*names, default):
-        for prim in sources:
-            for name in names:
-                attr = prim.GetAttribute(name)
-                if attr and attr.HasAuthoredValue():
-                    return attr.Get()
-        return default
+    authored: dict[str, bool] = {}
 
-    segment_count_value = _walk("newton:rod:segmentCount", default=None)
+    def _walk_geometry(key: str, *names: str, default):
+        value, _path = _authored_attribute_value(geometry_sources, *names)
+        authored[key] = value is not None
+        return default if value is None else value
+
+    def _walk_material(key: str, *names: str, default):
+        value, _path = _authored_attribute_value(material_sources, *names)
+        authored[key] = value is not None
+        return default if value is None else value
+
+    out["frameDefinition"] = str(
+        _walk_geometry("frameDefinition", "newton:rod:frameDefinition", default=DEFAULTS["frameDefinition"])
+    )
+    out["closed"] = bool(
+        _walk_geometry("closed", "newton:rod:closed", "newton:rod:isClosed", default=DEFAULTS["closed"])
+    )
+    out["crossSectionType"] = str(
+        _walk_geometry("crossSectionType", "newton:rod:crossSectionType", default=DEFAULTS["crossSectionType"])
+    )
+    out["width"] = float(_walk_geometry("width", "newton:rod:width", default=DEFAULTS["width"]))
+    out["thickness"] = float(_walk_geometry("thickness", "newton:rod:thickness", default=DEFAULTS["thickness"]))
+    out["length"] = float(_walk_geometry("length", "newton:rod:length", default=DEFAULTS["length"]))
+    out["dropHeight"] = float(_walk_geometry("dropHeight", "newton:rod:dropHeight", default=DEFAULTS["dropHeight"]))
+    out["twistTotal"] = float(_walk_geometry("twistTotal", "newton:rod:twistTotal", default=DEFAULTS["twistTotal"]))
+
+    segment_count_value = _walk_geometry("segmentCount", "newton:rod:segmentCount", default=None)
     segment_count = None if segment_count_value is None else int(segment_count_value)
 
     out["segmentCount"] = segment_count
-    out["stretchStiffness"] = float(_walk("newton:rod:stretchStiffness", default=DEFAULTS["stretchStiffness"]))
-    out["stretchDamping"] = float(_walk("newton:rod:stretchDamping", default=DEFAULTS["stretchDamping"]))
-    out["compressStiffness"] = float(_walk("newton:rod:compressStiffness", default=DEFAULTS["compressStiffness"]))
-    out["bendYStiffness"] = float(_walk("newton:rod:bendYStiffness", default=DEFAULTS["bendYStiffness"]))
-    out["bendYDamping"] = float(_walk("newton:rod:bendYDamping", default=DEFAULTS["bendYDamping"]))
-    out["bendZStiffness"] = float(_walk("newton:rod:bendZStiffness", default=DEFAULTS["bendZStiffness"]))
-    out["bendZDamping"] = float(_walk("newton:rod:bendZDamping", default=DEFAULTS["bendZDamping"]))
-    out["torsionStiffness"] = float(_walk("newton:rod:torsionStiffness", default=DEFAULTS["torsionStiffness"]))
-    out["torsionDamping"] = float(_walk("newton:rod:torsionDamping", default=DEFAULTS["torsionDamping"]))
+    out["density"] = float(_walk_material("density", "newton:rod:density", default=DEFAULTS["density"]))
+    out["stretchStiffness"] = float(
+        _walk_material("stretchStiffness", "newton:rod:stretchStiffness", default=DEFAULTS["stretchStiffness"])
+    )
+    out["stretchDamping"] = float(
+        _walk_material("stretchDamping", "newton:rod:stretchDamping", default=DEFAULTS["stretchDamping"])
+    )
+    out["compressStiffness"] = float(
+        _walk_material("compressStiffness", "newton:rod:compressStiffness", default=DEFAULTS["compressStiffness"])
+    )
+    out["compressDamping"] = float(
+        _walk_material("compressDamping", "newton:rod:compressDamping", default=DEFAULTS["compressDamping"])
+    )
+    out["bendStiffness"] = float(
+        _walk_material("bendStiffness", "newton:rod:bendStiffness", default=DEFAULTS["bendStiffness"])
+    )
+    out["bendDamping"] = float(
+        _walk_material("bendDamping", "newton:rod:bendDamping", default=DEFAULTS["bendDamping"])
+    )
+    out["bendYStiffness"] = float(
+        _walk_material("bendYStiffness", "newton:rod:bendYStiffness", default=DEFAULTS["bendYStiffness"])
+    )
+    out["bendYDamping"] = float(
+        _walk_material("bendYDamping", "newton:rod:bendYDamping", default=DEFAULTS["bendYDamping"])
+    )
+    out["bendZStiffness"] = float(
+        _walk_material("bendZStiffness", "newton:rod:bendZStiffness", default=DEFAULTS["bendZStiffness"])
+    )
+    out["bendZDamping"] = float(
+        _walk_material("bendZDamping", "newton:rod:bendZDamping", default=DEFAULTS["bendZDamping"])
+    )
+    out["torsionStiffness"] = float(
+        _walk_material("torsionStiffness", "newton:rod:torsionStiffness", default=DEFAULTS["torsionStiffness"])
+    )
+    out["torsionDamping"] = float(
+        _walk_material("torsionDamping", "newton:rod:torsionDamping", default=DEFAULTS["torsionDamping"])
+    )
 
-    centerline = _read_centerline_spec(stage, rod_prim, segment_count=segment_count)
+    centerline = _read_centerline_spec(
+        stage,
+        rod_prim,
+        segment_count=segment_count,
+        fallback_length=float(out["length"]),
+        fallback_drop_height=float(out["dropHeight"]),
+    )
     out["points"] = centerline.points
-    out["radius"] = centerline.radius
     out["guidePrimPath"] = centerline.guide_prim_path
     out["centerlineSourcePath"] = centerline.centerline_source_path
-    out["radiusSourcePath"] = centerline.radius_source_path
 
     widths_attr = rod_prim.GetAttribute("widths")
     out["widths"] = [float(width) for width in (widths_attr.Get() or [])] if widths_attr and widths_attr.HasAuthoredValue() else []
 
-    out["bendStiffness"] = _average_nonempty(
-        [out["bendYStiffness"], out["bendZStiffness"], out["torsionStiffness"]]
+    explicit_radius_value, explicit_radius_path = _authored_attribute_value(geometry_sources, "newton:rod:radius")
+    if explicit_radius_value is not None:
+        out["radius"] = float(explicit_radius_value)
+        out["radiusSourcePath"] = explicit_radius_path
+    elif str(out["crossSectionType"]) == "flatRect" and float(out["thickness"]) > 0.0:
+        out["radius"] = 0.5 * float(out["thickness"])
+        out["radiusSourcePath"] = rod_prim.GetPath().pathString
+    else:
+        out["radius"] = centerline.radius
+        out["radiusSourcePath"] = centerline.radius_source_path
+
+    bend_values = {
+        "bendYStiffness": float(out["bendYStiffness"]),
+        "bendYDamping": float(out["bendYDamping"]),
+        "bendZStiffness": float(out["bendZStiffness"]),
+        "bendZDamping": float(out["bendZDamping"]),
+        "torsionStiffness": float(out["torsionStiffness"]),
+        "torsionDamping": float(out["torsionDamping"]),
+        "stretchStiffness": float(out["stretchStiffness"]),
+        "stretchDamping": float(out["stretchDamping"]),
+        "compressStiffness": float(out["compressStiffness"]),
+        "compressDamping": float(out["compressDamping"]),
+        "bendStiffness": float(out["bendStiffness"]),
+        "bendDamping": float(out["bendDamping"]),
+    }
+    out["axialStiffness"] = _canonical_or_compat_average(
+        bend_values,
+        authored,
+        "stretchStiffness",
+        ["compressStiffness"],
     )
-    out["bendDamping"] = _average_nonempty(
-        [out["bendYDamping"], out["bendZDamping"], out["torsionDamping"]]
+    out["axialDamping"] = _canonical_or_compat_average(
+        bend_values,
+        authored,
+        "stretchDamping",
+        ["compressDamping"],
     )
+    out["bendStiffness"] = _canonical_or_compat_average(
+        bend_values,
+        authored,
+        "bendStiffness",
+        ["bendYStiffness", "bendZStiffness", "torsionStiffness"],
+    )
+    out["bendDamping"] = _canonical_or_compat_average(
+        bend_values,
+        authored,
+        "bendDamping",
+        ["bendYDamping", "bendZDamping", "torsionDamping"],
+    )
+
+    out["effectiveDensity"] = float(out["density"])
+    if (
+        str(out["crossSectionType"]) == "flatRect"
+        and float(out["width"]) > 0.0
+        and float(out["thickness"]) > 0.0
+        and float(out["radius"]) > 0.0
+    ):
+        rect_area = float(out["width"]) * float(out["thickness"])
+        circular_area = math.pi * float(out["radius"]) * float(out["radius"])
+        if circular_area > 1.0e-12:
+            out["effectiveDensity"] = float(out["density"]) * rect_area / circular_area
 
     intent_attr = rod_prim.GetAttribute("newton:deformable:simulationIntent")
     out["intent"] = str(intent_attr.Get()) if intent_attr and intent_attr.HasAuthoredValue() else "rod"

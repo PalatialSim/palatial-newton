@@ -345,12 +345,16 @@ def _set_rod_zero_curvature_rest_poses(
     rod_bodies: list[int],
     points: np.ndarray,
     attached_components: list[tuple[int, list[int]]],
+    closed: bool,
+    twist_total: float,
 ) -> list[wp.transform]:
     """Make the rod's rest pose straight while preserving the curved initial pose."""
     initial_body_q = [_copy_transform(xform) for xform in builder.body_q]
     rest_body_q = [_copy_transform(xform) for xform in builder.body_q]
 
     if not rod_bodies:
+        return initial_body_q
+    if closed:
         return initial_body_q
 
     segment_lengths = np.linalg.norm(points[1:] - points[:-1], axis=1)
@@ -362,7 +366,10 @@ def _set_rod_zero_curvature_rest_poses(
         wp.vec3(float(point[0]), float(point[1]), float(point[2]))
         for point in rest_points_np
     ]
-    rest_quaternions = newton.utils.create_parallel_transport_cable_quaternions(rest_positions)
+    rest_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+        rest_positions,
+        twist_total=float(twist_total),
+    )
 
     for i, body_idx in enumerate(rod_bodies):
         rest_body_q[int(body_idx)] = wp.transform(rest_positions[i], rest_quaternions[i])
@@ -380,12 +387,21 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
     from .rod import read_rod_params
 
     params = read_rod_params(usd_path)
+    frame_definition = str(params.get("frameDefinition") or "parallelTransport")
+    if frame_definition not in ("parallelTransport", "parallel_transport"):
+        raise RuntimeError(
+            f"Rod asset {usd_path} must declare newton:rod:frameDefinition='parallelTransport' "
+            f"(got {frame_definition!r})"
+        )
     points = params.get("points") or []
     if len(points) < 3:
         raise RuntimeError(f"Rod asset requires at least 3 centerline points: {usd_path}")
 
     positions = [wp.vec3(float(x), float(y), float(z)) for x, y, z in points]
-    quaternions = newton.utils.create_parallel_transport_cable_quaternions(positions)
+    quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+        positions,
+        twist_total=float(params["twistTotal"]),
+    )
     points_np = np.asarray(points, dtype=np.float64)
     label = (params.get("guidePrimPath") or "rod").rsplit("/", maxsplit=1)[-1]
     extra_ignored_paths = [
@@ -408,34 +424,43 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
         builder = newton.ModelBuilder()
         builder.rigid_gap = max(float(params["radius"]) * 0.25, 1.0e-4)
         builder.add_ground_plane()
+        rod_cfg = newton.ModelBuilder.ShapeConfig(density=float(params["effectiveDensity"]))
         rod_bodies, _ = builder.add_rod(
             positions=positions,
             quaternions=quaternions,
             radius=float(params["radius"]),
-            stretch_stiffness=float(params["stretchStiffness"]),
-            stretch_damping=float(params["stretchDamping"]),
+            cfg=rod_cfg,
+            stretch_stiffness=float(params["axialStiffness"]),
+            stretch_damping=float(params["axialDamping"]),
             bend_stiffness=float(params["bendStiffness"]),
             bend_damping=float(params["bendDamping"]),
+            closed=bool(params["closed"]),
             label=label,
         )
         filter_body_self_collisions(builder, rod_bodies)
         attached_component_bodies: list[tuple[int, list[int]]] = []
 
-        for component in components:
-            attached_component_bodies.append(
-                attach_rod_connector_component(
-                    builder,
-                    component=component,
-                    usd_path=usd_path,
-                    all_body_paths=all_body_paths,
-                    all_joint_paths=all_joint_paths,
-                    extra_ignored_paths=extra_ignored_paths,
-                    rod_bodies=rod_bodies,
-                    positions=positions,
-                    quaternions=quaternions,
-                )
+        if bool(params["closed"]) and components:
+            raise RuntimeError(
+                f"Closed rod asset {usd_path} cannot auto-attach endpoint connector components"
             )
-            _untint_textured_shapes(builder)
+
+        if not bool(params["closed"]):
+            for component in components:
+                attached_component_bodies.append(
+                    attach_rod_connector_component(
+                        builder,
+                        component=component,
+                        usd_path=usd_path,
+                        all_body_paths=all_body_paths,
+                        all_joint_paths=all_joint_paths,
+                        extra_ignored_paths=extra_ignored_paths,
+                        rod_bodies=rod_bodies,
+                        positions=positions,
+                        quaternions=quaternions,
+                    )
+                )
+                _untint_textured_shapes(builder)
         import_remaining_rigid_content(
             builder,
             usd_path=usd_path,
@@ -453,6 +478,8 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
             rod_bodies=rod_bodies,
             points=points_np,
             attached_components=attached_component_bodies,
+            closed=bool(params["closed"]),
+            twist_total=float(params["twistTotal"]),
         )
         builder.color()
         model = builder.finalize()
