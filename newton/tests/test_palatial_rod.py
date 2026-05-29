@@ -180,12 +180,8 @@ def _rod_test_stage() -> str:
                 float newton:rod:stretchStiffness = 1234
                 float newton:rod:stretchDamping = 5.5
                 float newton:rod:compressStiffness = 2345
-                float newton:rod:bendYStiffness = 12
-                float newton:rod:bendYDamping = 1
-                float newton:rod:bendZStiffness = 18
-                float newton:rod:bendZDamping = 2
-                float newton:rod:torsionStiffness = 30
-                float newton:rod:torsionDamping = 5
+                float newton:rod:bendStiffness = 20
+                float newton:rod:bendDamping = 2.5
             }}
 
             def BasisCurves "RodGuide" (
@@ -466,12 +462,6 @@ class TestPalatialRod(unittest.TestCase):
             "newton:rod:compressDamping",
             "newton:rod:bendStiffness",
             "newton:rod:bendDamping",
-            "newton:rod:bendYStiffness",
-            "newton:rod:bendYDamping",
-            "newton:rod:bendZStiffness",
-            "newton:rod:bendZDamping",
-            "newton:rod:torsionStiffness",
-            "newton:rod:torsionDamping",
         ):
             self.assertTrue(material.GetAttribute(attr_name).IsValid(), attr_name)
 
@@ -523,7 +513,7 @@ class TestPalatialRod(unittest.TestCase):
             self.assertAlmostEqual(params["axialStiffness"], 1234.0)
             self.assertAlmostEqual(params["axialDamping"], 5.5)
             self.assertAlmostEqual(params["bendStiffness"], 20.0)
-            self.assertAlmostEqual(params["bendDamping"], 8.0 / 3.0)
+            self.assertAlmostEqual(params["bendDamping"], 2.5)
 
     def test_read_restored_schema_attrs_drive_params(self):
         with tempfile.TemporaryDirectory() as tmpdir:

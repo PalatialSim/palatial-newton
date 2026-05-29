@@ -235,40 +235,4 @@ class "NewtonRodMaterialAPI" (
     float newton:rod:bendDamping = 0.0 (
         doc = """Isotropic bend/twist damping."""
     )
-
-    float newton:rod:bendYStiffness = 0.0 (
-        doc = """Compatibility bending stiffness about the local Y axis
-        (N*m). The isotropic runtime only uses this as a fallback when
-        isotropic bend stiffness is not authored."""
-    )
-
-    float newton:rod:bendYDamping = 0.0 (
-        doc = """Compatibility bending damping about the local Y axis. The
-        isotropic runtime only uses this as a fallback when isotropic bend
-        damping is not authored."""
-    )
-
-    float newton:rod:bendZStiffness = 0.0 (
-        doc = """Compatibility bending stiffness about the local Z axis
-        (N*m). The isotropic runtime only uses this as a fallback when
-        isotropic bend stiffness is not authored."""
-    )
-
-    float newton:rod:bendZDamping = 0.0 (
-        doc = """Compatibility bending damping about the local Z axis. The
-        isotropic runtime only uses this as a fallback when isotropic bend
-        damping is not authored."""
-    )
-
-    float newton:rod:torsionStiffness = 0.0 (
-        doc = """Compatibility torsional stiffness about the rod tangent
-        (N*m). The isotropic runtime only uses this as a fallback when
-        isotropic bend stiffness is not authored."""
-    )
-
-    float newton:rod:torsionDamping = 0.0 (
-        doc = """Compatibility torsional damping about the rod tangent. The
-        isotropic runtime only uses this as a fallback when isotropic bend
-        damping is not authored."""
-    )
 }

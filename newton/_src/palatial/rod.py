@@ -51,12 +51,6 @@ DEFAULTS = {
     "compressDamping": 0.0,
     "bendStiffness": 0.0,
     "bendDamping": 0.0,
-    "bendYStiffness": 0.0,
-    "bendYDamping": 0.0,
-    "bendZStiffness": 0.0,
-    "bendZDamping": 0.0,
-    "torsionStiffness": 0.0,
-    "torsionDamping": 0.0,
 }
 
 
@@ -631,26 +625,17 @@ def _read_centerline_spec(
     )
 
 
-def _average_nonempty(values: list[float]) -> float:
-    """Return the arithmetic mean of finite values, or 0.0 when empty."""
-    finite = [float(value) for value in values if math.isfinite(float(value))]
-    if not finite:
-        return 0.0
-    return float(sum(finite) / len(finite))
-
-
-def _canonical_or_compat_average(
+def _canonical_or_compat_value(
     values: dict[str, float],
     authored: dict[str, bool],
     canonical_key: str,
-    compat_keys: list[str],
+    compat_key: str,
 ) -> float:
-    """Use canonical isotropic value, or average authored compatibility values."""
+    """Use canonical isotropic value, or one authored compatibility value."""
     if authored.get(canonical_key, False):
         return float(values[canonical_key])
-    compat_values = [float(values[key]) for key in compat_keys if authored.get(key, False)]
-    if compat_values:
-        return _average_nonempty(compat_values)
+    if authored.get(compat_key, False):
+        return float(values[compat_key])
     return float(values[canonical_key])
 
 
@@ -734,24 +719,6 @@ def read_rod_params(usd_path: str) -> dict:
     out["bendDamping"] = float(
         _walk_material("bendDamping", "newton:rod:bendDamping", default=DEFAULTS["bendDamping"])
     )
-    out["bendYStiffness"] = float(
-        _walk_material("bendYStiffness", "newton:rod:bendYStiffness", default=DEFAULTS["bendYStiffness"])
-    )
-    out["bendYDamping"] = float(
-        _walk_material("bendYDamping", "newton:rod:bendYDamping", default=DEFAULTS["bendYDamping"])
-    )
-    out["bendZStiffness"] = float(
-        _walk_material("bendZStiffness", "newton:rod:bendZStiffness", default=DEFAULTS["bendZStiffness"])
-    )
-    out["bendZDamping"] = float(
-        _walk_material("bendZDamping", "newton:rod:bendZDamping", default=DEFAULTS["bendZDamping"])
-    )
-    out["torsionStiffness"] = float(
-        _walk_material("torsionStiffness", "newton:rod:torsionStiffness", default=DEFAULTS["torsionStiffness"])
-    )
-    out["torsionDamping"] = float(
-        _walk_material("torsionDamping", "newton:rod:torsionDamping", default=DEFAULTS["torsionDamping"])
-    )
 
     centerline = _read_centerline_spec(
         stage,
@@ -778,13 +745,7 @@ def read_rod_params(usd_path: str) -> dict:
         out["radius"] = centerline.radius
         out["radiusSourcePath"] = centerline.radius_source_path
 
-    bend_values = {
-        "bendYStiffness": float(out["bendYStiffness"]),
-        "bendYDamping": float(out["bendYDamping"]),
-        "bendZStiffness": float(out["bendZStiffness"]),
-        "bendZDamping": float(out["bendZDamping"]),
-        "torsionStiffness": float(out["torsionStiffness"]),
-        "torsionDamping": float(out["torsionDamping"]),
+    material_values = {
         "stretchStiffness": float(out["stretchStiffness"]),
         "stretchDamping": float(out["stretchDamping"]),
         "compressStiffness": float(out["compressStiffness"]),
@@ -792,29 +753,17 @@ def read_rod_params(usd_path: str) -> dict:
         "bendStiffness": float(out["bendStiffness"]),
         "bendDamping": float(out["bendDamping"]),
     }
-    out["axialStiffness"] = _canonical_or_compat_average(
-        bend_values,
+    out["axialStiffness"] = _canonical_or_compat_value(
+        material_values,
         authored,
         "stretchStiffness",
-        ["compressStiffness"],
+        "compressStiffness",
     )
-    out["axialDamping"] = _canonical_or_compat_average(
-        bend_values,
+    out["axialDamping"] = _canonical_or_compat_value(
+        material_values,
         authored,
         "stretchDamping",
-        ["compressDamping"],
-    )
-    out["bendStiffness"] = _canonical_or_compat_average(
-        bend_values,
-        authored,
-        "bendStiffness",
-        ["bendYStiffness", "bendZStiffness", "torsionStiffness"],
-    )
-    out["bendDamping"] = _canonical_or_compat_average(
-        bend_values,
-        authored,
-        "bendDamping",
-        ["bendYDamping", "bendZDamping", "torsionDamping"],
+        "compressDamping",
     )
 
     out["effectiveDensity"] = float(out["density"])
