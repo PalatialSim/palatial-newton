@@ -450,8 +450,15 @@ class Example:
     def __init__(self, viewer, usd_path: str, substeps: int | None = None,
                  drop_height: float = 0.0, device: str | None = None,
                  solver_iterations: int | None = None,
+                 contact_update_interval: int | None = None,
+                 cuda_graph: bool = True,
+                 step_diagnostics: bool = False,
                  rod_twist_rate: float = 0.0,
                  rod_twist_end_time: float | None = None,
+                 rod_stretch_stiffness: float | None = None,
+                 rod_stretch_damping: float | None = None,
+                 rod_bend_stiffness: float | None = None,
+                 rod_bend_damping: float | None = None,
                  zero_gravity: bool = False,
                  gravity_scale: float = 1.0,
                  cloth_particle_radius: float = 0.008,
@@ -474,6 +481,9 @@ class Example:
                  rotate_y_deg: float = 0.0,
                  rotate_z_deg: float = 0.0):
         self.viewer = viewer
+        self.graph = None
+        self._cuda_graph_requested = bool(cuda_graph)
+        self._step_diagnostics = bool(step_diagnostics)
 
         # One call: parse USDA, build model, build solver with baked params.
         bundle = load(usd_path, device=device)
@@ -800,6 +810,35 @@ class Example:
                     else vbd_rigid_contact_k_start
                 )
 
+        if bundle.body_type == "rod" and hasattr(self.model, "joint_target_ke"):
+            gains_changed = False
+            ke = self.model.joint_target_ke.numpy().copy()
+            kd = self.model.joint_target_kd.numpy().copy() if hasattr(self.model, "joint_target_kd") else None
+            if rod_stretch_stiffness is not None:
+                ke[0::2] = float(rod_stretch_stiffness)
+                gains_changed = True
+            if rod_bend_stiffness is not None:
+                ke[1::2] = float(rod_bend_stiffness)
+                gains_changed = True
+            if kd is not None and rod_stretch_damping is not None:
+                kd[0::2] = float(rod_stretch_damping)
+                gains_changed = True
+            if kd is not None and rod_bend_damping is not None:
+                kd[1::2] = float(rod_bend_damping)
+                gains_changed = True
+            if gains_changed:
+                self.model.joint_target_ke.assign(ke)
+                if kd is not None:
+                    self.model.joint_target_kd.assign(kd)
+                _rebuild_solver_with_params(dict(bundle.solver_params))
+                print(
+                    "  rod-gains: "
+                    f"stretch_ke={rod_stretch_stiffness} "
+                    f"stretch_kd={rod_stretch_damping} "
+                    f"bend_ke={rod_bend_stiffness} "
+                    f"bend_kd={rod_bend_damping}"
+                )
+
         # Diagnostic: confirm gravity + per-particle mass non-zero.
         try:
             import numpy as _np
@@ -1031,17 +1070,55 @@ class Example:
                     f"end_time={self._rod_twist_end_time if math.isfinite(self._rod_twist_end_time) else 'inf'}"
                 )
 
-        self.contacts = self.model.collide(self.state_0)
+        if contact_update_interval is None:
+            contact_update_interval = (
+                min(10, self.sim_substeps)
+                if bundle.body_type == "rod" and hasattr(self.solver, "set_rigid_history_update")
+                else 1
+            )
+        if int(contact_update_interval) <= 0:
+            raise ValueError(f"contact_update_interval must be > 0, got {contact_update_interval}")
+        self.contact_update_interval = int(contact_update_interval)
+        if self.contact_update_interval > 1 and not hasattr(self.solver, "set_rigid_history_update"):
+            print(
+                "  warn: contact-update-interval > 1 requires solver.set_rigid_history_update(); "
+                "falling back to 1"
+            )
+            self.contact_update_interval = 1
+
+        self.contacts = self.model.contacts()
+        self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
 
         print(
             f"[load] usd={usd_path}  body={bundle.body_type}  "
             f"solver={bundle.solver_name}  fps={self.fps}  substeps={self.sim_substeps}  "
+            f"contact_update_interval={self.contact_update_interval}  "
             f"params={bundle.solver_params}"
         )
+        self.capture()
+
+    def capture(self):
+        self.graph = None
+        if not self._cuda_graph_requested:
+            return
+        solver_device = getattr(self.solver, "device", None)
+        if solver_device is None or not solver_device.is_cuda:
+            return
+        if self._rod_twist_body_indices is not None and math.isfinite(self._rod_twist_end_time):
+            print("  cuda-graph: disabled for finite --rod-twist-end-time")
+            return
+        try:
+            with wp.ScopedCapture() as capture:
+                self.simulate()
+            self.graph = capture.graph
+            print("  cuda-graph: enabled")
+        except Exception as exc:
+            self.graph = None
+            print(f"  cuda-graph: disabled ({exc})")
 
     def simulate(self):
-        for _ in range(self.sim_substeps):
+        for substep in range(self.sim_substeps):
             self.state_0.clear_forces()
             if self._rod_twist_body_indices is not None:
                 twist_dt = 0.0
@@ -1051,7 +1128,11 @@ class Example:
                 self._apply_rod_twist_boundary(twist_dt)
                 self._rod_twist_elapsed += self.sim_dt
             self.viewer.apply_forces(self.state_0)
-            self.contacts = self.model.collide(self.state_0)
+            refresh_contacts = (substep % self.contact_update_interval) == 0
+            if refresh_contacts:
+                self.model.collide(self.state_0, self.contacts)
+            if hasattr(self.solver, "set_rigid_history_update"):
+                self.solver.set_rigid_history_update(refresh_contacts)
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
             if self._rod_twist_body_indices is not None:
@@ -1059,8 +1140,13 @@ class Example:
 
     def step(self):
         self._frame_idx = getattr(self, "_frame_idx", -1) + 1
-        self.simulate()
+        if self.graph is not None:
+            wp.capture_launch(self.graph)
+        else:
+            self.simulate()
         self.sim_time += self.frame_dt
+        if not self._step_diagnostics:
+            return
         # Per-frame debug: always print first 5 frames, then every 30.
         try:
             if self._frame_idx < 5 or self._frame_idx % 30 == 0:
@@ -1089,6 +1175,13 @@ def main(argv=None) -> int:
                    help="Override newton:solver:substeps from the USDA")
     p.add_argument("--solver-iterations", type=int, default=None,
                    help="Override newton:solver:iterations from the USDA")
+    p.add_argument("--contact-update-interval", type=int, default=None,
+                   help="Refresh contacts every N simulation substeps. "
+                        "Default: rods use one refresh per rendered frame, other assets use 1.")
+    p.add_argument("--no-cuda-graph", action="store_true",
+                   help="Disable CUDA graph capture and run the Python substep loop each frame.")
+    p.add_argument("--step-diagnostics", action="store_true",
+                   help="Print per-frame z diagnostics. Disabled by default because it syncs GPU state.")
     p.add_argument("--gui", action="store_true",
                    help="Open ViewerGL and run until the window is closed")
     p.add_argument("--drop-height", type=float, default=0.0,
@@ -1100,6 +1193,14 @@ def main(argv=None) -> int:
     p.add_argument("--rod-twist-end-time", type=float, default=None,
                    help="For rod bundles only: stop the prescribed endpoint twist after this many seconds. "
                         "Default is no time limit.")
+    p.add_argument("--rod-stretch-stiffness", type=float, default=None,
+                   help="For rod bundles only: override axial stretch stiffness.")
+    p.add_argument("--rod-stretch-damping", type=float, default=None,
+                   help="For rod bundles only: override axial stretch damping.")
+    p.add_argument("--rod-bend-stiffness", type=float, default=None,
+                   help="For rod bundles only: override isotropic bend/twist stiffness.")
+    p.add_argument("--rod-bend-damping", type=float, default=None,
+                   help="For rod bundles only: override isotropic bend/twist damping.")
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
     p.add_argument("--zero-gravity", action="store_true",
@@ -1162,7 +1263,7 @@ def main(argv=None) -> int:
                         "to stay constant).")
     args = p.parse_args(argv)
 
-    # Apply physics-json overrides for cloth-particle-radius and bending-ke.
+    # Apply physics-json overrides for cloth and rod tuning.
     if args.physics_json:
         import json
         with open(args.physics_json) as _f:
@@ -1176,13 +1277,45 @@ def main(argv=None) -> int:
         _s = _phys.get("sim_substeps")
         if _s is None:
             _s = _phys.get("solver", {}).get("sim_substeps")
-        if _s is not None:
+        _rod = None
+        _scene = None
+        if isinstance(_phys.get("newton"), dict):
+            _rod = _phys["newton"].get("rod")
+            _scene = _phys["newton"].get("simulation_scene")
+        if _rod is None:
+            for _part in _phys.get("parts", []) or []:
+                _newton = _part.get("newton", {}) if isinstance(_part, dict) else {}
+                if isinstance(_newton.get("rod"), dict):
+                    _rod = _newton["rod"]
+                    _scene = _newton.get("simulation_scene")
+                    break
+        if _s is None and isinstance(_scene, dict):
+            _s = _scene.get("sim_substeps")
+        if _s is not None and args.substeps is None:
             args.substeps = int(_s)
+        if (
+            args.solver_iterations is None
+            and isinstance(_scene, dict)
+            and _scene.get("max_solver_iterations") is not None
+        ):
+            args.solver_iterations = int(_scene["max_solver_iterations"])
+        if isinstance(_rod, dict):
+            if _rod.get("stretch_stiffness") is not None:
+                args.rod_stretch_stiffness = float(_rod["stretch_stiffness"])
+            if _rod.get("stretch_damping") is not None:
+                args.rod_stretch_damping = float(_rod["stretch_damping"])
+            if _rod.get("bend_stiffness") is not None:
+                args.rod_bend_stiffness = float(_rod["bend_stiffness"])
+            if _rod.get("bend_damping") is not None:
+                args.rod_bend_damping = float(_rod["bend_damping"])
         print(
             f"  physics-json: {args.physics_json}  "
             f"cloth_particle_radius={args.cloth_particle_radius}  "
             f"bending_ke={args.bending_ke}  "
-            f"substeps={args.substeps}"
+            f"substeps={args.substeps}  "
+            f"solver_iterations={args.solver_iterations}  "
+            f"rod_bend_stiffness={args.rod_bend_stiffness}  "
+            f"rod_bend_damping={args.rod_bend_damping}"
         )
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
@@ -1208,8 +1341,15 @@ def main(argv=None) -> int:
     ex = Example(viewer, args.usd, substeps=args.substeps,
                  drop_height=args.drop_height, device=args.device,
                  solver_iterations=args.solver_iterations,
+                 contact_update_interval=args.contact_update_interval,
+                 cuda_graph=not args.no_cuda_graph,
+                 step_diagnostics=args.step_diagnostics,
                  rod_twist_rate=args.rod_twist_rate,
                  rod_twist_end_time=args.rod_twist_end_time,
+                 rod_stretch_stiffness=args.rod_stretch_stiffness,
+                 rod_stretch_damping=args.rod_stretch_damping,
+                 rod_bend_stiffness=args.rod_bend_stiffness,
+                 rod_bend_damping=args.rod_bend_damping,
                  zero_gravity=args.zero_gravity,
                  gravity_scale=args.gravity_scale,
                  cloth_particle_radius=args.cloth_particle_radius,
