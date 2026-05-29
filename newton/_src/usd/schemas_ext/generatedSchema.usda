@@ -1,8 +1,9 @@
 #usda 1.0
 (
-    "Newton 2D-deformable (cloth/shell) USD API schemas. Sibling plugin to "
+    "Newton deformable USD API schemas. Sibling plugin to "
     "newton-usd-schemas. Defines NewtonDeformableAPI, NewtonShellAPI, "
-    "NewtonShellMaterialAPI, NewtonClothAPI. See "
+    "NewtonShellMaterialAPI, NewtonClothAPI, NewtonRodAPI, "
+    "NewtonRodMaterialAPI. See "
     "newton_usd/shell_skill/SKILL.md for the design rationale."
 )
 
@@ -135,4 +136,103 @@ class "NewtonClothAPI" (
     NewtonShellAPI for new authoring."""
 )
 {
+}
+
+class "NewtonRodAPI" (
+    doc = """1D-deformable rod/cable geometry. Apply on a BasisCurves prim
+    whose points represent the rod centerline. Material-response attributes
+    live on the bound Material via NewtonRodMaterialAPI."""
+)
+{
+    uniform token newton:rod:frameDefinition = "parallelTransport" (
+        allowedTokens = ["parallelTransport"]
+        doc = """Frame convention used when generating per-segment rod
+        orientations. The current isotropic palatial runtime supports
+        parallel-transport frames."""
+    )
+
+    bool newton:rod:closed = false (
+        doc = """If true, treat the authored rod as a closed loop."""
+    )
+
+    uniform token newton:rod:crossSectionType = "roundSolid" (
+        allowedTokens = ["roundSolid", "flatRect"]
+        doc = """Cross-section kind. The stock isotropic runtime uses a
+        round rod directly and approximates flat rectangular rods with an
+        equivalent isotropic proxy."""
+    )
+
+    float newton:rod:radius = 0.005 (
+        doc = """Round rod radius [m]."""
+    )
+
+    float newton:rod:width = 0.01 (
+        doc = """Flat rectangular rod width [m]."""
+    )
+
+    float newton:rod:thickness = 0.002 (
+        doc = """Flat rectangular rod thickness [m]."""
+    )
+
+    int newton:rod:segmentCount = 10 (
+        doc = """Number of simulation segments. When the authored centerline
+        is sparse, the loader resamples it to segmentCount + 1 points before
+        building the rod model."""
+    )
+
+    float newton:rod:length = 1.0 (
+        doc = """Straight-rod fallback length [m]. Used when the loader must
+        synthesize a centerline because no authored or helper centerline is
+        available."""
+    )
+
+    float newton:rod:dropHeight = 0.3 (
+        doc = """Straight-rod fallback spawn height [m]. Used together with
+        ``newton:rod:length`` when the loader must synthesize a centerline."""
+    )
+
+    float newton:rod:twistTotal = 0.0 (
+        doc = """Total distributed twist [rad] applied when generating
+        per-segment rod orientations from the centerline."""
+    )
+}
+
+class "NewtonRodMaterialAPI" (
+    doc = """1D-deformable rod/cable material response. Apply on a
+    UsdShade.Material prim and bind the material to the rod guide via
+    MaterialBindingAPI (physics purpose)."""
+)
+{
+    float newton:rod:density = 1000.0 (
+        doc = """Bulk density [kg/m^3]."""
+    )
+
+    float newton:rod:stretchStiffness = 100000.0 (
+        doc = """Axial stretch stiffness (N/m)."""
+    )
+
+    float newton:rod:stretchDamping = 0.0 (
+        doc = """Axial stretch damping."""
+    )
+
+    float newton:rod:compressStiffness = 100000.0 (
+        doc = """Compatibility axial compression stiffness (N/m). The
+        isotropic runtime uses stretch stiffness as the single axial
+        stiffness and only falls back to this value when stretch stiffness is
+        not authored."""
+    )
+
+    float newton:rod:compressDamping = 0.0 (
+        doc = """Compatibility axial compression damping. The isotropic
+        runtime uses stretch damping as the single axial damping value and
+        only falls back to this value when stretch damping is not authored."""
+    )
+
+    float newton:rod:bendStiffness = 0.0 (
+        doc = """Isotropic bend/twist stiffness (N*m)."""
+    )
+
+    float newton:rod:bendDamping = 0.0 (
+        doc = """Isotropic bend/twist damping."""
+    )
 }

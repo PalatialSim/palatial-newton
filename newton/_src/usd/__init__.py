@@ -7,7 +7,7 @@ try:
 except ImportError:
     pass
 
-#defining our APIS
+# defining our deformable API plugin (shell + cloth + rod)
 import pathlib as _pathlib
 
 from pxr import Plug as _Plug

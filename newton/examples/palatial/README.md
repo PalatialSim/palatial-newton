@@ -12,8 +12,9 @@ All commands assume the `test_venv` interpreter set up in
 
 ## 1. `example_palatial_load` — generic settle / drop
 
-Works for both **cloth** and **rigid** bundles. Cloth-only knobs are ignored
-on rigid assets and vice versa.
+Works for **cloth**, **rigid**, and **rod** bundles. Cloth-only knobs are
+ignored on rigid/rod assets; joint-drive flags only apply to rigid
+articulations.
 
 ```bash
 /home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
@@ -34,6 +35,17 @@ Recording works headless (no `--gui`) or alongside `--gui`.
 ... example_palatial_load ~/new_jean.newton.usda \
   --device cuda:0 --substeps 2 \
   --record-mp4 /tmp/jean.mp4 --mp4-fps 60 --steps 1000
+```
+
+Rod example:
+
+```bash
+/home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
+  -m newton.examples.palatial.example_palatial_load \
+  ~/hdmi_rod.newton.usda \
+  --device cuda:0 --substeps 2 \
+  --zero-gravity \
+  --gui --steps 1000
 ```
 
 ## 2. `example_palatial_articulated` — drive a rigid joint chain

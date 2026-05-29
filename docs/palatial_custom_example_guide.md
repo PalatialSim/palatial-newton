@@ -13,7 +13,9 @@ from newton.palatial import (
     load,                    # USDA -> ready-to-step bundle
     find_shell_prim_path,    # prim path of the cloth/shell mesh (or None)
     find_cloth_prim_path,    # legacy: bodyType="cloth" mesh path
+    find_rod_prim_path,      # prim path of the rod guide (or None)
     read_shell_params,       # resolved cloth/shell param dict
+    read_rod_params,         # resolved rod centerline + material param dict
 )
 ```
 
@@ -31,6 +33,7 @@ step a simulation:
 | `physicsScene.newton:solver:<key>` | Solver kwargs (`iterations`, `substeps`, ...) — forwarded only when the solver accepts them |
 | `physicsScene` gravity attrs | World gravity |
 | Mesh with `NewtonShellAPI` / `NewtonClothAPI` / `newton:bodyType="cloth"` | Triggers cloth path; cloth params resolved from `newton:shell:*` (+ bound material) |
+| `BasisCurves` with `NewtonRodAPI` / `newton:deformable:simulationIntent="rod"` | Triggers isotropic rod path; centerline/radius resolved from guide geometry plus optional helper rigid bodies such as `CablePath` / `CableJacket` |
 | Standard `UsdPhysics` rigid body / collision / mass / material APIs | Rigid path via `builder.add_usd` |
 
 You should not hand-pick the solver, stiffness, or fps in your example —
@@ -57,7 +60,7 @@ bundle = load(
 @dataclass
 class NewtonBundle:
     usd_path: str
-    body_type: str        # "rigid" or "cloth"
+    body_type: str        # "rigid", "cloth", or "rod"
     solver_name: str
     fps: int
     model: Any            # newton Model
@@ -80,13 +83,13 @@ arm bolted to a workbench). `load()` patches `ModelBuilder.add_joint_free`
 during `add_usd(...)` to emit `add_joint_fixed(parent=-1, child=body)`
 instead.
 
-### Cloth solver auto-pick
+### Deformable solver auto-pick
 
-If the USDA does not pin a solver and the asset is cloth, `load()` picks:
+If the USDA does not pin a solver, `load()` picks:
 
-* `style3d` when any `newton:shell:style3d:*` attr is authored,
-* `vbd` if `SolverVBD` is available,
-* else `xpbd`.
+* for cloth: `style3d` when any `newton:shell:style3d:*` attr is authored,
+  else `vbd` if `SolverVBD` is available, else `xpbd`
+* for rod: `vbd` if `SolverVBD` is available, else `xpbd`
 
 `solver_override="..."` can override the custom solver.
 
@@ -173,7 +176,7 @@ Run with:
 uv run python my_example.py /path/to/asset.newton.usda --gui --steps 1000
 ```
 
-That single class works for **both** cloth and rigid bundles — the body
+That single class works for **cloth**, **rigid**, and **rod** bundles — the body
 type is detected inside `load()` and the right solver is constructed for
 you.
 
@@ -228,7 +231,33 @@ For legacy assets that only carry `newton:bodyType="cloth"`,
 
 ---
 
-## 6. Parameter Optimization
+## 6. Reading rod params yourself
+
+For rod assets, `read_rod_params()` resolves a normalized isotropic dict from
+the authored guide plus any helper bodies used to reconstruct a bent
+centerline or estimate radius.
+
+```python
+from newton.palatial import find_rod_prim_path, read_rod_params
+
+prim_path = find_rod_prim_path("/path/to/rod_asset.newton.usda")
+if prim_path is None:
+    raise SystemExit("not a rod asset")
+
+p = read_rod_params("/path/to/rod_asset.newton.usda")
+print(p["radius"], p["segmentCount"], p["bendStiffness"])
+print(p["centerlineSourcePath"], p["radiusSourcePath"])
+```
+
+For a straight authored rod, the guide itself becomes the centerline and
+radius source. For converted cable assets whose visible bend is represented by
+helper rigid bodies, `read_rod_params()` prefers path-like helpers (for
+example `CablePath`) as the centerline source and jacket-like helpers (for
+example `CableJacket`) as the radius source.
+
+---
+
+## 7. Parameter Optimization
 
 In case of parameter tweaking for replicating behavior, these can be changed using the NewtonBundle class.
 

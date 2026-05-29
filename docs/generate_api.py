@@ -45,6 +45,7 @@ MODULES: list[str] = [
     "newton.geometry",
     "newton.ik",
     "newton.math",
+    "newton.palatial",
     "newton.selection",
     "newton.sensors",
     "newton.solvers",

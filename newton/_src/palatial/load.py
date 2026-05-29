@@ -2,8 +2,8 @@
 
 Reads solver name + simulation params from the converted USD's PhysicsScene and
 body-type markers, then constructs a Newton Model + Solver. Caller does not
-need to know whether the asset is rigid or cloth, or which solver was baked in
-— that information is read from the file.
+need to know whether the asset is rigid, cloth, or rod, or which solver was
+baked in — that information is read from the file.
 
 Convention (authored by framework.convert):
 
@@ -36,17 +36,26 @@ Usage:
 from __future__ import annotations
 
 # `import newton` registers the newton_usd_schemas plugin (NewtonSceneAPI,
-# NewtonXpbdSceneAPI, ...) AND the bundled `newton_shell` plugin
+# NewtonXpbdSceneAPI, ...) AND the bundled schema-extension plugin
 # (NewtonShellAPI, NewtonClothAPI, NewtonDeformableAPI,
-# NewtonShellMaterialAPI) via newton/_src/usd/__init__.py. Must precede
-# any pxr.Usd usage in the same process.
+# NewtonShellMaterialAPI, NewtonRodAPI, NewtonRodMaterialAPI) via
+# newton/_src/usd/__init__.py. Must precede any pxr.Usd usage in the
+# same process.
 import newton
 
 from pxr import Usd, UsdGeom
 
 from dataclasses import dataclass
 from typing import Any
+import numpy as np
 import warp as wp
+from .rod_connectors import (
+    _normalize_vector,
+    attach_rod_connector_component,
+    filter_body_self_collisions,
+    import_remaining_rigid_content,
+    plan_rod_rigid_imports,
+)
 
 
 def _build_solver(name: str, model: Any, params: dict) -> Any:
@@ -86,11 +95,25 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
     return cls(model, **kwargs)
 
 
+def _untint_textured_shapes(builder: Any) -> None:
+    """Force textured imported shapes to use white fallback vertex colors."""
+    for i, src in enumerate(builder.shape_source):
+        if src is not None and getattr(src, "texture", None) is not None:
+            builder.shape_color[i] = (1.0, 1.0, 1.0)
+
+@dataclass
+class _RodBuildResult:
+    """Rod model plus the curved input pose used as the initial state."""
+
+    model: Any
+    initial_body_q: Any
+
+
 @dataclass
 class NewtonBundle:
     """Everything needed to step the converted asset in Newton."""
     usd_path: str
-    body_type: str           # "rigid" or "cloth"
+    body_type: str           # "rigid", "cloth", or "rod"
     solver_name: str
     fps: int
     model: Any
@@ -134,13 +157,14 @@ def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
 
 
 def _detect_body_type(stage: Usd.Stage) -> str:
-    """Return 'cloth' if any prim looks cloth/shell-like, else 'rigid'.
+    """Return 'cloth'/'rod' when detected, else 'rigid'.
 
     Three positive signals (any of):
       - new schema: NewtonShellAPI / NewtonClothAPI in applied schemas
       - new schema: newton:deformable:simulationIntent in {cloth, shell}
       - legacy: newton:bodyType="cloth"
     """
+    rod_found = False
     for prim in stage.Traverse():
         applied = set(prim.GetAppliedSchemas())
         # Also walk raw apiSchemas listOp so we still see tokens when this
@@ -158,7 +182,12 @@ def _detect_body_type(stage: Usd.Stage) -> str:
         a = prim.GetAttribute("newton:bodyType")
         if a and a.HasAuthoredValue() and str(a.Get()) == "cloth":
             return "cloth"
-    return "rigid"
+        if "NewtonRodAPI" in applied:
+            rod_found = True
+        a = prim.GetAttribute("newton:deformable:simulationIntent")
+        if a and a.HasAuthoredValue() and str(a.Get()) == "rod":
+            rod_found = True
+    return "rod" if rod_found else "rigid"
 
 
 def _build_rigid(usd_path: str, *, device: str | None = None,
@@ -205,17 +234,8 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
         # SimReady ships pre-decomposed convex pieces; tell parser to trust them.
         builder.add_usd(usd_path, skip_mesh_approximation=True)
 
-        # Workaround for Newton bug: ModelBuilder._shape_palette_color() is
-        # used as the fallback display color when a USD material authors its
-        # diffuseColor as a *texture connection* (UsdPreviewSurface +
-        # UsdUVTexture) rather than a scalar value. The viewer's fragment
-        # shader then computes `albedo = ObjectColor * texture`, tinting the
-        # diffuse texture with the synthetic per-shape palette (cyan/green/
-        # yellow). Override the color to white for any shape whose source
-        # mesh has a texture, so the texture renders untinted.
-        for i, src in enumerate(builder.shape_source):
-            if src is not None and getattr(src, "texture", None) is not None:
-                builder.shape_color[i] = (1.0, 1.0, 1.0)
+        # Workaround for textured USD imports being tinted by palette colors.
+        _untint_textured_shapes(builder)
 
         if fix_base:
             # Catch any body that escaped all the inline routes (e.g. orphaned
@@ -311,6 +331,175 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
 
         return builder.finalize()
 
+def _copy_transform(xform: wp.transform) -> wp.transform:
+    """Return a value copy of a Warp transform."""
+    return wp.transform(
+        wp.vec3(float(xform.p[0]), float(xform.p[1]), float(xform.p[2])),
+        wp.quat(float(xform.q[0]), float(xform.q[1]), float(xform.q[2]), float(xform.q[3])),
+    )
+
+
+def _set_rod_zero_curvature_rest_poses(
+    builder: Any,
+    *,
+    rod_bodies: list[int],
+    points: np.ndarray,
+    attached_components: list[tuple[int, list[int]]],
+    closed: bool,
+    twist_total: float,
+) -> list[wp.transform]:
+    """Make the rod's rest pose straight while preserving the curved initial pose."""
+    initial_body_q = [_copy_transform(xform) for xform in builder.body_q]
+    rest_body_q = [_copy_transform(xform) for xform in builder.body_q]
+
+    if not rod_bodies:
+        return initial_body_q
+    if closed:
+        return initial_body_q
+
+    segment_lengths = np.linalg.norm(points[1:] - points[:-1], axis=1)
+    fallback_tangent = points[1] - points[0] if len(points) > 1 else np.asarray((1.0, 0.0, 0.0))
+    rest_direction = _normalize_vector(points[-1] - points[0], fallback_tangent)
+    distances = np.concatenate(([0.0], np.cumsum(segment_lengths)))
+    rest_points_np = points[0] + distances[:, None] * rest_direction[None, :]
+    rest_positions = [
+        wp.vec3(float(point[0]), float(point[1]), float(point[2]))
+        for point in rest_points_np
+    ]
+    rest_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+        rest_positions,
+        twist_total=float(twist_total),
+    )
+
+    for i, body_idx in enumerate(rod_bodies):
+        rest_body_q[int(body_idx)] = wp.transform(rest_positions[i], rest_quaternions[i])
+
+    for parent_body, body_indices in attached_components:
+        rest_from_initial = rest_body_q[int(parent_body)] * wp.transform_inverse(initial_body_q[int(parent_body)])
+        for body_idx in body_indices:
+            rest_body_q[int(body_idx)] = rest_from_initial * initial_body_q[int(body_idx)]
+
+    builder.body_q[:] = rest_body_q
+    return initial_body_q
+
+def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
+    """Build an isotropic rod model from a NewtonRodAPI-authored USDA."""
+    from .rod import read_rod_params
+
+    params = read_rod_params(usd_path)
+    frame_definition = str(params.get("frameDefinition") or "parallelTransport")
+    if frame_definition not in ("parallelTransport", "parallel_transport"):
+        raise RuntimeError(
+            f"Rod asset {usd_path} must declare newton:rod:frameDefinition='parallelTransport' "
+            f"(got {frame_definition!r})"
+        )
+    points = params.get("points") or []
+    if len(points) < 3:
+        raise RuntimeError(f"Rod asset requires at least 3 centerline points: {usd_path}")
+
+    positions = [wp.vec3(float(x), float(y), float(z)) for x, y, z in points]
+    quaternions = newton.utils.create_parallel_transport_cable_quaternions(
+        positions,
+        twist_total=float(params["twistTotal"]),
+    )
+    points_np = np.asarray(points, dtype=np.float64)
+    label = (params.get("guidePrimPath") or "rod").rsplit("/", maxsplit=1)[-1]
+    extra_ignored_paths = [
+        str(path)
+        for path in (
+            params.get("guidePrimPath"),
+            params.get("centerlineSourcePath"),
+            params.get("radiusSourcePath"),
+        )
+        if path
+    ]
+    components, remaining_body_paths, remaining_joint_paths, all_body_paths, all_joint_paths = plan_rod_rigid_imports(
+        usd_path,
+        params,
+        points_np,
+        quaternions,
+    )
+
+    with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
+        builder = newton.ModelBuilder()
+        builder.rigid_gap = max(float(params["radius"]) * 0.25, 1.0e-4)
+        builder.add_ground_plane()
+        rod_cfg = newton.ModelBuilder.ShapeConfig(density=float(params["effectiveDensity"]))
+        rod_bodies, _ = builder.add_rod(
+            positions=positions,
+            quaternions=quaternions,
+            radius=float(params["radius"]),
+            cfg=rod_cfg,
+            stretch_stiffness=float(params["axialStiffness"]),
+            stretch_damping=float(params["axialDamping"]),
+            bend_stiffness=float(params["bendStiffness"]),
+            bend_damping=float(params["bendDamping"]),
+            closed=bool(params["closed"]),
+            label=label,
+        )
+        filter_body_self_collisions(builder, rod_bodies)
+        attached_component_bodies: list[tuple[int, list[int]]] = []
+
+        if bool(params["closed"]) and components:
+            raise RuntimeError(
+                f"Closed rod asset {usd_path} cannot auto-attach endpoint connector components"
+            )
+
+        if not bool(params["closed"]):
+            for component in components:
+                attached_component_bodies.append(
+                    attach_rod_connector_component(
+                        builder,
+                        component=component,
+                        usd_path=usd_path,
+                        all_body_paths=all_body_paths,
+                        all_joint_paths=all_joint_paths,
+                        extra_ignored_paths=extra_ignored_paths,
+                        rod_bodies=rod_bodies,
+                        positions=positions,
+                        quaternions=quaternions,
+                    )
+                )
+                _untint_textured_shapes(builder)
+        import_remaining_rigid_content(
+            builder,
+            usd_path=usd_path,
+            all_body_paths=all_body_paths,
+            all_joint_paths=all_joint_paths,
+            remaining_body_paths=remaining_body_paths,
+            remaining_joint_paths=remaining_joint_paths,
+            extra_ignored_paths=extra_ignored_paths,
+        )
+        if remaining_body_paths or remaining_joint_paths:
+            _untint_textured_shapes(builder)
+
+        initial_body_q = _set_rod_zero_curvature_rest_poses(
+            builder,
+            rod_bodies=rod_bodies,
+            points=points_np,
+            attached_components=attached_component_bodies,
+            closed=bool(params["closed"]),
+            twist_total=float(params["twistTotal"]),
+        )
+        builder.color()
+        model = builder.finalize()
+        return _RodBuildResult(
+            model=model,
+            initial_body_q=wp.array(initial_body_q, dtype=wp.transform, device=model.body_q.device),
+        )
+
+
+def _scene_pins_solver(stage: Usd.Stage) -> bool:
+    """Return True when the stage explicitly authors a solver choice."""
+    for prim in stage.Traverse():
+        if prim.GetTypeName() != "PhysicsScene":
+            continue
+        a = prim.GetAttribute("newton:solver")
+        if not (a and a.HasAuthoredValue()):
+            a = prim.GetAttribute("palatial:solver")
+        return bool(a and a.HasAuthoredValue())
+    return False
+
 
 def load(usd_path: str, *, solver_override: str | None = None,
          device: str | None = None, fix_base: bool = False) -> NewtonBundle:
@@ -325,18 +514,9 @@ def load(usd_path: str, *, solver_override: str | None = None,
     solver_name, fps, solver_params = _read_scene_params(stage)
     body_type = _detect_body_type(stage)
 
-    # Defensive: if the scene didn't pin a solver but the asset is cloth,
-    # pick a sensible default. VBD by default; Style3D when any
-    # newton:shell:style3d:* attr is authored (those are Style3D-only).
-    scene_pinned = False
-    for prim in stage.Traverse():
-        if prim.GetTypeName() == "PhysicsScene":
-            a = prim.GetAttribute("newton:solver")
-            if not (a and a.HasAuthoredValue()):
-                a = prim.GetAttribute("palatial:solver")
-            if a and a.HasAuthoredValue():
-                scene_pinned = True
-            break
+    # Defensive: if the scene didn't pin a solver, pick a sensible default
+    # for deformable assets.
+    scene_pinned = _scene_pins_solver(stage)
     if body_type == "cloth" and not scene_pinned and not solver_override:
         style3d_used = False
         for prim in stage.Traverse():
@@ -354,6 +534,11 @@ def load(usd_path: str, *, solver_override: str | None = None,
             solver_name = "vbd"
         else:
             solver_name = "xpbd"
+    elif body_type == "rod" and not scene_pinned and not solver_override:
+        if getattr(newton.solvers, "SolverVBD", None):
+            solver_name = "vbd"
+        else:
+            solver_name = "xpbd"
     del stage
 
     if solver_override:
@@ -362,12 +547,29 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if device is None:
         device = str(wp.get_preferred_device())
 
+    rod_initial_body_q = None
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name)
+    elif body_type == "rod":
+        rod_result = _build_rod(usd_path, device=device)
+        model = rod_result.model
+        rod_initial_body_q = rod_result.initial_body_q
     else:
         model = _build_rigid(usd_path, device=device, fix_base=fix_base)
 
     solver = _build_solver(solver_name, model, solver_params)
+    state_in = model.state()
+    state_out = model.state()
+    if rod_initial_body_q is not None:
+        wp.copy(state_in.body_q, rod_initial_body_q)
+        wp.copy(state_out.body_q, rod_initial_body_q)
+        if state_in.body_qd is not None:
+            state_in.body_qd.zero_()
+        if state_out.body_qd is not None:
+            state_out.body_qd.zero_()
+        body_q_prev = getattr(solver, "body_q_prev", None)
+        if body_q_prev is not None:
+            wp.copy(body_q_prev, rod_initial_body_q)
 
     return NewtonBundle(
         usd_path=usd_path,
@@ -376,8 +578,8 @@ def load(usd_path: str, *, solver_override: str | None = None,
         fps=fps,
         model=model,
         solver=solver,
-        state_in=model.state(),
-        state_out=model.state(),
+        state_in=state_in,
+        state_out=state_out,
         control=model.control(),
         solver_params=solver_params,
     )
