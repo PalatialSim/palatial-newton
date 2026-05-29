@@ -452,6 +452,10 @@ class Example:
                  solver_iterations: int | None = None,
                  rod_twist_rate: float = 0.0,
                  rod_twist_end_time: float | None = None,
+                 rod_stretch_stiffness: float | None = None,
+                 rod_stretch_damping: float | None = None,
+                 rod_bend_stiffness: float | None = None,
+                 rod_bend_damping: float | None = None,
                  zero_gravity: bool = False,
                  gravity_scale: float = 1.0,
                  cloth_particle_radius: float = 0.008,
@@ -800,6 +804,35 @@ class Example:
                     else vbd_rigid_contact_k_start
                 )
 
+        if bundle.body_type == "rod" and hasattr(self.model, "joint_target_ke"):
+            gains_changed = False
+            ke = self.model.joint_target_ke.numpy().copy()
+            kd = self.model.joint_target_kd.numpy().copy() if hasattr(self.model, "joint_target_kd") else None
+            if rod_stretch_stiffness is not None:
+                ke[0::2] = float(rod_stretch_stiffness)
+                gains_changed = True
+            if rod_bend_stiffness is not None:
+                ke[1::2] = float(rod_bend_stiffness)
+                gains_changed = True
+            if kd is not None and rod_stretch_damping is not None:
+                kd[0::2] = float(rod_stretch_damping)
+                gains_changed = True
+            if kd is not None and rod_bend_damping is not None:
+                kd[1::2] = float(rod_bend_damping)
+                gains_changed = True
+            if gains_changed:
+                self.model.joint_target_ke.assign(ke)
+                if kd is not None:
+                    self.model.joint_target_kd.assign(kd)
+                _rebuild_solver_with_params(dict(bundle.solver_params))
+                print(
+                    "  rod-gains: "
+                    f"stretch_ke={rod_stretch_stiffness} "
+                    f"stretch_kd={rod_stretch_damping} "
+                    f"bend_ke={rod_bend_stiffness} "
+                    f"bend_kd={rod_bend_damping}"
+                )
+
         # Diagnostic: confirm gravity + per-particle mass non-zero.
         try:
             import numpy as _np
@@ -1100,6 +1133,14 @@ def main(argv=None) -> int:
     p.add_argument("--rod-twist-end-time", type=float, default=None,
                    help="For rod bundles only: stop the prescribed endpoint twist after this many seconds. "
                         "Default is no time limit.")
+    p.add_argument("--rod-stretch-stiffness", type=float, default=None,
+                   help="For rod bundles only: override axial stretch stiffness.")
+    p.add_argument("--rod-stretch-damping", type=float, default=None,
+                   help="For rod bundles only: override axial stretch damping.")
+    p.add_argument("--rod-bend-stiffness", type=float, default=None,
+                   help="For rod bundles only: override isotropic bend/twist stiffness.")
+    p.add_argument("--rod-bend-damping", type=float, default=None,
+                   help="For rod bundles only: override isotropic bend/twist damping.")
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
     p.add_argument("--zero-gravity", action="store_true",
@@ -1162,7 +1203,7 @@ def main(argv=None) -> int:
                         "to stay constant).")
     args = p.parse_args(argv)
 
-    # Apply physics-json overrides for cloth-particle-radius and bending-ke.
+    # Apply physics-json overrides for cloth and rod tuning.
     if args.physics_json:
         import json
         with open(args.physics_json) as _f:
@@ -1176,13 +1217,45 @@ def main(argv=None) -> int:
         _s = _phys.get("sim_substeps")
         if _s is None:
             _s = _phys.get("solver", {}).get("sim_substeps")
-        if _s is not None:
+        _rod = None
+        _scene = None
+        if isinstance(_phys.get("newton"), dict):
+            _rod = _phys["newton"].get("rod")
+            _scene = _phys["newton"].get("simulation_scene")
+        if _rod is None:
+            for _part in _phys.get("parts", []) or []:
+                _newton = _part.get("newton", {}) if isinstance(_part, dict) else {}
+                if isinstance(_newton.get("rod"), dict):
+                    _rod = _newton["rod"]
+                    _scene = _newton.get("simulation_scene")
+                    break
+        if _s is None and isinstance(_scene, dict):
+            _s = _scene.get("sim_substeps")
+        if _s is not None and args.substeps is None:
             args.substeps = int(_s)
+        if (
+            args.solver_iterations is None
+            and isinstance(_scene, dict)
+            and _scene.get("max_solver_iterations") is not None
+        ):
+            args.solver_iterations = int(_scene["max_solver_iterations"])
+        if isinstance(_rod, dict):
+            if _rod.get("stretch_stiffness") is not None:
+                args.rod_stretch_stiffness = float(_rod["stretch_stiffness"])
+            if _rod.get("stretch_damping") is not None:
+                args.rod_stretch_damping = float(_rod["stretch_damping"])
+            if _rod.get("bend_stiffness") is not None:
+                args.rod_bend_stiffness = float(_rod["bend_stiffness"])
+            if _rod.get("bend_damping") is not None:
+                args.rod_bend_damping = float(_rod["bend_damping"])
         print(
             f"  physics-json: {args.physics_json}  "
             f"cloth_particle_radius={args.cloth_particle_radius}  "
             f"bending_ke={args.bending_ke}  "
-            f"substeps={args.substeps}"
+            f"substeps={args.substeps}  "
+            f"solver_iterations={args.solver_iterations}  "
+            f"rod_bend_stiffness={args.rod_bend_stiffness}  "
+            f"rod_bend_damping={args.rod_bend_damping}"
         )
 
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
@@ -1210,6 +1283,10 @@ def main(argv=None) -> int:
                  solver_iterations=args.solver_iterations,
                  rod_twist_rate=args.rod_twist_rate,
                  rod_twist_end_time=args.rod_twist_end_time,
+                 rod_stretch_stiffness=args.rod_stretch_stiffness,
+                 rod_stretch_damping=args.rod_stretch_damping,
+                 rod_bend_stiffness=args.rod_bend_stiffness,
+                 rod_bend_damping=args.rod_bend_damping,
                  zero_gravity=args.zero_gravity,
                  gravity_scale=args.gravity_scale,
                  cloth_particle_radius=args.cloth_particle_radius,
