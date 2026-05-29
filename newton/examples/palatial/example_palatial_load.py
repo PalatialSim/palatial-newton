@@ -450,6 +450,9 @@ class Example:
     def __init__(self, viewer, usd_path: str, substeps: int | None = None,
                  drop_height: float = 0.0, device: str | None = None,
                  solver_iterations: int | None = None,
+                 contact_update_interval: int | None = None,
+                 cuda_graph: bool = True,
+                 step_diagnostics: bool = False,
                  rod_twist_rate: float = 0.0,
                  rod_twist_end_time: float | None = None,
                  rod_stretch_stiffness: float | None = None,
@@ -478,6 +481,9 @@ class Example:
                  rotate_y_deg: float = 0.0,
                  rotate_z_deg: float = 0.0):
         self.viewer = viewer
+        self.graph = None
+        self._cuda_graph_requested = bool(cuda_graph)
+        self._step_diagnostics = bool(step_diagnostics)
 
         # One call: parse USDA, build model, build solver with baked params.
         bundle = load(usd_path, device=device)
@@ -1064,17 +1070,55 @@ class Example:
                     f"end_time={self._rod_twist_end_time if math.isfinite(self._rod_twist_end_time) else 'inf'}"
                 )
 
-        self.contacts = self.model.collide(self.state_0)
+        if contact_update_interval is None:
+            contact_update_interval = (
+                min(10, self.sim_substeps)
+                if bundle.body_type == "rod" and hasattr(self.solver, "set_rigid_history_update")
+                else 1
+            )
+        if int(contact_update_interval) <= 0:
+            raise ValueError(f"contact_update_interval must be > 0, got {contact_update_interval}")
+        self.contact_update_interval = int(contact_update_interval)
+        if self.contact_update_interval > 1 and not hasattr(self.solver, "set_rigid_history_update"):
+            print(
+                "  warn: contact-update-interval > 1 requires solver.set_rigid_history_update(); "
+                "falling back to 1"
+            )
+            self.contact_update_interval = 1
+
+        self.contacts = self.model.contacts()
+        self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
 
         print(
             f"[load] usd={usd_path}  body={bundle.body_type}  "
             f"solver={bundle.solver_name}  fps={self.fps}  substeps={self.sim_substeps}  "
+            f"contact_update_interval={self.contact_update_interval}  "
             f"params={bundle.solver_params}"
         )
+        self.capture()
+
+    def capture(self):
+        self.graph = None
+        if not self._cuda_graph_requested:
+            return
+        solver_device = getattr(self.solver, "device", None)
+        if solver_device is None or not solver_device.is_cuda:
+            return
+        if self._rod_twist_body_indices is not None and math.isfinite(self._rod_twist_end_time):
+            print("  cuda-graph: disabled for finite --rod-twist-end-time")
+            return
+        try:
+            with wp.ScopedCapture() as capture:
+                self.simulate()
+            self.graph = capture.graph
+            print("  cuda-graph: enabled")
+        except Exception as exc:
+            self.graph = None
+            print(f"  cuda-graph: disabled ({exc})")
 
     def simulate(self):
-        for _ in range(self.sim_substeps):
+        for substep in range(self.sim_substeps):
             self.state_0.clear_forces()
             if self._rod_twist_body_indices is not None:
                 twist_dt = 0.0
@@ -1084,7 +1128,11 @@ class Example:
                 self._apply_rod_twist_boundary(twist_dt)
                 self._rod_twist_elapsed += self.sim_dt
             self.viewer.apply_forces(self.state_0)
-            self.contacts = self.model.collide(self.state_0)
+            refresh_contacts = (substep % self.contact_update_interval) == 0
+            if refresh_contacts:
+                self.model.collide(self.state_0, self.contacts)
+            if hasattr(self.solver, "set_rigid_history_update"):
+                self.solver.set_rigid_history_update(refresh_contacts)
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
             if self._rod_twist_body_indices is not None:
@@ -1092,8 +1140,13 @@ class Example:
 
     def step(self):
         self._frame_idx = getattr(self, "_frame_idx", -1) + 1
-        self.simulate()
+        if self.graph is not None:
+            wp.capture_launch(self.graph)
+        else:
+            self.simulate()
         self.sim_time += self.frame_dt
+        if not self._step_diagnostics:
+            return
         # Per-frame debug: always print first 5 frames, then every 30.
         try:
             if self._frame_idx < 5 or self._frame_idx % 30 == 0:
@@ -1122,6 +1175,13 @@ def main(argv=None) -> int:
                    help="Override newton:solver:substeps from the USDA")
     p.add_argument("--solver-iterations", type=int, default=None,
                    help="Override newton:solver:iterations from the USDA")
+    p.add_argument("--contact-update-interval", type=int, default=None,
+                   help="Refresh contacts every N simulation substeps. "
+                        "Default: rods use one refresh per rendered frame, other assets use 1.")
+    p.add_argument("--no-cuda-graph", action="store_true",
+                   help="Disable CUDA graph capture and run the Python substep loop each frame.")
+    p.add_argument("--step-diagnostics", action="store_true",
+                   help="Print per-frame z diagnostics. Disabled by default because it syncs GPU state.")
     p.add_argument("--gui", action="store_true",
                    help="Open ViewerGL and run until the window is closed")
     p.add_argument("--drop-height", type=float, default=0.0,
@@ -1281,6 +1341,9 @@ def main(argv=None) -> int:
     ex = Example(viewer, args.usd, substeps=args.substeps,
                  drop_height=args.drop_height, device=args.device,
                  solver_iterations=args.solver_iterations,
+                 contact_update_interval=args.contact_update_interval,
+                 cuda_graph=not args.no_cuda_graph,
+                 step_diagnostics=args.step_diagnostics,
                  rod_twist_rate=args.rod_twist_rate,
                  rod_twist_end_time=args.rod_twist_end_time,
                  rod_stretch_stiffness=args.rod_stretch_stiffness,
