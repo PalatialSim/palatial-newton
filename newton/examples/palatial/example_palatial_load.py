@@ -461,17 +461,23 @@ class Example:
                  rod_bend_damping: float | None = None,
                  zero_gravity: bool = False,
                  gravity_scale: float = 1.0,
-                 cloth_particle_radius: float = 0.008,
+                 cloth_particle_radius: float | None = None,
                  soft_contact_ke: float = 100.0,
                  soft_contact_kd: float = 2e-3,
-                 soft_contact_mu: float = 1.0,
+                 soft_contact_mu: float = 0.25,
                  soft_contact_max: int = 1_000_000,
                  cloth_body_contact_margin: float = 0.01,
-                 bending_ke: float = 1e-4,
-                 bending_kd: float = 1e-3,
+                 bending_ke: float | None = None,
+                 bending_kd: float | None = None,
                  vbd_particle_edge_contact_buffer_size: int = 64,
                  vbd_particle_collision_detection_interval: int = -1,
                  vbd_rigid_contact_k_start: float | None = None,
+                 vbd_particle_vertex_contact_buffer_size: int = 16,
+                 vbd_particle_topological_contact_filter_threshold: int = 1,
+                 vbd_particle_rest_shape_contact_exclusion_radius: float = 0.005,
+                 preset: bool = False,
+                 cloth_zero_edge_rest_angle: bool = False,
+                 use_collision_pipeline: bool = False,
                  joint_q_overrides: dict[int, float] | None = None,
                  joint_target_overrides: dict[int, float] | None = None,
                  joint_target_ke: float | None = None,
@@ -479,14 +485,16 @@ class Example:
                  list_joints: bool = False,
                  rotate_x_deg: float = 0.0,
                  rotate_y_deg: float = 0.0,
-                 rotate_z_deg: float = 0.0):
+                 rotate_z_deg: float = 0.0,
+                 table: dict | None = None):
         self.viewer = viewer
         self.graph = None
         self._cuda_graph_requested = bool(cuda_graph)
         self._step_diagnostics = bool(step_diagnostics)
+        self._table = table
 
         # One call: parse USDA, build model, build solver with baked params.
-        bundle = load(usd_path, device=device)
+        bundle = load(usd_path, device=device, table=table)
         self.bundle = bundle
         self.model = bundle.model
         self.solver = bundle.solver
@@ -595,21 +603,19 @@ class Example:
 
         def _rebuild_solver_with_params(params: dict) -> None:
             import inspect as _inspect
+            from newton._src.palatial.load import (
+                _SOLVER_PARAM_ALIAS as _alias,
+                _dedupe_solver_params as _dedupe,
+            )
 
-            alias = {
-                "iterations": "iterations",
-                "substeps": "substeps",
-                "particleEnableSelfContact": "particle_enable_self_contact",
-                "particleSelfContactRadius": "particle_self_contact_radius",
-                "particleSelfContactMargin": "particle_self_contact_margin",
-            }
+            params = _dedupe(params)
             try:
                 accepted = set(_inspect.signature(type(self.solver).__init__).parameters)
             except (TypeError, ValueError):
                 accepted = set()
             kwargs = {}
             for key, value in params.items():
-                py_key = alias.get(key, key)
+                py_key = _alias.get(key, key)
                 if py_key in accepted:
                     kwargs[py_key] = value
             self.solver = type(self.solver)(self.model, **kwargs)
@@ -639,9 +645,7 @@ class Example:
             self.model.set_gravity(gravity)
             print(f"  gravity-scale: x{gravity_scale:g}")
 
-        # ---- Optional rotation of the asset around world axes (degrees) ----
-        # Runs BEFORE drop_height so the lift always ends up along world +z,
-        # regardless of which axis the user rotates around.
+        #Optional rotation of the asset around world axes
         if rotate_x_deg or rotate_y_deg or rotate_z_deg:
             import math as _math
             import numpy as _np
@@ -791,15 +795,47 @@ class Example:
             self.model.soft_contact_kd = soft_contact_kd
             self.model.soft_contact_mu = soft_contact_mu
             self.model.soft_contact_max = soft_contact_max
-            import numpy as _np
-            n_particles = int(self.model.particle_count)
-            if n_particles > 0:
-                self.model.particle_radius.assign(
-                    _np.full(n_particles, self.cloth_particle_radius, dtype=_np.float32)
-                )
+            # When unset, keep USDA's newton:shell:particleRadius (loaded
+            # into model.particle_radius by the loader).
+            if cloth_particle_radius is not None:
+                import numpy as _np
+                n_particles = int(self.model.particle_count)
+                if n_particles > 0:
+                    self.model.particle_radius.assign(
+                        _np.full(n_particles, float(cloth_particle_radius), dtype=_np.float32)
+                    )
             self.model.cloth_body_contact_margin = cloth_body_contact_margin
-            self.model.bending_ke = bending_ke
-            self.model.bending_kd = bending_kd
+
+            # VBD/Style3D read per-edge bend params from
+            # model.edge_bending_properties ([edge_count, 2] = [ke, kd]).
+            # model.bending_ke is a dead attribute. Only touch columns the
+            # user explicitly set; the rest keep USDA's bendStiffness /
+            # bendDamping forwarded via add_cloth_mesh.
+            if (bending_ke is not None or bending_kd is not None) and getattr(
+                self.model, "edge_bending_properties", None
+            ) is not None:
+                _bp = self.model.edge_bending_properties.numpy().copy()
+                if _bp.size > 0:
+                    if bending_ke is not None:
+                        _bp[:, 0] = float(bending_ke)
+                    if bending_kd is not None:
+                        _bp[:, 1] = float(bending_kd)
+                    self.model.edge_bending_properties.assign(_bp)
+                    print(
+                        "  cloth: edge_bending_properties overridden "
+                        f"(bend_ke={bending_ke}, bend_kd={bending_kd}, "
+                        f"edges={_bp.shape[0]})"
+                    )
+
+            # Flatten the cloth rest shape so the asset drapes naturally on a
+            # surface instead of curling toward its authored rest angle.
+            # This matches example_cloth_gown_franka.
+            if cloth_zero_edge_rest_angle and hasattr(self.model, "edge_rest_angle"):
+                try:
+                    self.model.edge_rest_angle.zero_()
+                    print("  cloth: edge_rest_angle zeroed (flat rest shape)")
+                except Exception as _e:
+                    print(f"  cloth: edge_rest_angle.zero_() failed: {_e}")
 
             # VBD solver extras (no-op for other solvers).
             if type(self.solver).__name__ == "SolverVBD":
@@ -809,6 +845,59 @@ class Example:
                     soft_contact_ke if vbd_rigid_contact_k_start is None
                     else vbd_rigid_contact_k_start
                 )
+
+                # VBD __init__-only knobs need a solver rebuild. Buffer
+                # knobs are always applied; self-contact overrides only
+                # under preset.
+                import inspect as _ins
+                from newton._src.palatial.load import (
+                    _SOLVER_PARAM_ALIAS,
+                    _dedupe_solver_params,
+                )
+                vbd_overrides: dict = {
+                    "particle_vertex_contact_buffer_size": int(vbd_particle_vertex_contact_buffer_size),
+                    "particle_topological_contact_filter_threshold": int(vbd_particle_topological_contact_filter_threshold),
+                    "particle_rest_shape_contact_exclusion_radius": float(vbd_particle_rest_shape_contact_exclusion_radius),
+                }
+                if preset:
+                    vbd_overrides.update({
+                        "particle_enable_self_contact": True,
+                        "particle_self_contact_radius": 0.002,
+                        "particle_self_contact_margin": 0.002,
+                    })
+                # Strip USDA equivalents (camel + snake) before injecting.
+                base = dict(bundle.solver_params)
+                _snake_to_camel = {v: k for k, v in _SOLVER_PARAM_ALIAS.items() if k != v}
+                for snake_k in vbd_overrides:
+                    base.pop(snake_k, None)
+                    camel = _snake_to_camel.get(snake_k)
+                    if camel:
+                        base.pop(camel, None)
+                base.update(vbd_overrides)
+                base = _dedupe_solver_params(base)
+                try:
+                    accepted = set(_ins.signature(type(self.solver).__init__).parameters)
+                except (TypeError, ValueError):
+                    accepted = set(base)
+                kwargs_vbd = {}
+                for k, v in base.items():
+                    py_key = _SOLVER_PARAM_ALIAS.get(k, k)
+                    if py_key in accepted:
+                        kwargs_vbd[py_key] = v
+                self.solver = type(self.solver)(self.model, **kwargs_vbd)
+                bundle.solver = self.solver
+                bundle.solver_params = base
+                # Re-apply the per-solver knobs that live outside __init__.
+                self.solver.particle_edge_contact_buffer_size = vbd_particle_edge_contact_buffer_size
+                self.solver.particle_collision_detection_interval = vbd_particle_collision_detection_interval
+                self.solver.rigid_contact_k_start = (
+                    soft_contact_ke if vbd_rigid_contact_k_start is None
+                    else vbd_rigid_contact_k_start
+                )
+                if preset:
+                    print(f"  gown-preset: VBD self-contact applied {vbd_overrides}")
+                else:
+                    print(f"  cloth: VBD buffer knobs applied {vbd_overrides}")
 
         if bundle.body_type == "rod" and hasattr(self.model, "joint_target_ke"):
             gains_changed = False
@@ -1086,8 +1175,26 @@ class Example:
             )
             self.contact_update_interval = 1
 
-        self.contacts = self.model.contacts()
-        self.model.collide(self.state_0, self.contacts)
+        self.collision_pipeline = None
+        if use_collision_pipeline and bundle.body_type == "cloth":
+            try:
+                self.collision_pipeline = newton.CollisionPipeline(
+                    self.model,
+                    soft_contact_margin=float(cloth_body_contact_margin),
+                )
+                self.contacts = self.collision_pipeline.contacts()
+                self.collision_pipeline.collide(self.state_0, self.contacts)
+                print(
+                    "  cloth: using explicit CollisionPipeline "
+                    f"(soft_contact_margin={cloth_body_contact_margin})"
+                )
+            except Exception as _e:
+                print(f"  cloth: CollisionPipeline setup failed ({_e}); falling back to model.contacts()")
+                self.collision_pipeline = None
+
+        if self.collision_pipeline is None:
+            self.contacts = self.model.contacts()
+            self.model.collide(self.state_0, self.contacts)
         self.viewer.set_model(self.model)
 
         print(
@@ -1130,7 +1237,10 @@ class Example:
             self.viewer.apply_forces(self.state_0)
             refresh_contacts = (substep % self.contact_update_interval) == 0
             if refresh_contacts:
-                self.model.collide(self.state_0, self.contacts)
+                if self.collision_pipeline is not None:
+                    self.collision_pipeline.collide(self.state_0, self.contacts)
+                else:
+                    self.model.collide(self.state_0, self.contacts)
             if hasattr(self.solver, "set_rigid_history_update"):
                 self.solver.set_rigid_history_update(refresh_contacts)
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
@@ -1219,20 +1329,48 @@ def main(argv=None) -> int:
                         "overrides --bending-ke.")
 
     # Cloth tuning (only applied when bundle.body_type == "cloth").
-    p.add_argument("--cloth-particle-radius", type=float, default=0.008)
+    p.add_argument("--cloth-particle-radius", type=float, default=None,
+                   help="Override model.particle_radius. When unset, the loader's "
+                        "USDA-derived value (newton:shell:particleRadius) wins.")
     p.add_argument("--soft-contact-ke", type=float, default=100.0)
     p.add_argument("--soft-contact-kd", type=float, default=2e-3)
-    p.add_argument("--soft-contact-mu", type=float, default=1.0)
+    p.add_argument("--soft-contact-mu", type=float, default=0.25)
     p.add_argument("--soft-contact-max", type=int, default=1_000_000)
     p.add_argument("--cloth-body-contact-margin", type=float, default=0.01)
-    p.add_argument("--bending-ke", type=float, default=1e-4)
-    p.add_argument("--bending-kd", type=float, default=1e-3)
+    p.add_argument("--bending-ke", type=float, default=None,
+                   help="Override edge bend stiffness for ALL edges (overwrites "
+                        "model.edge_bending_properties[:,0]). Omit to keep the "
+                        "USDA-authored bendStiffness value.")
+    p.add_argument("--bending-kd", type=float, default=None,
+                   help="Override edge bend damping for ALL edges (overwrites "
+                        "model.edge_bending_properties[:,1]). Omit to keep the "
+                        "USDA-authored bendDamping value.")
 
     # VBD-only knobs (ignored for other solvers).
     p.add_argument("--vbd-particle-edge-contact-buffer-size", type=int, default=64)
     p.add_argument("--vbd-particle-collision-detection-interval", type=int, default=-1)
     p.add_argument("--vbd-rigid-contact-k-start", type=float, default=None,
                    help="Defaults to --soft-contact-ke when omitted")
+    # VBD __init__-only knobs. Defaults match the gown preset; these always
+    # overwrite USDA-authored equivalents (which is intentional — we want a
+    # predictable contact-buffer sizing across assets).
+    p.add_argument("--vbd-particle-vertex-contact-buffer-size", type=int, default=16)
+    p.add_argument("--vbd-particle-topological-contact-filter-threshold", type=int, default=1)
+    p.add_argument("--vbd-particle-rest-shape-contact-exclusion-radius", type=float, default=0.005)
+    # particle_enable_self_contact / radius / margin remain preset-only knobs
+    # because the USDA usually authors them and we don't want to silently
+    # clobber the asset's authored values from a CLI default. Use --gown-preset
+    # to apply the gown self-contact recipe.
+    p.add_argument("--cloth-zero-edge-rest-angle", action="store_true", default=True,
+                   help="Zero edge rest angles so the cloth drapes flat (matches gown_franka).")
+    p.add_argument("--use-collision-pipeline", action="store_true", default=True,
+                   help="Build an explicit newton.CollisionPipeline so soft_contact_margin\n"
+                        "is honored (matches example_cloth_gown_franka).")
+    p.add_argument("--preset", action="store_true", default=False,
+                   help="Cloth + table preset that mirrors example_cloth_gown_franka in meter scale:\n"
+                        "sets soft-contact stiffness, bending, self-contact, particle radius,\n"
+                        "explicit CollisionPipeline, and flat rest shape. Overrides values you did\n"
+                        "NOT set on the command line; values you pass explicitly win.")
 
     # Joint inspection / driving (rigid articulated assets).
     p.add_argument("--list-joints", action="store_true",
@@ -1249,6 +1387,19 @@ def main(argv=None) -> int:
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
 
+    # Cloth-only: add a static table under the cloth so it drops onto a surface.
+    p.add_argument("--add-table", action=argparse.BooleanOptionalAction, default=None,
+                   help="Cloth only: add a static box (table) under the asset for the drop. "
+                        "Also overrides the camera. "
+                        "Defaults to ON when the loaded USDA is detected as cloth; pass "
+                        "--no-add-table to disable.")
+    p.add_argument("--table-size", default="1.0,1.0,0.1",
+                   help="Table half-extents in meters as 'hx,hy,hz' ")
+    p.add_argument("--table-pos", default="0.0,0.0,0.1",
+                   help="Table center position in meters as 'x,y,z' ")
+    p.add_argument("--cloth-scale", type=float, default=None,
+                   help="Uniform mesh scale applied to the cloth via add_cloth_mesh.")
+
     # mp4 recording (front-facing camera).
     p.add_argument("--record-mp4", default=None,
                    help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
@@ -1263,7 +1414,35 @@ def main(argv=None) -> int:
                         "to stay constant).")
     args = p.parse_args(argv)
 
-    # Apply physics-json overrides for cloth and rod tuning.
+    # ----  preset for cloth-on-table drops --------------------
+    # Mirrors example_cloth_gown_franka in meter scalee.
+    if args.preset:
+        _defaults = {a.dest: a.default for a in p._actions}
+
+        def _maybe(name: str, value):
+            cur = getattr(args, name, None)
+            if cur == _defaults.get(name):
+                setattr(args, name, value)
+
+        _maybe("cloth_particle_radius", 0.008)            
+        _maybe("cloth_body_contact_margin", 0.008)        
+        _maybe("soft_contact_ke", 1.0e4)
+        _maybe("soft_contact_kd", 1.0e-2)
+        _maybe("soft_contact_mu", 0.25)                  
+        _maybe("bending_ke", 5.0e-3)                      
+        _maybe("bending_kd", 1.0e-5)                      
+        _maybe("vbd_particle_edge_contact_buffer_size", 20)
+        _maybe("cloth_zero_edge_rest_angle", True)
+        _maybe("use_collision_pipeline", True)
+        _maybe("add_table", True)
+        if args.substeps is None:
+            args.substeps = 10
+        if args.solver_iterations is None:
+            args.solver_iterations = 32
+        print(
+            "  gown-preset: applied (only fields not set on CLI were overwritten)"
+        )
+
     if args.physics_json:
         import json
         with open(args.physics_json) as _f:
@@ -1282,13 +1461,17 @@ def main(argv=None) -> int:
         if isinstance(_phys.get("newton"), dict):
             _rod = _phys["newton"].get("rod")
             _scene = _phys["newton"].get("simulation_scene")
-        if _rod is None:
-            for _part in _phys.get("parts", []) or []:
-                _newton = _part.get("newton", {}) if isinstance(_part, dict) else {}
-                if isinstance(_newton.get("rod"), dict):
-                    _rod = _newton["rod"]
-                    _scene = _newton.get("simulation_scene")
-                    break
+        # Walk parts to fill in whichever of {rod, simulation_scene} is still
+        # missing. Cloth-only assets have a simulation_scene but no rod, so
+        # the two lookups must be independent.
+        for _part in _phys.get("parts", []) or []:
+            if _rod is not None and _scene is not None:
+                break
+            _newton = _part.get("newton", {}) if isinstance(_part, dict) else {}
+            if _rod is None and isinstance(_newton.get("rod"), dict):
+                _rod = _newton["rod"]
+            if _scene is None and isinstance(_newton.get("simulation_scene"), dict):
+                _scene = _newton["simulation_scene"]
         if _s is None and isinstance(_scene, dict):
             _s = _scene.get("sim_substeps")
         if _s is not None and args.substeps is None:
@@ -1318,6 +1501,37 @@ def main(argv=None) -> int:
             f"rod_bend_damping={args.rod_bend_damping}"
         )
 
+    def _parse_vec3(s: str) -> tuple[float, float, float]:
+        parts = [float(x) for x in s.split(",")]
+        if len(parts) != 3:
+            raise ValueError(f"expected 3 comma-separated floats, got {s!r}")
+        return (parts[0], parts[1], parts[2])
+
+   
+    if args.add_table is None:
+        try:
+            from pxr import Usd as _Usd
+            from newton._src.palatial.load import _detect_body_type as _detect
+            _stage = _Usd.Stage.Open(args.usd)
+            _bt = _detect(_stage) if _stage is not None else "rigid"
+        except Exception as _e:
+            print(f"  warn: --add-table auto-detect failed ({_e}); defaulting OFF")
+            _bt = "rigid"
+        args.add_table = (_bt == "cloth")
+        if args.add_table:
+            print("  --add-table: auto-enabled (detected cloth asset)")
+
+    table_cfg: dict | None = None
+    if args.add_table:
+        # When --add-table is on, keep the cloth at real-world size (1.0).
+        # The default --table-size is sized to hold a full ~1.9 m gown.
+        cloth_scale = args.cloth_scale if args.cloth_scale is not None else 1.0
+        table_cfg = {
+            "pos": _parse_vec3(args.table_pos),
+            "size": _parse_vec3(args.table_size),
+            "cloth_scale": float(cloth_scale),
+        }
+
     def _parse_joint_kv(s: str | None) -> dict[int, float]:
         if not s:
             return {}
@@ -1339,6 +1553,12 @@ def main(argv=None) -> int:
         viewer = v.ViewerNull()
 
     ex = Example(viewer, args.usd, substeps=args.substeps,
+                 preset=args.preset,
+                 vbd_particle_vertex_contact_buffer_size=args.vbd_particle_vertex_contact_buffer_size,
+                 vbd_particle_topological_contact_filter_threshold=args.vbd_particle_topological_contact_filter_threshold,
+                 vbd_particle_rest_shape_contact_exclusion_radius=args.vbd_particle_rest_shape_contact_exclusion_radius,
+                 cloth_zero_edge_rest_angle=args.cloth_zero_edge_rest_angle,
+                 use_collision_pipeline=args.use_collision_pipeline,
                  drop_height=args.drop_height, device=args.device,
                  solver_iterations=args.solver_iterations,
                  contact_update_interval=args.contact_update_interval,
@@ -1370,24 +1590,72 @@ def main(argv=None) -> int:
                  list_joints=args.list_joints,
                  rotate_x_deg=args.rotate_x,
                  rotate_y_deg=args.rotate_y,
-                 rotate_z_deg=args.rotate_z)
+                 rotate_z_deg=args.rotate_z,
+                 table=table_cfg)
 
     usd_bounds = _read_usd_geometry_bounds(args.usd)
 
     def _camera_bounds():
+        # Prefer live simulation state so the camera reflects post-drop
+        # particle positions and the actual Z-up axis, instead of the raw USD geometry bounds 
         import numpy as _np
 
-        if usd_bounds is not None:
-            return usd_bounds
         n_p = int(ex.model.particle_count)
         if n_p > 0:
             pts = ex.state_0.particle_q.numpy()
-        else:
+        elif int(ex.model.body_count) > 0:
             pts = ex.state_0.body_q.numpy()[:, 0:3]
+        elif usd_bounds is not None:
+            return usd_bounds
+        else:
+            return _np.zeros(3, dtype=float), _np.ones(3, dtype=float)
         return _np.asarray(pts.min(axis=0), dtype=float), _np.asarray(pts.max(axis=0), dtype=float)
 
-    # ---- Top-down camera (ViewerGL only) ----
-    if args.top_view and hasattr(ex.viewer, "set_camera"):
+    # Cloth + table: camera angles on an origin-centered table
+    
+    if (
+        args.add_table
+        and ex.bundle.body_type == "cloth"
+        and (args.record_mp4 or args.gui)
+        and not args.no_auto_camera
+        and hasattr(ex.viewer, "set_camera")
+    ):
+        # With pitch=0 (horizontal look) the screen's vertical axis is world Z,
+        # so set camera.z to the midpoint between the cloth's spawn top
+        # (b_max[2] at state_0) and the table top (where it settles).
+        # X distance scales with the asset's longest XY extent so big assets
+        # are framed further out and small ones are zoomed in.
+        b_min, b_max = _camera_bounds()
+        spawn_top_z = float(b_max[2])
+        if table_cfg is not None:
+            table_top_z = float(table_cfg["pos"][2] + table_cfg["size"][2])
+        else:
+            table_top_z = float(b_min[2])
+        mid_z = 0.75 * (spawn_top_z + table_top_z)
+        ext_x = float(b_max[0] - b_min[0])
+        ext_y = float(b_max[1] - b_min[1])
+        reference_extent = 2.0  # ~1.9 m gown after the -pi/2 X rotation
+        scale = max(max(ext_x, ext_y) / reference_extent, 0.5)
+        cam_x = -2.8 * scale
+        pos = wp.vec3(cam_x, 0.0, mid_z)
+        ex.viewer.set_camera(pos, -30.0, 0.0)
+        print(
+            f"  table camera: pos=({cam_x:.3f},0.000,{mid_z:.3f}) "
+            f"yaw=-30 pitch=0  (spawn_top={spawn_top_z:.3f} table_top={table_top_z:.3f}, "
+            f"scale={scale:.2f})"
+        )
+
+    # Rods/cables auto-frame top-down (their length axis is in the XY plane),
+    # unless --no-auto-camera is passed. Cloth/rigid keep the front view.
+    _auto_top = (
+        ex.bundle.body_type == "rod"
+        and (args.record_mp4 or args.gui)
+        and not args.no_auto_camera
+    )
+    if args.add_table and ex.bundle.body_type == "cloth":
+        # Already set above; skip the front/top auto-framers.
+        pass
+    elif (args.top_view or _auto_top) and hasattr(ex.viewer, "set_camera"):
         bounds_min, bounds_max = _camera_bounds()
         cx = float(0.5 * (bounds_min[0] + bounds_max[0]))
         cy = float(0.5 * (bounds_min[1] + bounds_max[1]))
