@@ -73,14 +73,6 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
     if cls is None:
         raise RuntimeError(f"Solver '{name}' not available in this Newton build")
 
-    # Translate USD attr names -> solver constructor kwargs.
-    alias = {
-        "iterations":                "iterations",
-        "substeps":                  "substeps",
-        "particleEnableSelfContact": "particle_enable_self_contact",
-        "particleSelfContactRadius": "particle_self_contact_radius",
-        "particleSelfContactMargin": "particle_self_contact_margin",
-    }
     try:
         sig = _ins.signature(cls.__init__)
         accepted = set(sig.parameters.keys())
@@ -89,7 +81,7 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
 
     kwargs = {}
     for k, v in params.items():
-        py = alias.get(k, k)
+        py = _SOLVER_PARAM_ALIAS.get(k, k)
         if py in accepted:
             kwargs[py] = v
     return cls(model, **kwargs)
@@ -128,6 +120,44 @@ class NewtonBundle:
         return 1.0 / float(self.fps)
 
 
+# USD-schema canonical (camelCase) name -> solver constructor kwarg (snake_case).
+# Centralized so _read_scene_params can dedupe duplicates and _build_solver can
+# translate names without diverging.
+_SOLVER_PARAM_ALIAS = {
+    "iterations":                          "iterations",
+    "substeps":                            "substeps",
+    "particleEnableSelfContact":           "particle_enable_self_contact",
+    "particleSelfContactRadius":           "particle_self_contact_radius",
+    "particleSelfContactMargin":           "particle_self_contact_margin",
+    "particleConservativeBoundRelaxation": "particle_conservative_bound_relaxation",
+}
+
+
+def _dedupe_solver_params(params: dict) -> dict:
+    """Drop snake_case duplicates when the canonical camelCase form is present.
+
+    Some converters write both ``newton:solver:particleEnableSelfContact`` and
+    ``newton:solver:particle_enable_self_contact``. They end up in the same
+    dict, then ``_build_solver`` lets the last one win in iteration order,
+    which is non-deterministic between asset versions. Prefer the canonical
+    USD-schema name and warn when a duplicate is dropped.
+    """
+    out = dict(params)
+    for camel, snake in _SOLVER_PARAM_ALIAS.items():
+        if camel == snake:
+            continue
+        if camel in out and snake in out and out[camel] != out[snake]:
+            print(
+                f"  warn: solver param conflict — {snake}={out[snake]!r} "
+                f"ignored, using canonical {camel}={out[camel]!r}"
+            )
+            out.pop(snake, None)
+        elif camel in out and snake in out:
+            # Same value, just remove the snake_case duplicate silently.
+            out.pop(snake, None)
+    return out
+
+
 def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
     """Return (solver_name, fps, solver_params) from the first PhysicsScene."""
     solver = "mujoco"
@@ -153,7 +183,7 @@ def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
                     solver_params.setdefault(name[len(pfx):], attr.Get())
                     break
         break
-    return solver, fps, solver_params
+    return solver, fps, _dedupe_solver_params(solver_params)
 
 
 def _detect_body_type(stage: Usd.Stage) -> str:
@@ -254,12 +284,28 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
 
 
 def _build_cloth(usd_path: str, *, device: str | None = None,
-                 solver_name: str | None = None) -> Any:
+                 solver_name: str | None = None,
+                 table: dict | None = None) -> Any:
     """Build a cloth model using params + mesh data baked into the USD.
 
     Reads both new (`newton:shell:*` on mesh + bound Material) and legacy
     (`newton:cloth:*` on mesh) attribute namespaces. Forwards only kwargs
     that the installed `add_cloth_mesh` accepts.
+
+    table: optional dict with keys ``pos`` (vec3 in meters, default
+        ``(0.0, 0.0, 0.1)``) and ``size`` (vec3 half-extents in meters,
+        default ``(1.0, 1.0, 0.1)``). When provided, a static box shape
+        is added under the cloth, the cloth's rest orientation is baked
+        to lay flat (-pi/2 around X), and the cloth's lowest rotated+
+        scaled vertex is positioned exactly ``margin`` meters above the
+        table top so it lands right on the surface (instead of free-
+        falling). Optional keys ``rot`` (wp.quat, overrides the default
+        flat rotation), ``margin`` (meters of clearance between the
+        cloth's lowest vertex and the table top, default 0.01), and
+        ``cloth_scale`` (float, uniform mesh scale applied via
+        ``add_cloth_mesh``; useful for garments authored at full real-
+        world size that need to be shrunk to fit the table — e.g. a
+        ~1.9 m gown on an 0.8 m table needs cloth_scale ~ 0.4).
     """
     import inspect as _ins
     from .cloth import _extract_first_mesh, find_cloth_prim_path
@@ -279,11 +325,91 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
 
+        table_pos: tuple[float, float, float] | None = None
+        table_size: tuple[float, float, float] | None = None
+        if table is not None:
+            table_pos = tuple(float(v) for v in table.get("pos", (0.0, 0.0, 0.1)))
+            table_size = tuple(float(v) for v in table.get("size", (1.0, 1.0, 0.1)))
+            table_shape_idx = builder.add_shape_box(
+                -1,
+                wp.transform(
+                    wp.vec3(table_pos[0], table_pos[1], table_pos[2]),
+                    wp.quat_identity(),
+                ),
+                hx=table_size[0],
+                hy=table_size[1],
+                hz=table_size[2],
+            )
+            # Render the table as pure white (RGB). Falls back to indexing
+            # the last appended shape when add_shape_box doesn't return an
+            # index in older builder versions.
+            if table_shape_idx is None:
+                table_shape_idx = len(builder.shape_color) - 1
+            builder.shape_color[int(table_shape_idx)] = (1.0, 1.0, 1.0)
+
+        # Default cloth drop pose. When a table is configured, bake a
+        # gown-style flat rotation (-pi/2 around X) into the rest mesh and
+        # lift the spawn z above the table top so the asset drops cleanly.
+        # The cloth is ALWAYS centered so its rotated+scaled AABB center in
+        # X/Y is aligned with scene origin (or table_pos when --add-table
+        # is on), i.e. the asset's geometric centroid lives at scene 0,0.
+        # Without this, the cloth_pos translation would place the mesh's
+        # local origin (often chest/waist of the gown, not its centroid) at
+        # 0,0, which makes the gown drape asymmetrically.
+        cloth_pos_z = float(p["dropHeight"])
+        cloth_rot = wp.quat(0.0, 0.0, 0.0, 1.0)
+        cloth_scale = 1.0
+        target_x = 0.0
+        target_y = 0.0
+        bottom_z: float | None = None  # set when a table is active
+        if table is not None and table_pos is not None and table_size is not None:
+            table_top_z = table_pos[2] + table_size[2]
+            # Default to a 1 cm gap so the cloth starts right above the
+            # table top and settles immediately (vs. free-falling).
+            margin = float(table.get("margin", 0.01))
+            target_x = float(table_pos[0])
+            target_y = float(table_pos[1])
+            bottom_z = table_top_z + margin
+            cloth_rot = table.get(
+                "rot",
+                wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), -float(np.pi) / 2.0),
+            )
+            cloth_scale = float(table.get("cloth_scale", 1.0))
+
+        # add_cloth_mesh applies scale -> rot -> translation, so replicate
+        # scale+rot in NumPy to compute the world-space AABB and pick a
+        # translation that centers the asset.
+        verts_np = np.asarray(verts, dtype=np.float64).reshape(-1, 3)
+        if verts_np.size > 0:
+            qx, qy, qz, qw = (
+                float(cloth_rot[0]),
+                float(cloth_rot[1]),
+                float(cloth_rot[2]),
+                float(cloth_rot[3]),
+            )
+            q_xyz = np.asarray((qx, qy, qz), dtype=np.float64)
+            scaled = verts_np * cloth_scale
+            # v' = v + 2 * cross(q.xyz, cross(q.xyz, v) + q.w * v)
+            cross1 = np.cross(q_xyz, scaled) + qw * scaled
+            rotated = scaled + 2.0 * np.cross(q_xyz, cross1)
+            bbox_min = rotated.min(axis=0)
+            bbox_max = rotated.max(axis=0)
+            center_xy = 0.5 * (bbox_min[:2] + bbox_max[:2])
+            cloth_pos_x = target_x - float(center_xy[0])
+            cloth_pos_y = target_y - float(center_xy[1])
+            if bottom_z is not None:
+                cloth_pos_z = max(cloth_pos_z, bottom_z - float(bbox_min[2]))
+        else:
+            cloth_pos_x = target_x
+            cloth_pos_y = target_y
+            if bottom_z is not None:
+                cloth_pos_z = max(cloth_pos_z, bottom_z)
+
         # Candidate kwargs covering both old and current Newton signatures.
         candidates = {
-            "pos":      wp.vec3(0.0, 0.0, float(p["dropHeight"])),
-            "rot":      wp.quat(0.0, 0.0, 0.0, 1.0),
-            "scale":    1.0,
+            "pos":      wp.vec3(cloth_pos_x, cloth_pos_y, cloth_pos_z),
+            "rot":      cloth_rot,
+            "scale":    cloth_scale,
             "vel":      wp.vec3(0.0, 0.0, 0.0),
             "vertices": verts,
             "indices":  tri,
@@ -502,11 +628,15 @@ def _scene_pins_solver(stage: Usd.Stage) -> bool:
 
 
 def load(usd_path: str, *, solver_override: str | None = None,
-         device: str | None = None, fix_base: bool = False) -> NewtonBundle:
+         device: str | None = None, fix_base: bool = False,
+         table: dict | None = None) -> NewtonBundle:
     """Read converted USD, build Newton model + solver, return ready-to-step bundle.
 
     device: warp device string ("cuda:0", "cpu", ...). Defaults to GPU if
     available (wp.get_preferred_device()).
+    table: cloth-only; optional dict with ``pos`` and ``size`` (half-extents)
+    in meters. When provided, a static box is added under the cloth so the
+    asset can drop onto it.
     """
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -547,9 +677,30 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if device is None:
         device = str(wp.get_preferred_device())
 
+    # Forward shell-level VBD knobs (authored on the cloth Material as
+    # `newton:shell:vbd:*`) into solver_params. Shell-level is the
+    # canonical source for these particle self-contact tunables; any
+    # scene-level `newton:solver:*` equivalent is silently superseded.
+    if body_type == "cloth":
+        from .shell import read_shell_params as _read_shell_params
+        _shell = _read_shell_params(usd_path)
+        _shell_to_solver = {
+            "vbdSelfContactRadius":           "particleSelfContactRadius",
+            "vbdSelfContactMargin":           "particleSelfContactMargin",
+            "vbdConservativeBoundRelaxation": "particleConservativeBoundRelaxation",
+        }
+        for sk, ck in _shell_to_solver.items():
+            v = _shell.get(sk)
+            if v is None:
+                continue
+            sn = _SOLVER_PARAM_ALIAS.get(ck, ck)
+            solver_params.pop(ck, None)
+            solver_params.pop(sn, None)
+            solver_params[ck] = v
+
     rod_initial_body_q = None
     if body_type == "cloth":
-        model = _build_cloth(usd_path, device=device, solver_name=solver_name)
+        model = _build_cloth(usd_path, device=device, solver_name=solver_name, table=table)
     elif body_type == "rod":
         rod_result = _build_rod(usd_path, device=device)
         model = rod_result.model
