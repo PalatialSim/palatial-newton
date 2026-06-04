@@ -1383,7 +1383,9 @@ def main(argv=None) -> int:
                    help="Override model.joint_target_ke for ALL DOFs (PD position gain)")
     p.add_argument("--joint-target-kd", type=float, default=None,
                    help="Override model.joint_target_kd for ALL DOFs (PD velocity gain)")
-    p.add_argument("--rotate-x", type=float, default=0.0, help="Rotate asset around X (degrees)")
+    p.add_argument("--rotate-x", type=float, default=None,
+                   help="Rotate asset around X (degrees). Defaults to 90 when the "
+                        "loaded USDA is detected as a rod, else 0.")
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
 
@@ -1508,18 +1510,24 @@ def main(argv=None) -> int:
         return (parts[0], parts[1], parts[2])
 
    
-    if args.add_table is None:
+    _bt: str | None = None
+    if args.add_table is None or args.rotate_x is None:
         try:
             from pxr import Usd as _Usd
             from newton._src.palatial.load import _detect_body_type as _detect
             _stage = _Usd.Stage.Open(args.usd)
             _bt = _detect(_stage) if _stage is not None else "rigid"
         except Exception as _e:
-            print(f"  warn: --add-table auto-detect failed ({_e}); defaulting OFF")
+            print(f"  warn: body-type auto-detect failed ({_e}); defaulting to rigid")
             _bt = "rigid"
+    if args.add_table is None:
         args.add_table = (_bt == "cloth")
         if args.add_table:
             print("  --add-table: auto-enabled (detected cloth asset)")
+    if args.rotate_x is None:
+        args.rotate_x = 90.0 if _bt == "rod" else 0.0
+        if args.rotate_x:
+            print("  --rotate-x: auto-set to 90 (detected rod asset)")
 
     table_cfg: dict | None = None
     if args.add_table:
