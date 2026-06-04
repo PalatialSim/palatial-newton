@@ -221,7 +221,8 @@ def _detect_body_type(stage: Usd.Stage) -> str:
 
 
 def _build_rigid(usd_path: str, *, device: str | None = None,
-                 fix_base: bool = False) -> Any:
+                 fix_base: bool = False,
+                 solver_name: str | None = None) -> Any:
     """Use Newton's USD parser for rigid assets.
 
     fix_base: if True, anchor every floating root body to world via a
@@ -280,6 +281,15 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
                 j = builder.add_joint_fixed(parent=-1, child=b,
                                             label=f"fixed_base_orphan_{b}")
                 builder.add_articulation([j], label=f"articulation_orphan_{b}")
+
+        # SolverVBD requires per-body graph coloring before finalize() when
+        # any rigid bodies are present (mirrors the cloth/rod paths above).
+        if solver_name == "vbd":
+            try:
+                builder.color()
+            except Exception:
+                pass
+
         return builder.finalize()
 
 
@@ -706,7 +716,8 @@ def load(usd_path: str, *, solver_override: str | None = None,
         model = rod_result.model
         rod_initial_body_q = rod_result.initial_body_q
     else:
-        model = _build_rigid(usd_path, device=device, fix_base=fix_base)
+        model = _build_rigid(usd_path, device=device, fix_base=fix_base,
+                             solver_name=solver_name)
 
     solver = _build_solver(solver_name, model, solver_params)
     state_in = model.state()
