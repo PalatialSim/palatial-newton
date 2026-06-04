@@ -574,6 +574,13 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
             label=label,
         )
         filter_body_self_collisions(builder, rod_bodies)
+        # Paint every rod segment with one color sourced from the cable's USD
+        # material (falls back to neutral grey) so the rod renders uniformly
+        # instead of with per-shape palette colors.
+        rod_color = params.get("displayColor") or (0.5, 0.5, 0.5)
+        for body_id in rod_bodies:
+            for shape_idx in builder.body_shapes.get(body_id, []):
+                builder.shape_color[shape_idx] = rod_color
         attached_component_bodies: list[tuple[int, list[int]]] = []
 
         if bool(params["closed"]) and components:

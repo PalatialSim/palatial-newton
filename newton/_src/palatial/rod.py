@@ -16,6 +16,7 @@ from __future__ import annotations
 import newton  # noqa: F401
 
 from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
+from ..usd import utils as _usd_material_utils
 from .usd_utils import (
     has_api_schema,
     matrix_transform_points,
@@ -158,6 +159,70 @@ def _bound_rod_material_prims(rod_prim: Usd.Prim) -> list[Usd.Prim]:
         if _has_rod_material_api(prim):
             out.append(prim)
     return out
+
+
+def _coerce_color_triplet(value) -> tuple[float, float, float] | None:
+    """Coerce a USD color value (Vec3 or per-point array) to an RGB tuple."""
+    if value is None:
+        return None
+    try:
+        if hasattr(value, "__len__") and len(value) > 0 and hasattr(value[0], "__len__"):
+            value = value[0]
+        return (float(value[0]), float(value[1]), float(value[2]))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _resolve_display_color(
+    stage: Usd.Stage,
+    rod_prim: Usd.Prim,
+    centerline_source_path: str | None,
+) -> tuple[float, float, float] | None:
+    """Resolve a single RGB display color for the rod from bound USD materials.
+
+    Preference order:
+      1. Flat color on the material bound to the rod guide curve.
+      2. Flat color on the material bound to any mesh descendant in the
+         centerline source's ancestor chain (the cable-side rigid body).
+      3. ``primvars:displayColor`` authored on those mesh descendants.
+
+    Returns None when no flat color can be resolved (the loader then falls
+    back to a neutral grey).
+    """
+    props = _usd_material_utils.resolve_material_properties_for_prim(rod_prim)
+    color = _coerce_color_triplet(props.get("color"))
+    if color is not None:
+        return color
+
+    # Walk from the centerline source (often the guide curve itself) up the
+    # parent chain so we visit the enclosing rigid-body Xform that owns the
+    # cable Mesh + bound material.
+    visited: set[str] = set()
+    search_roots: list[Usd.Prim] = []
+    if centerline_source_path:
+        cursor = stage.GetPrimAtPath(centerline_source_path)
+        while cursor and cursor.IsValid() and not cursor.IsPseudoRoot():
+            path = cursor.GetPath().pathString
+            if path in visited:
+                break
+            visited.add(path)
+            search_roots.append(cursor)
+            cursor = cursor.GetParent()
+
+    for root in search_roots:
+        for descendant in Usd.PrimRange(root):
+            if not descendant.IsA(UsdGeom.Mesh):
+                continue
+            props = _usd_material_utils.resolve_material_properties_for_prim(descendant)
+            color = _coerce_color_triplet(props.get("color"))
+            if color is not None:
+                return color
+            primvar = UsdGeom.PrimvarsAPI(descendant).GetPrimvar("displayColor")
+            if primvar:
+                color = _coerce_color_triplet(primvar.Get())
+                if color is not None:
+                    return color
+    return None
 
 
 def _read_basis_curve_points(
@@ -780,4 +845,6 @@ def read_rod_params(usd_path: str) -> dict:
 
     intent_attr = rod_prim.GetAttribute("newton:deformable:simulationIntent")
     out["intent"] = str(intent_attr.Get()) if intent_attr and intent_attr.HasAuthoredValue() else "rod"
+
+    out["displayColor"] = _resolve_display_color(stage, rod_prim, out.get("centerlineSourcePath"))
     return out
