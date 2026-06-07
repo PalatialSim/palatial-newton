@@ -518,7 +518,117 @@ def _set_rod_zero_curvature_rest_poses(
     builder.body_q[:] = rest_body_q
     return initial_body_q
 
-def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
+def _build_rod_textured_tube(
+    builder: "newton.ModelBuilder",
+    *,
+    rod_bodies: list[int],
+    points: list[tuple[float, float, float]],
+    radius: float,
+    texture_path: str,
+    color: tuple[float, float, float] | None,
+    radial_segments: int,
+    label: str,
+) -> None:
+    """Hide rod capsules and attach a textured cylindrical tube mesh per segment.
+
+    For each rod body, builds a closed cylindrical strip whose axis runs along
+    local +Z from the segment start to its end (matching the body frame produced
+    by :meth:`ModelBuilder.add_rod`). UVs are laid out with U = theta/(2*pi)
+    around the tube and V increasing monotonically along the rod (arc-length
+    fraction) so the diffuse texture is applied without seams along the cable.
+    """
+    points_np = np.asarray(points, dtype=np.float64)
+    if points_np.shape[0] != len(rod_bodies) + 1:
+        # Should not happen for non-closed rods, but bail out safely.
+        return
+    seg_lengths = np.linalg.norm(np.diff(points_np, axis=0), axis=1)
+    total_length = float(seg_lengths.sum())
+    if total_length <= 0.0:
+        return
+    arc_starts = np.concatenate(([0.0], np.cumsum(seg_lengths)))
+    v_fracs = arc_starts / total_length
+
+    n = max(int(radial_segments), 3)
+    thetas = np.linspace(0.0, 2.0 * np.pi, n + 1, dtype=np.float64)
+    cos_t = np.cos(thetas)
+    sin_t = np.sin(thetas)
+    u_coords = thetas / (2.0 * np.pi)
+
+    visual_cfg = newton.ModelBuilder.ShapeConfig(
+        density=0.0,
+        has_shape_collision=False,
+        has_particle_collision=False,
+        collision_group=-1,
+    )
+
+    # Hide the existing capsule shapes from rendering (collisions stay intact).
+    for body_id in rod_bodies:
+        for shape_idx in builder.body_shapes.get(body_id, []):
+            builder.shape_flags[shape_idx] &= ~int(newton.ShapeFlags.VISIBLE)
+
+    identity_xform = wp.transform()
+    for i, body_id in enumerate(rod_bodies):
+        seg_len = float(seg_lengths[i])
+        if seg_len <= 0.0:
+            continue
+        v0 = float(v_fracs[i])
+        v1 = float(v_fracs[i + 1])
+
+        # Two rings of n+1 vertices each (the seam at theta=2*pi is duplicated
+        # so the U coordinate wraps cleanly from 1.0 back to 0.0 visually).
+        ring0 = np.stack([radius * cos_t, radius * sin_t, np.zeros(n + 1)], axis=1)
+        ring1 = np.stack([radius * cos_t, radius * sin_t, np.full(n + 1, seg_len)], axis=1)
+        vertices = np.vstack([ring0, ring1]).astype(np.float32)
+
+        normals_xy = np.stack([cos_t, sin_t, np.zeros(n + 1)], axis=1)
+        normals = np.vstack([normals_xy, normals_xy]).astype(np.float32)
+
+        uvs0 = np.stack([u_coords, np.full(n + 1, v0)], axis=1)
+        uvs1 = np.stack([u_coords, np.full(n + 1, v1)], axis=1)
+        uvs = np.vstack([uvs0, uvs1]).astype(np.float32)
+
+        # Triangle indices: for each radial quad form two triangles. Winding
+        # is CCW when viewed from outside (normals point radially outward).
+        indices = np.empty(n * 6, dtype=np.int32)
+        ring_stride = n + 1
+        for k in range(n):
+            a = k
+            b = k + 1
+            c = k + ring_stride
+            d = k + 1 + ring_stride
+            base = k * 6
+            indices[base + 0] = a
+            indices[base + 1] = c
+            indices[base + 2] = b
+            indices[base + 3] = b
+            indices[base + 4] = c
+            indices[base + 5] = d
+
+        mesh = newton.Mesh(
+            vertices=vertices,
+            indices=indices,
+            normals=normals,
+            uvs=uvs,
+            color=color,
+            texture=texture_path,
+            compute_inertia=False,
+        )
+        builder.add_shape_mesh(
+            body=int(body_id),
+            xform=identity_xform,
+            mesh=mesh,
+            cfg=visual_cfg,
+            label=f"{label}_tube_{i}",
+        )
+
+
+def _build_rod(
+    usd_path: str,
+    *,
+    device: str | None = None,
+    textured_tube: bool = False,
+    tube_radial_segments: int = 12,
+) -> _RodBuildResult:
     """Build an isotropic rod model from a NewtonRodAPI-authored USDA."""
     from .rod import read_rod_params
 
@@ -581,6 +691,19 @@ def _build_rod(usd_path: str, *, device: str | None = None) -> _RodBuildResult:
         for body_id in rod_bodies:
             for shape_idx in builder.body_shapes.get(body_id, []):
                 builder.shape_color[shape_idx] = rod_color
+
+        texture_path = params.get("diffuseTexturePath")
+        if textured_tube and texture_path and not bool(params["closed"]):
+            _build_rod_textured_tube(
+                builder,
+                rod_bodies=rod_bodies,
+                points=points,
+                radius=float(params["radius"]),
+                texture_path=str(texture_path),
+                color=rod_color,
+                radial_segments=int(tube_radial_segments),
+                label=label,
+            )
         attached_component_bodies: list[tuple[int, list[int]]] = []
 
         if bool(params["closed"]) and components:
@@ -646,7 +769,9 @@ def _scene_pins_solver(stage: Usd.Stage) -> bool:
 
 def load(usd_path: str, *, solver_override: str | None = None,
          device: str | None = None, fix_base: bool = False,
-         table: dict | None = None) -> NewtonBundle:
+         table: dict | None = None,
+         rod_textured_tube: bool = False,
+         rod_tube_radial_segments: int = 12) -> NewtonBundle:
     """Read converted USD, build Newton model + solver, return ready-to-step bundle.
 
     device: warp device string ("cuda:0", "cpu", ...). Defaults to GPU if
@@ -654,6 +779,12 @@ def load(usd_path: str, *, solver_override: str | None = None,
     table: cloth-only; optional dict with ``pos`` and ``size`` (half-extents)
     in meters. When provided, a static box is added under the cloth so the
     asset can drop onto it.
+    rod_textured_tube: rod-only; when True and the USD binds a diffuse texture
+    to the cable mesh, hide the underlying capsule shapes and render the rod
+    as a swept textured cylinder. Has no effect on closed rods or when no
+    on-disk texture can be resolved.
+    rod_tube_radial_segments: rod-only; number of radial segments used for the
+    swept tube when ``rod_textured_tube`` is enabled.
     """
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -719,7 +850,12 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name, table=table)
     elif body_type == "rod":
-        rod_result = _build_rod(usd_path, device=device)
+        rod_result = _build_rod(
+            usd_path,
+            device=device,
+            textured_tube=rod_textured_tube,
+            tube_radial_segments=rod_tube_radial_segments,
+        )
         model = rod_result.model
         rod_initial_body_q = rod_result.initial_body_q
     else:
