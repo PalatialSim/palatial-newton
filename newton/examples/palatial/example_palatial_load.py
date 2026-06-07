@@ -1065,10 +1065,10 @@ def main(argv=None) -> int:
         scale = max(max(ext_x, ext_y) / reference_extent, 0.5)
         cam_x = -3.6 * scale
         pos = wp.vec3(cam_x, 0.0, mid_z)
-        ex.viewer.set_camera(pos, -30.0, 0.0)
+        ex.viewer.set_camera(pos, -25.0, 0.0)
         print(
             f"  table camera: pos=({cam_x:.3f},0.000,{mid_z:.3f}) "
-            f"yaw=-30 pitch=0  (spawn_top={spawn_top_z:.3f} table_top={table_top_z:.3f}, "
+            f"pitch=-25 yaw=0  (spawn_top={spawn_top_z:.3f} table_top={table_top_z:.3f}, "
             f"scale={scale:.2f})"
         )
 
@@ -1100,9 +1100,19 @@ def main(argv=None) -> int:
         ext_x = float(bounds_max[0] - bounds_min[0])
         ext_y = float(bounds_max[1] - bounds_min[1])
         ext_z = float(bounds_max[2] - bounds_min[2])
-        # Cloth needs a wider frame to show drape; rigid stays at 2.2x.
-        dist_mult = 2.8 if ex.bundle.body_type == "cloth" else 2.2
-        dist = max(ext_x, ext_y, ext_z, 1.0) * dist_mult
+        # Frame by the AABB diagonal so the asset occupies the same fraction
+        # of the frame regardless of physical size (fixed FOV → constant
+        # angular size). Rod uses a tighter multiplier for a zoomed-in feel;
+        # cloth needs a wider frame to show drape.
+        diag = math.sqrt(ext_x * ext_x + ext_y * ext_y + ext_z * ext_z)
+        diag = max(diag, 1e-3)
+        if ex.bundle.body_type == "cloth":
+            dist_mult = 2.8
+        elif ex.bundle.body_type == "rod":
+            dist_mult = 1.8
+        else:
+            dist_mult = 2.2
+        dist = diag * dist_mult
         # Z-up: camera in -Y, looking toward +Y → yaw=90, pitch=0.
         ex.viewer.set_camera(wp.vec3(cx, cy - dist, cz_mid), 0.0, 90.0)
         print(f"  front-view camera: pos=({cx:.3f},{cy - dist:.3f},{cz_mid:.3f})")
