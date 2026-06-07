@@ -27,6 +27,7 @@ from .usd_utils import (
 
 from dataclasses import dataclass
 import math
+import os
 
 import numpy as np
 from pxr import Usd, UsdGeom, UsdShade
@@ -173,6 +174,48 @@ def _coerce_color_triplet(value) -> tuple[float, float, float] | None:
         return None
 
 
+def _sample_texture_mean_rgb(
+    stage: Usd.Stage,
+    texture_path: str,
+) -> tuple[float, float, float] | None:
+    """Return the alpha-weighted mean RGB of a diffuse texture, or None on failure.
+
+    Tries the resolved texture path first, then falls back to ``<usda_dir>/<name>``
+    and ``<usda_dir>/textures/<name>`` since some exports record absolute paths
+    that no longer exist on the consumer's machine.
+    """
+    from ..utils.texture import load_texture_from_file
+
+    candidates: list[str] = []
+    if texture_path:
+        candidates.append(texture_path)
+    root_layer = stage.GetRootLayer() if stage else None
+    base_dir = os.path.dirname(root_layer.realPath) if root_layer and root_layer.realPath else ""
+    if base_dir and texture_path:
+        name = os.path.basename(texture_path)
+        if name:
+            candidates.append(os.path.join(base_dir, name))
+            candidates.append(os.path.join(base_dir, "textures", name))
+
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        image = load_texture_from_file(path)
+        if image is None or image.size == 0:
+            continue
+        rgb = image[..., :3].astype(np.float32) / 255.0
+        if image.ndim == 3 and image.shape[-1] == 4:
+            alpha = image[..., 3].astype(np.float32) / 255.0
+            total = float(alpha.sum())
+            if total < 1.0:
+                continue
+            weighted = (rgb * alpha[..., None]).reshape(-1, 3).sum(axis=0) / total
+        else:
+            weighted = rgb.reshape(-1, 3).mean(axis=0)
+        return (float(weighted[0]), float(weighted[1]), float(weighted[2]))
+    return None
+
+
 def _resolve_display_color(
     stage: Usd.Stage,
     rod_prim: Usd.Prim,
@@ -185,9 +228,10 @@ def _resolve_display_color(
       2. Flat color on the material bound to any mesh descendant in the
          centerline source's ancestor chain (the cable-side rigid body).
       3. ``primvars:displayColor`` authored on those mesh descendants.
+      4. Alpha-weighted mean RGB of the diffuse texture bound to those meshes.
 
-    Returns None when no flat color can be resolved (the loader then falls
-    back to a neutral grey).
+    Returns None when no color can be resolved (the loader then falls back to
+    a neutral grey).
     """
     props = _usd_material_utils.resolve_material_properties_for_prim(rod_prim)
     color = _coerce_color_triplet(props.get("color"))
@@ -209,6 +253,7 @@ def _resolve_display_color(
             search_roots.append(cursor)
             cursor = cursor.GetParent()
 
+    texture_paths: list[str] = []
     for root in search_roots:
         for descendant in Usd.PrimRange(root):
             if not descendant.IsA(UsdGeom.Mesh):
@@ -222,6 +267,75 @@ def _resolve_display_color(
                 color = _coerce_color_triplet(primvar.Get())
                 if color is not None:
                     return color
+            texture = props.get("texture")
+            if texture and texture not in texture_paths:
+                texture_paths.append(texture)
+
+    for texture in texture_paths:
+        color = _sample_texture_mean_rgb(stage, texture)
+        if color is not None:
+            return color
+    return None
+
+
+def _resolve_existing_texture_path(stage: Usd.Stage, texture_path: str) -> str | None:
+    """Return the first on-disk path matching ``texture_path`` or its basename.
+
+    USD assets sometimes bake absolute texture paths (e.g. ``/opt/...``) that
+    do not exist on the consumer machine; in that case we fall back to
+    ``<usda_dir>/<name>`` and ``<usda_dir>/textures/<name>``.
+    """
+    if not texture_path:
+        return None
+    candidates: list[str] = [texture_path]
+    root_layer = stage.GetRootLayer() if stage else None
+    base_dir = os.path.dirname(root_layer.realPath) if root_layer and root_layer.realPath else ""
+    if base_dir:
+        name = os.path.basename(texture_path)
+        if name:
+            candidates.append(os.path.join(base_dir, name))
+            candidates.append(os.path.join(base_dir, "textures", name))
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
+
+
+def _resolve_diffuse_texture_path(
+    stage: Usd.Stage,
+    rod_prim: Usd.Prim,
+    centerline_source_path: str | None,
+) -> str | None:
+    """Resolve an on-disk diffuse texture path bound to the rod's cable mesh."""
+    props = _usd_material_utils.resolve_material_properties_for_prim(rod_prim)
+    texture = props.get("texture")
+    if texture:
+        resolved = _resolve_existing_texture_path(stage, texture)
+        if resolved is not None:
+            return resolved
+
+    visited: set[str] = set()
+    search_roots: list[Usd.Prim] = []
+    if centerline_source_path:
+        cursor = stage.GetPrimAtPath(centerline_source_path)
+        while cursor and cursor.IsValid() and not cursor.IsPseudoRoot():
+            path = cursor.GetPath().pathString
+            if path in visited:
+                break
+            visited.add(path)
+            search_roots.append(cursor)
+            cursor = cursor.GetParent()
+
+    for root in search_roots:
+        for descendant in Usd.PrimRange(root):
+            if not descendant.IsA(UsdGeom.Mesh):
+                continue
+            props = _usd_material_utils.resolve_material_properties_for_prim(descendant)
+            texture = props.get("texture")
+            if texture:
+                resolved = _resolve_existing_texture_path(stage, texture)
+                if resolved is not None:
+                    return resolved
     return None
 
 
@@ -847,4 +961,7 @@ def read_rod_params(usd_path: str) -> dict:
     out["intent"] = str(intent_attr.Get()) if intent_attr and intent_attr.HasAuthoredValue() else "rod"
 
     out["displayColor"] = _resolve_display_color(stage, rod_prim, out.get("centerlineSourcePath"))
+    out["diffuseTexturePath"] = _resolve_diffuse_texture_path(
+        stage, rod_prim, out.get("centerlineSourcePath")
+    )
     return out
