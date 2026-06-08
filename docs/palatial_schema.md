@@ -551,14 +551,3 @@ arr.assign(jt)
 ```
 
 ---
-
-## 8. Steps to run
-
-* Drop the script under `newton/examples/palatial/example_palatial_<name>.py`.
-* Follow the `Example` class layout. Implement `test_final()` (runs once
-  after the run) so `uv run --extra dev -m newton.tests` can validate it.
-* Match the project conventions in `AGENTS.md`: PEP 604 unions,
-  prefix-first naming, Google-style docstrings, SI units.
-
-For a reference implementation that exercises every section above, read
-`newton/examples/palatial/example_palatial_load.py`.
