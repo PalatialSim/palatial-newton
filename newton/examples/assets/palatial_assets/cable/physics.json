@@ -1,0 +1,2479 @@
+{
+  "parts": [
+    {
+      "canonical_name": "CableJacketStraightSpan",
+      "part_name": "CableJacketStraightSpan",
+      "source_part_name": "CableJacketStraightSpan",
+      "source_object_name": "CableJacketStraightSpan",
+      "part_index": 0,
+      "part_id": "part_00",
+      "material_name": "pvc_plastic",
+      "material": "pvc_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.01,
+      "density": 1300.0,
+      "inertia": [
+        1.1622562335910326e-08,
+        4.256142478022549e-05,
+        4.2561533250830335e-05
+      ],
+      "inertia_axes": [
+        0.7030902849222744,
+        -0.7111005915112342,
+        -3.0746639223533373e-07,
+        -4.396528790961838e-07
+      ],
+      "center_of_mass": [
+        2.1818129114295198e-06,
+        -1.550312561513175e-08,
+        -6.287891508363988e-09
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 1.6498208288458217e-06,
+      "bounds": {
+        "min": [
+          -0.113004,
+          -0.001507,
+          -0.001507
+        ],
+        "max": [
+          0.113004,
+          0.001507,
+          0.001507
+        ],
+        "center": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "description": "Flexible outer PVC sheath protecting the internal wires.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Main structural element of the cable, modeled as a stiff rigid body in this context.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": true,
+      "color_name": "CableJacketStraightSpan"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "part_name": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "part_index": 1,
+      "part_id": "part_01",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0005,
+      "density": 8960.0,
+      "inertia": [
+        2.678206041755277e-10,
+        1.2241572369582616e-09,
+        1.3608074774107265e-09
+      ],
+      "inertia_axes": [
+        0.1623628524011649,
+        -0.6880443321125752,
+        0.688355239166289,
+        -0.16248189413051184
+      ],
+      "center_of_mass": [
+        -0.14005634921094967,
+        -1.0450036982765876e-06,
+        0.0016446356775428213
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 1.3709754095568176e-08,
+      "bounds": {
+        "min": [
+          -0.140954,
+          0.000643,
+          -0.002687
+        ],
+        "max": [
+          -0.138669,
+          0.0023,
+          0.002687
+        ],
+        "center": [
+          -0.139811,
+          0.001472,
+          0.0
+        ]
+      },
+      "description": "Internal metal patch for electrical contact.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Tiny internal electrical component. Fixed to avoid instability.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "part_index": 2,
+      "part_id": "part_02",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.615156531706544e-10,
+        6.615198137134932e-10
+      ],
+      "inertia_axes": [
+        0.20333419883871304,
+        -0.9783106500843721,
+        -0.016026529509009624,
+        0.036147280202095886
+      ],
+      "center_of_mass": [
+        -0.13513944323460064,
+        0.0020502862973203824,
+        -0.00034640600323851395
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.329101008906065e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000859,
+          -0.002466
+        ],
+        "max": [
+          -0.129799,
+          0.000116,
+          -0.001658
+        ],
+        "center": [
+          -0.134505,
+          -0.000372,
+          -0.002062
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "part_index": 3,
+      "part_id": "part_03",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.641193587702992e-10,
+        6.642029935308481e-10
+      ],
+      "inertia_axes": [
+        0.04136065715134898,
+        -0.9984839858602642,
+        -0.0157102233866587,
+        0.03274469272644871
+      ],
+      "center_of_mass": [
+        -0.13508188214140757,
+        0.0014705980119445348,
+        -7.348589444807856e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.539827918414589e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000583,
+          -0.001813
+        ],
+        "max": [
+          -0.129799,
+          0.000392,
+          -0.001123
+        ],
+        "center": [
+          -0.134505,
+          -9.5e-05,
+          -0.001468
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "part_index": 4,
+      "part_id": "part_04",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.689791538961076e-10,
+        6.690305909911228e-10
+      ],
+      "inertia_axes": [
+        0.01857544920280456,
+        -0.9992697670728531,
+        -0.008538972018366835,
+        0.032279579581361025
+      ],
+      "center_of_mass": [
+        -0.1350511087746238,
+        0.0008744188082545497,
+        -0.0003516438968958575
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.509731646301758e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000859,
+          -0.00116
+        ],
+        "max": [
+          -0.129799,
+          0.000116,
+          -0.000587
+        ],
+        "center": [
+          -0.134505,
+          -0.000372,
+          -0.000874
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "part_index": 5,
+      "part_id": "part_05",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.656091757446122e-10,
+        6.656139736110401e-10
+      ],
+      "inertia_axes": [
+        0.6880401751084323,
+        -0.7249541555724829,
+        0.019746197286392375,
+        0.025539722936500066
+      ],
+      "center_of_mass": [
+        -0.13511817849241564,
+        0.00029257963104973445,
+        -7.118533080613406e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.245532468617879e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000583,
+          -0.000507
+        ],
+        "max": [
+          -0.129799,
+          0.000392,
+          -5.2e-05
+        ],
+        "center": [
+          -0.134505,
+          -9.5e-05,
+          -0.000279
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "part_index": 6,
+      "part_id": "part_06",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.685131062916558e-10,
+        6.685755913151782e-10
+      ],
+      "inertia_axes": [
+        0.9994137309587524,
+        0.011504794470780571,
+        0.03209843388526014,
+        -0.003086197888236639
+      ],
+      "center_of_mass": [
+        -0.13505527501794365,
+        -0.00028680534181342804,
+        -0.00035119064827960847
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.53966280342862e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000859,
+          5.2e-05
+        ],
+        "max": [
+          -0.129799,
+          0.000116,
+          0.000507
+        ],
+        "center": [
+          -0.134505,
+          -0.000372,
+          0.000279
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "part_index": 7,
+      "part_id": "part_07",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.681298242788476e-10,
+        6.681794962761559e-10
+      ],
+      "inertia_axes": [
+        0.9994401088173444,
+        0.0027077505601793756,
+        0.03205760381172727,
+        -0.00918950553235052
+      ],
+      "center_of_mass": [
+        -0.1350564227577625,
+        -0.0008745929422249005,
+        -7.56354011062838e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.543498223988525e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000583,
+          0.000587
+        ],
+        "max": [
+          -0.129799,
+          0.000392,
+          0.00116
+        ],
+        "center": [
+          -0.134505,
+          -9.5e-05,
+          0.000874
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "part_index": 8,
+      "part_id": "part_08",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.70786542639437e-10,
+        6.709315094126295e-10
+      ],
+      "inertia_axes": [
+        0.9993473773883628,
+        -0.0028696045721209786,
+        0.03213515885167595,
+        -0.016245499136024542
+      ],
+      "center_of_mass": [
+        -0.13500792888551685,
+        -0.0014675461350389803,
+        -0.00035475125429796603
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.895967920340593e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000859,
+          0.001123
+        ],
+        "max": [
+          -0.129799,
+          0.000116,
+          0.001813
+        ],
+        "center": [
+          -0.134505,
+          -0.000372,
+          0.001468
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "part_index": 9,
+      "part_id": "part_09",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.585200163119519e-10,
+        6.585634253090329e-10
+      ],
+      "inertia_axes": [
+        0.7313078064708582,
+        0.6809038032000102,
+        0.007638659884412036,
+        -0.03873698307449678
+      ],
+      "center_of_mass": [
+        -0.13515241077526127,
+        -0.0020492138457740105,
+        -6.84633922734584e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.299883258792408e-10,
+      "bounds": {
+        "min": [
+          -0.139211,
+          -0.000583,
+          0.001658
+        ],
+        "max": [
+          -0.129799,
+          0.000392,
+          0.002466
+        ],
+        "center": [
+          -0.134505,
+          -9.5e-05,
+          0.002062
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "part_name": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "part_index": 10,
+      "part_id": "part_10",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "matte"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        1.2445997109042962e-08,
+        1.4713025010776144e-08,
+        1.5335767646053788e-08
+      ],
+      "inertia_axes": [
+        0.18923423214561144,
+        0.6845385989217165,
+        -0.6789281604832638,
+        -0.1861554857460987
+      ],
+      "center_of_mass": [
+        -0.1274532418559689,
+        -3.6190195635950406e-06,
+        5.395704825709274e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.530585674756885e-07,
+      "bounds": {
+        "min": [
+          -0.131185,
+          -0.002938,
+          -0.003742
+        ],
+        "max": [
+          -0.124355,
+          0.003114,
+          0.003742
+        ],
+        "center": [
+          -0.12777,
+          8.8e-05,
+          0.0
+        ]
+      },
+      "description": "Opaque outer casing of the RJ45 connector.",
+      "semantic": {
+        "qid": "Q3140502"
+      },
+      "reasoning": "Hard plastic casing holding the connector.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "part_name": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "part_index": 11,
+      "part_id": "part_11",
+      "material_name": "rubber",
+      "material": "rubber",
+      "non_visual_material": {
+        "base": "rubber",
+        "coating": "none",
+        "attributes": [
+          "matte"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        1.0724350700829816e-08,
+        3.1982943511299945e-08,
+        3.4157449866329907e-08
+      ],
+      "inertia_axes": [
+        0.9999178848208471,
+        0.011950570160069836,
+        -0.004096738439312354,
+        0.0021504005237110405
+      ],
+      "center_of_mass": [
+        -0.12018956340749473,
+        -1.2394863429882637e-05,
+        3.64108455055145e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 4.0733044387588813e-07,
+      "bounds": {
+        "min": [
+          -0.126037,
+          -0.002691,
+          -0.003539
+        ],
+        "max": [
+          -0.111899,
+          0.002842,
+          0.003539
+        ],
+        "center": [
+          -0.118968,
+          7.5e-05,
+          0.0
+        ]
+      },
+      "description": "Flexible rubber boot to prevent cable bending damage.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Rubber component connecting the hard shell to the flexible cable jacket.",
+      "static_friction": 0.8,
+      "dynamic_friction": 0.7,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "part_name": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "source_part_name": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "source_object_name": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "part_index": 12,
+      "part_id": "part_12",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "transparent",
+          "smooth"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        8.68043835071614e-09,
+        2.359363770000159e-08,
+        2.6864416445035943e-08
+      ],
+      "inertia_axes": [
+        0.9999993137200504,
+        0.0009791938081518238,
+        0.00035508141810258737,
+        -0.0005363358099405885
+      ],
+      "center_of_mass": [
+        -0.13520677427926928,
+        1.8066405217756119e-06,
+        6.052767017772367e-06
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.7198951128948215e-07,
+      "bounds": {
+        "min": [
+          -0.140803,
+          -0.002009,
+          -0.003013
+        ],
+        "max": [
+          -0.129578,
+          0.002009,
+          0.003013
+        ],
+        "center": [
+          -0.135191,
+          0.0,
+          0.0
+        ]
+      },
+      "description": "Clear plastic body holding the contacts.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Clear rigid polycarbonate material forming the connector core.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody"
+    },
+    {
+      "canonical_name": "LeftConnectorAssembly.LatchClip",
+      "part_name": "LeftConnectorAssembly.LatchClip",
+      "source_part_name": "LeftConnectorAssembly.LatchClip",
+      "source_object_name": "LeftConnectorAssembly.LatchClip",
+      "part_index": 13,
+      "part_id": "part_13",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0005,
+      "density": 1200.0,
+      "inertia": [
+        6.098290211119917e-10,
+        4.804481939520502e-09,
+        5.2529667853082765e-09
+      ],
+      "inertia_axes": [
+        0.0008670578751305879,
+        -0.9985914252201036,
+        -0.0006710742254011012,
+        0.053046803361818856
+      ],
+      "center_of_mass": [
+        -0.13602744267031572,
+        -9.867250671309294e-06,
+        0.0027129915680029577
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.466453267206697e-08,
+      "bounds": {
+        "min": [
+          -0.141682,
+          0.001748,
+          -0.001532
+        ],
+        "max": [
+          -0.130834,
+          0.003742,
+          0.001532
+        ],
+        "center": [
+          -0.136258,
+          0.002745,
+          0.0
+        ]
+      },
+      "description": "Plastic clip to secure the connector in the port.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Very small plastic part. Kept fixed to the transparent plug body to prevent physics instability.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "LeftConnectorAssembly.LatchClip"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "part_name": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "part_index": 14,
+      "part_id": "part_14",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0005,
+      "density": 8960.0,
+      "inertia": [
+        2.914284666092291e-10,
+        1.2176815159443221e-09,
+        1.3934358431311638e-09
+      ],
+      "inertia_axes": [
+        0.18185397914544757,
+        0.6836792996169362,
+        -0.6829685343080791,
+        -0.18183983801504228
+      ],
+      "center_of_mass": [
+        0.1400969385344365,
+        -2.5036447955838653e-06,
+        0.0017539275506475891
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 6.444904544253144e-09,
+      "bounds": {
+        "min": [
+          0.138669,
+          0.000643,
+          -0.002687
+        ],
+        "max": [
+          0.140954,
+          0.0023,
+          0.002687
+        ],
+        "center": [
+          0.139811,
+          0.001472,
+          0.0
+        ]
+      },
+      "description": "Internal metal patch for electrical contact.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Tiny internal electrical component. Fixed to avoid instability.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "part_index": 15,
+      "part_id": "part_15",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.693862538228233e-10,
+        6.693985648369498e-10
+      ],
+      "inertia_axes": [
+        0.7326337316934902,
+        0.679436669240374,
+        -0.007851740652954797,
+        0.03939515002048204
+      ],
+      "center_of_mass": [
+        0.13501677988073424,
+        -0.0020602937174418042,
+        -0.0003574510559164595
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.927913419601718e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000859,
+          0.001658
+        ],
+        "max": [
+          0.139211,
+          0.000116,
+          0.002466
+        ],
+        "center": [
+          0.134505,
+          -0.000372,
+          0.002062
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "part_index": 16,
+      "part_id": "part_16",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.684365407142384e-10,
+        6.68466019037807e-10
+      ],
+      "inertia_axes": [
+        0.7417664383396255,
+        0.6696491058978904,
+        -0.01286828967425913,
+        0.034453345903728116
+      ],
+      "center_of_mass": [
+        0.1350155478450526,
+        -0.0014725444802166404,
+        -8.267987963747602e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.869720826402534e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000583,
+          0.001123
+        ],
+        "max": [
+          0.139211,
+          0.000392,
+          0.001813
+        ],
+        "center": [
+          0.134505,
+          -9.5e-05,
+          0.001468
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "part_index": 17,
+      "part_id": "part_17",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.689124664766364e-10,
+        6.689421706287941e-10
+      ],
+      "inertia_axes": [
+        0.7104730556283271,
+        0.7028885703167603,
+        -0.01595400897439392,
+        0.030350692609130748
+      ],
+      "center_of_mass": [
+        0.13501110460712276,
+        -0.0008873407839077672,
+        -0.000359258157189617
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.803016156786246e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000859,
+          0.000587
+        ],
+        "max": [
+          0.139211,
+          0.000116,
+          0.00116
+        ],
+        "center": [
+          0.134505,
+          -0.000372,
+          0.000874
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "part_index": 18,
+      "part_id": "part_18",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.648891066442911e-10,
+        6.649089595311925e-10
+      ],
+      "inertia_axes": [
+        0.7343810500670677,
+        0.677938886960185,
+        -0.022252825485965747,
+        0.02425181658078376
+      ],
+      "center_of_mass": [
+        0.13502092906297217,
+        -0.0002882057742729842,
+        -8.352704981054664e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.754157959154889e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000583,
+          5.2e-05
+        ],
+        "max": [
+          0.139211,
+          0.000392,
+          0.000507
+        ],
+        "center": [
+          0.134505,
+          -9.5e-05,
+          0.000279
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "part_index": 19,
+      "part_id": "part_19",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.669721453794368e-10,
+        6.669806963082846e-10
+      ],
+      "inertia_axes": [
+        0.21050617014077935,
+        0.9770370595815423,
+        -0.010717736170008069,
+        0.031158733419466504
+      ],
+      "center_of_mass": [
+        0.13501752038591458,
+        0.000297838174948176,
+        -0.0003591974121781527
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.83687790970592e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000859,
+          -0.000507
+        ],
+        "max": [
+          0.139211,
+          0.000116,
+          -5.2e-05
+        ],
+        "center": [
+          0.134505,
+          -0.000372,
+          -0.000279
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "part_index": 20,
+      "part_id": "part_20",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.692616959909195e-10,
+        6.693176499411434e-10
+      ],
+      "inertia_axes": [
+        0.02375300682880035,
+        0.9991350002302122,
+        -0.010537075225041258,
+        0.03246561299693656
+      ],
+      "center_of_mass": [
+        0.13496400073371148,
+        0.0008821584064204003,
+        -8.726650877649366e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 9.126411307102243e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000583,
+          -0.00116
+        ],
+        "max": [
+          0.139211,
+          0.000392,
+          -0.000587
+        ],
+        "center": [
+          0.134505,
+          -9.5e-05,
+          -0.000874
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "part_index": 21,
+      "part_id": "part_21",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.659082457949504e-10,
+        6.659251207834151e-10
+      ],
+      "inertia_axes": [
+        0.656984264460596,
+        -0.7530047831128625,
+        -0.008730294427760741,
+        -0.03576667191010876
+      ],
+      "center_of_mass": [
+        0.1350371538514102,
+        0.0014722745886657522,
+        -0.0003584524662936968
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.823197675293534e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000859,
+          -0.001813
+        ],
+        "max": [
+          0.139211,
+          0.000116,
+          -0.001123
+        ],
+        "center": [
+          0.134505,
+          -0.000372,
+          -0.001468
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "part_index": 22,
+      "part_id": "part_22",
+      "material_name": "copper",
+      "material": "copper",
+      "non_visual_material": {
+        "base": "copper",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0001,
+      "density": 8960.0,
+      "inertia": [
+        1e-10,
+        6.707272258351618e-10,
+        6.707594475735568e-10
+      ],
+      "inertia_axes": [
+        0.6747519279351254,
+        -0.7369528301987617,
+        -0.004569218469717695,
+        -0.039868333956194754
+      ],
+      "center_of_mass": [
+        0.1350083871722037,
+        0.0020604548571941388,
+        -8.200885514781515e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 8.983607833759169e-10,
+      "bounds": {
+        "min": [
+          0.129799,
+          -0.000583,
+          -0.002466
+        ],
+        "max": [
+          0.139211,
+          0.000392,
+          -0.001658
+        ],
+        "center": [
+          0.134505,
+          -9.5e-05,
+          -0.002062
+        ]
+      },
+      "description": "Internal wire channel.",
+      "semantic": {
+        "qid": "Q556012"
+      },
+      "reasoning": "Tiny internal wire fixed in the plug.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "part_name": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "part_index": 23,
+      "part_id": "part_23",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "matte"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        1.2475977333848909e-08,
+        1.4666670607140219e-08,
+        1.541477748161464e-08
+      ],
+      "inertia_axes": [
+        0.6788776343924982,
+        -0.19493553786831197,
+        -0.19516689216694955,
+        0.6804668822209733
+      ],
+      "center_of_mass": [
+        0.1274456332260295,
+        8.790846094744092e-07,
+        4.352210522396316e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.5369282128088185e-07,
+      "bounds": {
+        "min": [
+          0.124355,
+          -0.002938,
+          -0.003742
+        ],
+        "max": [
+          0.131185,
+          0.003114,
+          0.003742
+        ],
+        "center": [
+          0.12777,
+          8.8e-05,
+          0.0
+        ]
+      },
+      "description": "Opaque outer casing of the RJ45 connector.",
+      "semantic": {
+        "qid": "Q3140502"
+      },
+      "reasoning": "Hard plastic casing holding the connector.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.OpaquePlugShell"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "part_name": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "part_index": 24,
+      "part_id": "part_24",
+      "material_name": "rubber",
+      "material": "rubber",
+      "non_visual_material": {
+        "base": "rubber",
+        "coating": "none",
+        "attributes": [
+          "matte"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        9.566310222856773e-09,
+        3.1238648790220634e-08,
+        3.309207005113072e-08
+      ],
+      "inertia_axes": [
+        0.9999991131298079,
+        -0.0003759012936921854,
+        0.0012699966714514457,
+        -0.00013980797367238386
+      ],
+      "center_of_mass": [
+        0.1205160290042023,
+        1.2236388430454308e-06,
+        2.916213055984723e-05
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 3.40202338871778e-07,
+      "bounds": {
+        "min": [
+          0.111899,
+          -0.002691,
+          -0.003539
+        ],
+        "max": [
+          0.126037,
+          0.002842,
+          0.003539
+        ],
+        "center": [
+          0.118968,
+          7.5e-05,
+          0.0
+        ]
+      },
+      "description": "Flexible rubber boot to prevent cable bending damage.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Rubber component connecting the hard shell to the flexible cable jacket.",
+      "static_friction": 0.8,
+      "dynamic_friction": 0.7,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.StrainReliefBoot"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "part_name": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "source_part_name": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "source_object_name": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "part_index": 25,
+      "part_id": "part_25",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "transparent",
+          "smooth"
+        ]
+      },
+      "mass": 0.002,
+      "density": 1200.0,
+      "inertia": [
+        8.643382287541093e-09,
+        2.2807960378542193e-08,
+        2.6766219301816686e-08
+      ],
+      "inertia_axes": [
+        1.7096559368584081e-06,
+        -0.9998283087381715,
+        -2.5923294892649114e-08,
+        0.018529787987027372
+      ],
+      "center_of_mass": [
+        0.135202232547753,
+        1.1616779870781512e-07,
+        4.664410431164637e-06
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.384565553402637e-07,
+      "bounds": {
+        "min": [
+          0.129578,
+          -0.002009,
+          -0.003013
+        ],
+        "max": [
+          0.140803,
+          0.002009,
+          0.003013
+        ],
+        "center": [
+          0.135191,
+          0.0,
+          0.0
+        ]
+      },
+      "description": "Clear plastic body holding the contacts.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Clear rigid polycarbonate material forming the connector core.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.FixedHardware.TransparentPlugBody"
+    },
+    {
+      "canonical_name": "RightConnectorAssembly.LatchClip",
+      "part_name": "RightConnectorAssembly.LatchClip",
+      "source_part_name": "RightConnectorAssembly.LatchClip",
+      "source_object_name": "RightConnectorAssembly.LatchClip",
+      "part_index": 26,
+      "part_id": "part_26",
+      "material_name": "polycarbonate_plastic",
+      "material": "polycarbonate_plastic",
+      "non_visual_material": {
+        "base": "plastic",
+        "coating": "none",
+        "attributes": [
+          "smooth"
+        ]
+      },
+      "mass": 0.0005,
+      "density": 1200.0,
+      "inertia": [
+        6.026092378205943e-10,
+        4.804209750586653e-09,
+        5.249033861408474e-09
+      ],
+      "inertia_axes": [
+        0.0048845380542566295,
+        -0.9985231142614646,
+        0.0011900127917760794,
+        -0.0540954290410772
+      ],
+      "center_of_mass": [
+        0.13599829233313143,
+        -5.6079630740315215e-06,
+        0.0027170524703035853
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 2.4383099015091747e-08,
+      "bounds": {
+        "min": [
+          0.130834,
+          0.001748,
+          -0.001532
+        ],
+        "max": [
+          0.141682,
+          0.003742,
+          0.001532
+        ],
+        "center": [
+          0.136258,
+          0.002745,
+          0.0
+        ]
+      },
+      "description": "Plastic clip to secure the connector in the port.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Very small plastic part. Kept fixed to the transparent plug body to prevent physics instability.",
+      "static_friction": 0.3,
+      "dynamic_friction": 0.2,
+      "restitution": 0.5,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "RightConnectorAssembly.LatchClip"
+    }
+  ],
+  "joint_relations": [
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_contactcarrierpatch",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_1",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_2",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_3",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_4",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_5",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_6",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_7",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_fixedhardware_internalwirechannel_8",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "parent": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_strainreliefboot__leftconnectorassembly_fixedhardware_opaqueplugshell",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "parent": "CableJacketStraightSpan",
+      "joint_type": "fixed",
+      "name": "joint_cablejacketstraightspan__leftconnectorassembly_fixedhardware_strainreliefboot",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "parent": "LeftConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_opaqueplugshell__leftconnectorassembly_fixedhardware_transparentplugbody",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "LeftConnectorAssembly.LatchClip",
+      "parent": "LeftConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_leftconnectorassembly_fixedhardware_transparentplugbody__leftconnectorassembly_latchclip",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.ContactCarrierPatch",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_contactcarrierpatch",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_1",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_1",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_2",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_2",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_3",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_3",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_4",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_4",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_5",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_5",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_6",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_6",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_7",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_7",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.InternalWireChannel_8",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_fixedhardware_internalwirechannel_8",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "parent": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_strainreliefboot__rightconnectorassembly_fixedhardware_opaqueplugshell",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.StrainReliefBoot",
+      "parent": "CableJacketStraightSpan",
+      "joint_type": "fixed",
+      "name": "joint_cablejacketstraightspan__rightconnectorassembly_fixedhardware_strainreliefboot",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "parent": "RightConnectorAssembly.FixedHardware.OpaquePlugShell",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_opaqueplugshell__rightconnectorassembly_fixedhardware_transparentplugbody",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    },
+    {
+      "child": "RightConnectorAssembly.LatchClip",
+      "parent": "RightConnectorAssembly.FixedHardware.TransparentPlugBody",
+      "joint_type": "fixed",
+      "name": "joint_rightconnectorassembly_fixedhardware_transparentplugbody__rightconnectorassembly_latchclip",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_origin_world": null,
+      "joint_rotation_local": [],
+      "axis": [],
+      "axis_world": null,
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.95
+    }
+  ],
+  "base_link": "CableJacketStraightSpan",
+  "object_description": "An Ethernet patch cable with RJ45 connectors. Modeled as a single fixed rigid assembly for stable physical simulation.",
+  "object_semantic": {
+    "qid": "Q324225"
+  },
+  "total_mass": 0.0256,
+  "center_of_mass": null,
+  "inertia": null,
+  "behavior_type": "normal",
+  "overall_assessment": "A static rigid-body representation of an Ethernet patch cable with correct part mass distribution and material properties.",
+  "num_parts": 27,
+  "object_type": "rod",
+  "simulation_scene": {
+    "simulation_steps_per_second": 60,
+    "sim_substeps": 10,
+    "gravity_enabled": true,
+    "gravitational_acceleration": [
+      0,
+      -9.81,
+      0
+    ],
+    "solver_backend": "vbd",
+    "max_solver_iterations": 16
+  },
+  "solver": {
+    "vbd_iterations": 16,
+    "vbd_particle_self_contact_enabled": true,
+    "vbd_particle_self_contact_radius": 0.003,
+    "vbd_particle_self_contact_margin": 0.001,
+    "vbd_particle_vertex_contact_buffer_size": 32
+  },
+  "soft_contact": {
+    "ke": 1000,
+    "kd": 0.001,
+    "mu": 0.4,
+    "margin": 0.003
+  },
+  "collisions": {
+    "collider_type": "none",
+    "contact_margin": 0.003,
+    "contact_gap": 0,
+    "max_hull_vertices": -1
+  },
+  "articulations": {
+    "self_collision_enabled": true
+  },
+  "rod": {
+    "cross_section_type": "roundSolid",
+    "radius": 0.003,
+    "segment_count": 40,
+    "closed": false,
+    "frame_definition": "parallelTransport",
+    "density": 1500,
+    "stretch_stiffness": 1000000,
+    "compress_stiffness": 10,
+    "bend_stiffness": 50,
+    "bend_damping": 0.05
+  },
+  "newton_body_type": "rod",
+  "newton_deformable_type": "rod"
+}

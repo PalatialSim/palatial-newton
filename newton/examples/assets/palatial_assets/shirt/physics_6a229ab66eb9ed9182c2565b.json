@@ -1,0 +1,115 @@
+{
+  "parts": [
+    {
+      "canonical_name": "part_00",
+      "part_name": "generated reference 01 refined",
+      "source_part_name": "generated reference 01 refined",
+      "source_object_name": "generated reference 01 refined",
+      "part_index": 0,
+      "part_id": "part_00",
+      "material_name": "cotton",
+      "material": "cotton",
+      "non_visual_material": null,
+      "mass": 0.4,
+      "density": 0.15,
+      "inertia": [
+        0.009363756412478712,
+        0.01615397126274791,
+        0.021961700822883592
+      ],
+      "inertia_axes": [
+        0.5238992786408948,
+        0.47459961702172454,
+        -0.4742877866262053,
+        0.5247245418499099
+      ],
+      "center_of_mass": [
+        -0.0005490553349731846,
+        -0.0052861730880400986,
+        -0.04891586982733786
+      ],
+      "part_origin_world": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "volume": 0.07763875955219994,
+      "bounds": {
+        "min": [
+          -0.30330265,
+          -0.37534276,
+          -0.14609471
+        ],
+        "max": [
+          0.30254115,
+          0.37471708,
+          0.14652295
+        ],
+        "center": [
+          -0.0003233815233160532,
+          -0.028282138001482108,
+          0.0014430326366551064
+        ]
+      },
+      "description": "A long-sleeved, button-up shirt made of a soft, slightly thick olive green fabric, featuring a standard collar and a single left chest pocket.",
+      "semantic": {
+        "qid": null
+      },
+      "reasoning": "Visual analysis indicates a woven garment, likely a heavy brushed cotton or flannel, which provides more structure than a basic t-shirt but remains soft and drapey. The asset is treated as a meter-scale typical garment. Areal density is estimated at 0.15 kg/m^2 for thick cotton. Newton VBD parameters are selected from the 'typical garment' band: tri_stiffness at 1e4 N/m ensures stability, while bend_stiffness is set to 10.0 N*m to capture the slight rigidity of the flannel material and collar, avoiding the extreme floppiness of thin silk. Soft contact parameters are configured for standard garment interaction (ke=1e4, mu=0.5 matching cotton friction), and the simulation rate is standard 60 Hz with 10 substeps. Per-asset self-contact overrides are omitted in favor of assuming scene-level defaults for a single garment.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.0,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "deformable",
+      "is_structural_root": true,
+      "color_name": "",
+      "appearance_properties": {},
+      "newton": {
+        "collisions": {
+          "collider_type": "none",
+          "contact_margin": 0.01
+        },
+        "simulation_scene": {
+          "simulation_steps_per_second": 60,
+          "sim_substeps": 10,
+          "gravity_enabled": true,
+          "gravitational_acceleration": [
+            0,
+            0,
+            -9.81
+          ],
+          "solver_backend": "vbd",
+          "max_solver_iterations": 16
+        },
+        "soft_contact": {
+          "ke": 10000,
+          "kd": 0.01,
+          "mu": 0.5,
+          "margin": 0.015
+        },
+        "cloth": {
+          "density": 0.15,
+          "tri_stiffness": 10000,
+          "tri_area_stiffness": 10000,
+          "tri_damping": 1.5e-06,
+          "bend_stiffness": 10,
+          "bend_damping": 0.1,
+          "particle_radius": 0.02
+        }
+      }
+    }
+  ],
+  "joint_relations": [],
+  "base_link": "generated reference 01 refined",
+  "object_description": "A long-sleeved, button-up shirt made of a soft, slightly thick olive green fabric, featuring a standard collar and a single left chest pocket.",
+  "object_semantic": {
+    "qid": null
+  },
+  "total_mass": 0.4,
+  "center_of_mass": null,
+  "inertia": null,
+  "overall_assessment": "",
+  "num_parts": 1,
+  "object_type": "cloth"
+}
