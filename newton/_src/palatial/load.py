@@ -5,7 +5,7 @@ import newton
 from pxr import Usd, UsdGeom
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 import numpy as np
 import warp as wp
 from .rod_connectors import (
@@ -87,6 +87,9 @@ _SOLVER_PARAM_ALIAS = {
     "particleSelfContactRadius":           "particle_self_contact_radius",
     "particleSelfContactMargin":           "particle_self_contact_margin",
     "particleConservativeBoundRelaxation": "particle_conservative_bound_relaxation",
+    "particleRestShapeContactExclusionRadius":   "particle_rest_shape_contact_exclusion_radius",
+    "particleTopologicalContactFilterThreshold": "particle_topological_contact_filter_threshold",
+    "particleVertexContactBufferSize":           "particle_vertex_contact_buffer_size",
 }
 
 
@@ -629,10 +632,25 @@ def load(usd_path: str, *, solver_override: str | None = None,
          device: str | None = None, fix_base: bool = False,
          table: dict | None = None,
          rod_textured_tube: bool = False,
-         rod_tube_radial_segments: int = 12) -> NewtonBundle:
+         rod_tube_radial_segments: int = 12,
+         solver_param_overrides: dict | None = None,
+         on_model: Callable[[Any], None] | None = None) -> NewtonBundle:
     """Read a converted USD and return a ready-to-step :class:`NewtonBundle`.
 
     See ``docs/palatial_package.md`` for parameter semantics.
+
+    Args:
+        solver_param_overrides: Extra kwargs forwarded to the solver
+            constructor. Keys accept either USDA camelCase or solver
+            snake_case; caller-supplied values win over scene- and
+            shell-level USDA attributes. Use this for VBD knobs the
+            schema does not author (e.g.
+            ``particle_rest_shape_contact_exclusion_radius``) or to feed
+            values parsed from a companion physics JSON.
+        on_model: Invoked once with the finalized :class:`~newton.Model`
+            immediately before the solver is constructed. Use this when a
+            solver bakes model state at ``__init__`` time (e.g. MuJoCo
+            actuator type and drive gains).
     """
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -689,6 +707,19 @@ def load(usd_path: str, *, solver_override: str | None = None,
             solver_params.pop(sn, None)
             solver_params[ck] = v
 
+        # Anti-pinch VBD self-contact defaults for dense garment meshes.
+        # The converter authors particleSelfContact{Radius,Margin} but not
+        # these three knobs. Left at SolverVBD defaults
+        # (rest_excl=0.0, topo_filter=2, vertex_buffer=32) rest-adjacent
+        # triangles self-collide and erupt into sharp tent-spikes. Inject
+        # sane defaults so the bare load() path drapes cleanly; any value
+        # authored in the USDA still wins via setdefault.
+        if solver_name == "vbd":
+            solver_params.setdefault("particleEnableSelfContact", True)
+            solver_params.setdefault("particleRestShapeContactExclusionRadius", 0.005)
+            solver_params.setdefault("particleTopologicalContactFilterThreshold", 1)
+            solver_params.setdefault("particleVertexContactBufferSize", 64)
+
     rod_initial_body_q = None
     if body_type == "cloth":
         model = _build_cloth(usd_path, device=device, solver_name=solver_name, table=table)
@@ -704,6 +735,26 @@ def load(usd_path: str, *, solver_override: str | None = None,
     else:
         model = _build_rigid(usd_path, device=device, fix_base=fix_base,
                              solver_name=solver_name)
+
+    # Caller-supplied overrides win over scene/shell-level USDA attrs.
+    # Pop both the alias form and the literal form so an override under
+    # either name displaces the USDA-authored value cleanly; then dedupe
+    # to keep the dict canonical for downstream consumers.
+    if solver_param_overrides:
+        _snake_to_camel = {v: k for k, v in _SOLVER_PARAM_ALIAS.items() if k != v}
+        for key in solver_param_overrides:
+            solver_params.pop(key, None)
+            if key in _snake_to_camel:
+                solver_params.pop(_snake_to_camel[key], None)
+            elif key in _SOLVER_PARAM_ALIAS:
+                solver_params.pop(_SOLVER_PARAM_ALIAS[key], None)
+        solver_params.update(solver_param_overrides)
+        solver_params = _dedupe_solver_params(solver_params)
+
+    # Pre-solver model hook (e.g. set MuJoCo joint drive mode/gains so the
+    # solver bakes them at __init__).
+    if on_model is not None:
+        on_model(model)
 
     solver = _build_solver(solver_name, model, solver_params)
     state_in = model.state()
