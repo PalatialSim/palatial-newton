@@ -1,0 +1,238 @@
+#usda 1.0
+(
+    "Newton deformable USD API schemas. Sibling plugin to "
+    "newton-usd-schemas. Defines NewtonDeformableAPI, NewtonShellAPI, "
+    "NewtonShellMaterialAPI, NewtonClothAPI, NewtonRodAPI, "
+    "NewtonRodMaterialAPI. See "
+    "newton_usd/shell_skill/SKILL.md for the design rationale."
+)
+
+class "NewtonDeformableAPI" (
+    doc = """Shared base for 2D / 3D / 1D deformable assets (cloth, shell,
+    rod, volume, particle, granular). Carries cross-cutting flags. Apply
+    alongside the intent-specific API (e.g. NewtonShellAPI for cloth)."""
+)
+{
+    bool newton:deformable:enabled = true (
+        doc = "Runtime toggle. When false the loader skips this asset."
+    )
+
+    bool newton:deformable:selfCollisionEnabled = false (
+        doc = """Whether the deformable should self-collide. Maps to VBD's
+        particle_enable_self_contact."""
+    )
+
+    uniform token newton:deformable:simulationIntent (
+        allowedTokens = ["cloth", "shell", "rod", "volume", "particle", "granular"]
+        doc = """Advisory hint for solver dispatch. The cloth/shell prim
+        does not pin a solver; the runtime picks SolverVBD by default and
+        promotes to SolverStyle3D when style3d:* attrs are authored."""
+    )
+
+    float newton:deformable:velocityDamping = 0.0 (
+        doc = """Global per-step velocity damping (1/s). Applied uniformly
+        to the deformable's particle velocities."""
+    )
+}
+
+class "NewtonShellAPI" (
+    doc = """2D-deformable geometry (cloth, sheets, membranes, thin shells).
+    Geometry-level attributes live on the Mesh prim; material-response
+    attributes live on the bound Material via NewtonShellMaterialAPI."""
+)
+{
+    float newton:shell:thickness = 0.001 (
+        doc = """Shell thickness (m). Drives mass + bending interpretation;
+        critical for thin shells. Range: (0, inf)"""
+    )
+
+    float newton:shell:particleRadius = 0.01 (
+        doc = """Contact radius for VBD/particle-based shell solvers (m).
+        Range: (0, inf)"""
+    )
+
+    bool newton:shell:addBendingEdges = true (
+        doc = """Importer hint: derive bending edges from mesh adjacency
+        when building the cloth model."""
+    )
+
+    float newton:shell:dropHeight = 1.0 (
+        doc = """Sim-time spawn height (m above ground plane). Newton-USD
+        convention; not part of the canonical shell schema."""
+    )
+
+    float3 newton:shell:style3d:triAnisoKe = (100, 100, 10) (
+        doc = """Style3D anisotropic in-plane stiffness (warp, weft, shear)
+        in N/m. Authored only for woven fabrics. Maps to
+        newton.solvers.style3d.add_cloth_mesh's tri_aniso_ke."""
+    )
+
+    float3 newton:shell:style3d:edgeAnisoKe = (2e-5, 1e-5, 5e-6) (
+        doc = """Style3D anisotropic bending stiffness (warp-bend, weft-bend,
+        shear-bend) in N*m. Maps to add_cloth_mesh's edge_aniso_ke."""
+    )
+
+    float newton:shell:vbd:selfContactRadius = 0.2 (
+        doc = """VBD particle_self_contact_radius for this asset (m)."""
+    )
+
+    float newton:shell:vbd:selfContactMargin = 0.2 (
+        doc = """VBD particle_self_contact_margin for this asset (m)."""
+    )
+
+    float newton:shell:vbd:conservativeBoundRelaxation = 0.85 (
+        doc = """VBD particle_conservative_bound_relaxation for this asset.
+        Range: (0, 1]"""
+    )
+}
+
+class "NewtonShellMaterialAPI" (
+    doc = """2D-deformable material response. Apply on a UsdShade.Material
+    prim and bind the material to the cloth Mesh via MaterialBindingAPI
+    (physics purpose). Mirrors the PhysicsMaterialAPI / NewtonMaterialAPI
+    convention for rigid materials."""
+)
+{
+    float newton:shell:density = 300.0 (
+        doc = """Bulk density (kg/m^3). Surface density is derived as
+        density * thickness at simulation time."""
+    )
+
+    float newton:shell:triStiffness = 100.0 (
+        doc = """In-plane stretch stiffness, warp/weft averaged (N/m).
+        Maps to add_cloth_mesh's tri_ke."""
+    )
+
+    float newton:shell:triAreaStiffness = 100.0 (
+        doc = """Area-preservation stiffness (N/m). Maps to tri_ka."""
+    )
+
+    float newton:shell:triDamping = 0.0 (
+        doc = """In-plane damping. Maps to tri_kd."""
+    )
+
+    float newton:shell:triDrag = 0.0 (
+        doc = """Aerodynamic drag coefficient (dimensionless)."""
+    )
+
+    float newton:shell:triLift = 0.0 (
+        doc = """Aerodynamic lift coefficient (dimensionless)."""
+    )
+
+    float newton:shell:bendStiffness = 0.001 (
+        doc = """Bending stiffness (N*m). The single most important fabric
+        param. Maps to add_cloth_mesh's edge_ke."""
+    )
+
+    float newton:shell:bendDamping = 0.0 (
+        doc = """Bending damping. Maps to edge_kd."""
+    )
+}
+
+class "NewtonClothAPI" (
+    prepend apiSchemas = ["NewtonShellAPI"]
+    doc = """Back-compat alias for NewtonShellAPI. Resolves to the same
+    underlying attributes via the shell-first resolution layer. Prefer
+    NewtonShellAPI for new authoring."""
+)
+{
+}
+
+class "NewtonRodAPI" (
+    doc = """1D-deformable rod/cable geometry. Apply on a BasisCurves prim
+    whose points represent the rod centerline. Material-response attributes
+    live on the bound Material via NewtonRodMaterialAPI."""
+)
+{
+    uniform token newton:rod:frameDefinition = "parallelTransport" (
+        allowedTokens = ["parallelTransport"]
+        doc = """Frame convention used when generating per-segment rod
+        orientations. The current isotropic palatial runtime supports
+        parallel-transport frames."""
+    )
+
+    bool newton:rod:closed = false (
+        doc = """If true, treat the authored rod as a closed loop."""
+    )
+
+    uniform token newton:rod:crossSectionType = "roundSolid" (
+        allowedTokens = ["roundSolid", "flatRect"]
+        doc = """Cross-section kind. The stock isotropic runtime uses a
+        round rod directly and approximates flat rectangular rods with an
+        equivalent isotropic proxy."""
+    )
+
+    float newton:rod:radius = 0.005 (
+        doc = """Round rod radius [m]."""
+    )
+
+    float newton:rod:width = 0.01 (
+        doc = """Flat rectangular rod width [m]."""
+    )
+
+    float newton:rod:thickness = 0.002 (
+        doc = """Flat rectangular rod thickness [m]."""
+    )
+
+    int newton:rod:segmentCount = 10 (
+        doc = """Number of simulation segments. When the authored centerline
+        is sparse, the loader resamples it to segmentCount + 1 points before
+        building the rod model."""
+    )
+
+    float newton:rod:length = 1.0 (
+        doc = """Straight-rod fallback length [m]. Used when the loader must
+        synthesize a centerline because no authored or helper centerline is
+        available."""
+    )
+
+    float newton:rod:dropHeight = 0.3 (
+        doc = """Straight-rod fallback spawn height [m]. Used together with
+        ``newton:rod:length`` when the loader must synthesize a centerline."""
+    )
+
+    float newton:rod:twistTotal = 0.0 (
+        doc = """Total distributed twist [rad] applied when generating
+        per-segment rod orientations from the centerline."""
+    )
+}
+
+class "NewtonRodMaterialAPI" (
+    doc = """1D-deformable rod/cable material response. Apply on a
+    UsdShade.Material prim and bind the material to the rod guide via
+    MaterialBindingAPI (physics purpose)."""
+)
+{
+    float newton:rod:density = 1000.0 (
+        doc = """Bulk density [kg/m^3]."""
+    )
+
+    float newton:rod:stretchStiffness = 100000.0 (
+        doc = """Axial stretch stiffness (N/m)."""
+    )
+
+    float newton:rod:stretchDamping = 0.0 (
+        doc = """Axial stretch damping."""
+    )
+
+    float newton:rod:compressStiffness = 100000.0 (
+        doc = """Compatibility axial compression stiffness (N/m). The
+        isotropic runtime uses stretch stiffness as the single axial
+        stiffness and only falls back to this value when stretch stiffness is
+        not authored."""
+    )
+
+    float newton:rod:compressDamping = 0.0 (
+        doc = """Compatibility axial compression damping. The isotropic
+        runtime uses stretch damping as the single axial damping value and
+        only falls back to this value when stretch damping is not authored."""
+    )
+
+    float newton:rod:bendStiffness = 0.0 (
+        doc = """Isotropic bend/twist stiffness (N*m)."""
+    )
+
+    float newton:rod:bendDamping = 0.0 (
+        doc = """Isotropic bend/twist damping."""
+    )
+}
