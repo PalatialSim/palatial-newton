@@ -26,10 +26,7 @@ class Example:
 
         self.fps = bundle.fps
         self.frame_dt = 1.0 / float(self.fps)
-        # Substeps: CLI override > USDA newton:solver:substeps > 1.
-        # Default 1 keeps the drop running in real time (matching
-        # example_palatial_load); raise it only if the fabric needs
-        # extra stability, at the cost of slower-than-real playback.
+       
         if getattr(args, "substeps", None) is not None:
             self.sim_substeps = max(1, int(args.substeps))
         else:
@@ -40,13 +37,8 @@ class Example:
         self.state_0 = bundle.state_in
         self.state_1 = bundle.state_out
 
-        # Soft-contact gains drive how firmly fabric resists penetration
-        # against rigid bodies / ground (ke) and how damped that contact is
-        # (kd). The converter leaves Newton's weak defaults (ke=1e3), which
-        # let the denim slowly compress THROUGH the floor over time (the
-        # cloth "seeps down" after it lands). A stiff ke (1e5) paired with
-        # real damping (kd=1.0) holds it on the surface at substeps=1.
-        # Raising kd alone makes it worse; it only helps with a stiff ke.
+        # Cloth assets should have newton:soft_contact:* params authored for
+        # good ground interaction out of the box, but CLI overrides are here for experimentation.
         if args.soft_contact_ke is not None:
             self.model.soft_contact_ke = float(args.soft_contact_ke)
         if args.soft_contact_kd is not None:
@@ -56,13 +48,8 @@ class Example:
             f"kd={self.model.soft_contact_kd} mu={self.model.soft_contact_mu}"
         )
 
-        # Pose the cloth before it settles: rotate it about the world axes,
-        # then lift it so it falls onto the ground. Cloth lives entirely in
-        # particles, so both ops are just a transform of particle_q.
         self._pose_cloth(args)
 
-        # Native model contacts: VBD owns cloth self-contact internally, so
-        # we just allocate the model contact buffer and run one pass.
         self.contacts = self.model.contacts()
         self.model.collide(self.state_0, self.contacts)
 
