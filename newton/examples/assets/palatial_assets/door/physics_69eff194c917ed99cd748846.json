@@ -1,0 +1,164 @@
+{
+  "parts": [
+    {
+      "canonical_name": "part_00",
+      "part_name": "door frame",
+      "source_part_name": "part_00",
+      "source_object_name": "part_00",
+      "part_index": 0,
+      "part_id": "part_00",
+      "material_name": "walnut_wood",
+      "material": "walnut_wood",
+      "mass": 15.0,
+      "density": 700.0,
+      "inertia": [
+        2.2956495514059823,
+        5.2778395574582655,
+        7.507424134925444
+      ],
+      "inertia_axes": [
+        0.5002565457391642,
+        -0.5001014925428843,
+        -0.49988644011696776,
+        -0.49975537274619114
+      ],
+      "center_of_mass": [
+        0.0539168263153406,
+        0.15904950159214587,
+        1.0696022020029692
+      ],
+      "part_origin_world": [
+        0.0539168263153406,
+        0.15904950159214587,
+        1.0696022020029692
+      ],
+      "volume": 0.056326157923373144,
+      "bounds": {
+        "min": [
+          -0.396298,
+          0.076229,
+          -0.000273
+        ],
+        "max": [
+          0.504814,
+          0.244049,
+          1.864141
+        ],
+        "center": [
+          0.054258,
+          0.160139,
+          0.931934
+        ]
+      },
+      "description": "Outer structural frame that mounts to a wall and holds the door hinges.",
+      "reasoning": "This is the stationary frame that structurally supports the moving door. Estimated mass for a solid wood frame is around 15kg.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": true,
+      "color_name": "Red",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_01",
+      "part_name": "door panel",
+      "source_part_name": "part_01",
+      "source_object_name": "part_01",
+      "part_index": 1,
+      "part_id": "part_01",
+      "material_name": "walnut_wood",
+      "material": "walnut_wood",
+      "mass": 25.0,
+      "density": 700.0,
+      "inertia": [
+        1.2453060714091662,
+        7.230353837746763,
+        8.470385671943902
+      ],
+      "inertia_axes": [
+        0.6497047480785189,
+        0.2785651566809969,
+        -0.6499068468076292,
+        0.27911697239703076
+      ],
+      "center_of_mass": [
+        -0.0365521719138639,
+        -0.08617833523897689,
+        0.8944616576733748
+      ],
+      "part_origin_world": [
+        -0.0365521719138639,
+        -0.08617833523897689,
+        0.8944616576733748
+      ],
+      "volume": 0.03691546275002763,
+      "bounds": {
+        "min": [
+          -0.305445,
+          -0.345378,
+          0.017212
+        ],
+        "max": [
+          0.229079,
+          0.167256,
+          1.791654
+        ],
+        "center": [
+          -0.038183,
+          -0.089061,
+          0.904433
+        ]
+      },
+      "description": "Swinging solid wooden door panel.",
+      "reasoning": "The main swinging component. Attached via hinges to the frame. Side-hinged doors rotate about the vertical (Z) axis. Estimated mass for a solid wood door is around 25kg.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Blue",
+      "confidence": "high"
+    }
+  ],
+  "joint_relations": [
+    {
+      "child": "part_01",
+      "parent": "part_00",
+      "joint_type": "revolute",
+      "name": "joint_part_00__part_01",
+      "damping": 10.0,
+      "effort": 20.0,
+      "friction": 2.0,
+      "stiffness": 0.0,
+      "velocity": 3.0,
+      "origin": [
+        -0.3537143569433272,
+        0.15302744688755388,
+        -1.1838312666009871
+      ],
+      "joint_rotation_local": [],
+      "axis": [
+        -0.0,
+        -0.0,
+        -1.0
+      ],
+      "motion_limits": {
+        "min": -90.0,
+        "max": 45.0
+      },
+      "revolute_mode": "hinge",
+      "score": 0.95,
+      "rest_pose_state": "partial"
+    }
+  ],
+  "base_link": "part_00",
+  "object_description": "A wooden interior door and frame assembly. The door panel swings open on a vertical hinge axis.",
+  "total_mass": 40.0,
+  "center_of_mass": null,
+  "inertia": null
+}

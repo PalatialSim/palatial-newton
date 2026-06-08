@@ -1,0 +1,1984 @@
+{
+  "parts": [
+    {
+      "canonical_name": "part_0",
+      "part_name": "right headboard leg",
+      "source_part_name": "part_0",
+      "source_object_name": "part_0",
+      "part_index": 0,
+      "part_id": "part_00",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 4.0,
+      "density": 650.0,
+      "inertia": [
+        0.0028390475903286483,
+        0.2743396274863027,
+        0.2756364163449272
+      ],
+      "inertia_axes": [
+        0.49324017617100596,
+        -0.5043248369438486,
+        -0.49559755492528107,
+        -0.5067086450855547
+      ],
+      "center_of_mass": [
+        0.46458892644157085,
+        0.8633708156163159,
+        0.47099058989070947
+      ],
+      "part_origin_world": [
+        0.46458892644157085,
+        0.8633708156163159,
+        0.47099058989070947
+      ],
+      "volume": 0.0033501123117630023,
+      "bounds": {
+        "min": [
+          0.394899,
+          0.821553,
+          -0.00023
+        ],
+        "max": [
+          0.504318,
+          0.88786,
+          0.919559
+        ],
+        "center": [
+          0.449608,
+          0.854707,
+          0.459665
+        ]
+      },
+      "description": "Tall vertical wooden leg supporting the right side of the headboard.",
+      "reasoning": "Wooden structural leg, long Z dimension. Attaches to the headboard.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Red",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_1",
+      "part_name": "headboard panel",
+      "source_part_name": "part_1",
+      "source_object_name": "part_1",
+      "part_index": 1,
+      "part_id": "part_01",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 20.0,
+      "density": 650.0,
+      "inertia": [
+        0.6934399032097809,
+        1.2730201332341267,
+        1.9649356908871458
+      ],
+      "inertia_axes": [
+        0.7073352919371027,
+        -0.706873194154965,
+        0.0018203990772865943,
+        0.001938636791781298
+      ],
+      "center_of_mass": [
+        -0.00210217578533651,
+        0.8626649534669273,
+        0.5293150009484673
+      ],
+      "part_origin_world": [
+        -0.00210217578533651,
+        0.8626649534669273,
+        0.5293150009484673
+      ],
+      "volume": 0.01138801743171319,
+      "bounds": {
+        "min": [
+          -0.439509,
+          0.82046,
+          0.215249
+        ],
+        "max": [
+          0.434726,
+          0.876854,
+          0.858211
+        ],
+        "center": [
+          -0.002392,
+          0.848657,
+          0.53673
+        ]
+      },
+      "description": "Large wooden panel serving as the main headboard and structural root of the bed.",
+      "reasoning": "Large central panel, excellent candidate for the kinematic root of the frame.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": true,
+      "color_name": "Blue",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_10",
+      "part_name": "headboard top trim",
+      "source_part_name": "part_10",
+      "source_object_name": "part_10",
+      "part_index": 2,
+      "part_id": "part_10",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 2.0,
+      "density": 650.0,
+      "inertia": [
+        0.00061128437989425,
+        0.12670930988327309,
+        0.12721404387500285
+      ],
+      "inertia_axes": [
+        0.9999996209635407,
+        0.0008597620531206804,
+        -6.187775714039391e-07,
+        -0.00013741034958365098
+      ],
+      "center_of_mass": [
+        -0.00329886998751759,
+        -0.692117133238364,
+        0.33326431208755464
+      ],
+      "part_origin_world": [
+        -0.00329886998751759,
+        -0.692117133238364,
+        0.33326431208755464
+      ],
+      "volume": 0.0008786065107439484,
+      "bounds": {
+        "min": [
+          -0.442171,
+          -0.753814,
+          0.322604
+        ],
+        "max": [
+          0.436786,
+          -0.649321,
+          0.342912
+        ],
+        "center": [
+          -0.002693,
+          -0.701568,
+          0.332758
+        ]
+      },
+      "description": "Horizontal wooden trim capping the top of the headboard panel.",
+      "reasoning": "Horizontal decorative/structural wood piece spanning the headboard.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Green",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_11",
+      "part_name": "bed slat 1",
+      "source_part_name": "part_11",
+      "source_object_name": "part_11",
+      "part_index": 3,
+      "part_id": "part_11",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0003064236280052185,
+        0.06635042534978297,
+        0.06660442789381547
+      ],
+      "inertia_axes": [
+        0.999994448784411,
+        0.0033319803128727074,
+        9.682903792107565e-07,
+        1.75105414740456e-05
+      ],
+      "center_of_mass": [
+        -0.0023045368135319387,
+        0.686509281633212,
+        0.3331807805551743
+      ],
+      "part_origin_world": [
+        -0.0023045368135319387,
+        0.686509281633212,
+        0.3331807805551743
+      ],
+      "volume": 0.0008370324594226898,
+      "bounds": {
+        "min": [
+          -0.442574,
+          0.623165,
+          0.322001
+        ],
+        "max": [
+          0.436862,
+          0.724723,
+          0.343029
+        ],
+        "center": [
+          -0.002856,
+          0.673944,
+          0.332515
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "One of many identical horizontal boards spanning the width of the bed.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Yellow",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_12",
+      "part_name": "right footboard leg",
+      "source_part_name": "part_12",
+      "source_object_name": "part_12",
+      "part_index": 4,
+      "part_id": "part_12",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 1.5,
+      "density": 650.0,
+      "inertia": [
+        0.0009764726898322097,
+        0.01816268121140372,
+        0.018666338174035353
+      ],
+      "inertia_axes": [
+        0.5022833497859821,
+        -0.4891503913443308,
+        -0.5141035606875297,
+        -0.4941061222691582
+      ],
+      "center_of_mass": [
+        0.4646772470382662,
+        -1.1462766434129716,
+        0.19939607795217407
+      ],
+      "part_origin_world": [
+        0.4646772470382662,
+        -1.1462766434129716,
+        0.19939607795217407
+      ],
+      "volume": 0.0012743419126139076,
+      "bounds": {
+        "min": [
+          0.411302,
+          -1.170019,
+          -0.000179
+        ],
+        "max": [
+          0.504451,
+          -1.121781,
+          0.381739
+        ],
+        "center": [
+          0.457877,
+          -1.1459,
+          0.19078
+        ]
+      },
+      "description": "Short vertical wooden leg supporting the front right corner of the bed.",
+      "reasoning": "Leg component attached to the foot of the bed frame.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Purple",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_13",
+      "part_name": "bed slat 2",
+      "source_part_name": "part_13",
+      "source_object_name": "part_13",
+      "part_index": 5,
+      "part_id": "part_13",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0003845403133815786,
+        0.06117924499854661,
+        0.06150926816882759
+      ],
+      "inertia_axes": [
+        0.006677337373774997,
+        -0.9999777059669963,
+        -1.2709504194082824e-05,
+        2.39384413949121e-05
+      ],
+      "center_of_mass": [
+        -0.0029980178263962656,
+        0.14092692691330172,
+        0.3330017954812984
+      ],
+      "part_origin_world": [
+        -0.0029980178263962656,
+        0.14092692691330172,
+        0.3330017954812984
+      ],
+      "volume": 0.0009261522543673017,
+      "bounds": {
+        "min": [
+          -0.441763,
+          0.035087,
+          0.32191
+        ],
+        "max": [
+          0.436675,
+          0.176772,
+          0.342667
+        ],
+        "center": [
+          -0.002544,
+          0.105929,
+          0.332288
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Orange",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_14",
+      "part_name": "bed slat 3",
+      "source_part_name": "part_14",
+      "source_object_name": "part_14",
+      "part_index": 6,
+      "part_id": "part_14",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0003405669562176977,
+        0.06152269033043983,
+        0.06181009136202457
+      ],
+      "inertia_axes": [
+        0.0012287528913518593,
+        -0.9999992444414252,
+        -2.2826704562714477e-05,
+        2.7601675145857815e-05
+      ],
+      "center_of_mass": [
+        -0.0024798194426797495,
+        -0.15199750675719503,
+        0.3330771084520134
+      ],
+      "part_origin_world": [
+        -0.0024798194426797495,
+        -0.15199750675719503,
+        0.3330771084520134
+      ],
+      "volume": 0.0009033007043668835,
+      "bounds": {
+        "min": [
+          -0.440558,
+          -0.228036,
+          0.322135
+        ],
+        "max": [
+          0.435974,
+          -0.106543,
+          0.342404
+        ],
+        "center": [
+          -0.002292,
+          -0.167289,
+          0.33227
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Cyan",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_15",
+      "part_name": "left footboard leg",
+      "source_part_name": "part_15",
+      "source_object_name": "part_15",
+      "part_index": 7,
+      "part_id": "part_15",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 1.5,
+      "density": 650.0,
+      "inertia": [
+        0.0009577687473673498,
+        0.018203128018435922,
+        0.018690165159126866
+      ],
+      "inertia_axes": [
+        0.4926052725215604,
+        -0.5167873311944787,
+        -0.4862024801209675,
+        -0.5038631243949768
+      ],
+      "center_of_mass": [
+        -0.4704433086182503,
+        -1.146088994442864,
+        0.19915921101500858
+      ],
+      "part_origin_world": [
+        -0.4704433086182503,
+        -1.146088994442864,
+        0.19915921101500858
+      ],
+      "volume": 0.0012569732660170415,
+      "bounds": {
+        "min": [
+          -0.509938,
+          -1.169919,
+          -0.000379
+        ],
+        "max": [
+          -0.417049,
+          -1.121337,
+          0.381699
+        ],
+        "center": [
+          -0.463493,
+          -1.145628,
+          0.19066
+        ]
+      },
+      "description": "Short vertical wooden leg supporting the front left corner of the bed.",
+      "reasoning": "Leg component attached to the foot of the bed frame.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Pink",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_16",
+      "part_name": "bed slat 4",
+      "source_part_name": "part_16",
+      "source_object_name": "part_16",
+      "part_index": 8,
+      "part_id": "part_16",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0004064998948267421,
+        0.059021905639804084,
+        0.05937333912343163
+      ],
+      "inertia_axes": [
+        0.9999999518778813,
+        0.0003082045427856701,
+        -9.740214761633227e-06,
+        -3.404883628522865e-05
+      ],
+      "center_of_mass": [
+        -0.0014826924481698151,
+        0.310338817777351,
+        0.3330459166613863
+      ],
+      "part_origin_world": [
+        -0.0014826924481698151,
+        0.310338817777351,
+        0.3330459166613863
+      ],
+      "volume": 0.0009380767823819749,
+      "bounds": {
+        "min": [
+          -0.441312,
+          0.213809,
+          0.321866
+        ],
+        "max": [
+          0.438405,
+          0.367763,
+          0.342895
+        ],
+        "center": [
+          -0.001454,
+          0.290786,
+          0.332381
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Brown",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_17",
+      "part_name": "footboard top rail",
+      "source_part_name": "part_17",
+      "source_object_name": "part_17",
+      "part_index": 9,
+      "part_id": "part_17",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 3.0,
+      "density": 650.0,
+      "inertia": [
+        0.0020063006779165705,
+        0.20289509522921426,
+        0.2030725738131493
+      ],
+      "inertia_axes": [
+        0.8954838729791699,
+        0.4450928788216853,
+        -0.00018205916395031,
+        0.0009640077341325627
+      ],
+      "center_of_mass": [
+        0.003515444430406333,
+        -1.1428652697817256,
+        0.3556155828197955
+      ],
+      "part_origin_world": [
+        0.003515444430406333,
+        -1.1428652697817256,
+        0.3556155828197955
+      ],
+      "volume": 0.0012119455908952837,
+      "bounds": {
+        "min": [
+          -0.43757,
+          -1.169796,
+          0.320423
+        ],
+        "max": [
+          0.48484,
+          -1.111294,
+          0.385424
+        ],
+        "center": [
+          0.023635,
+          -1.140545,
+          0.352923
+        ]
+      },
+      "description": "Horizontal rail spanning the top of the footboard.",
+      "reasoning": "Front-spanning horizontal bed frame component.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Gray",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_18",
+      "part_name": "bed slat 5",
+      "source_part_name": "part_18",
+      "source_object_name": "part_18",
+      "part_index": 10,
+      "part_id": "part_18",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0003302470987786985,
+        0.06131628675131947,
+        0.06159277630385108
+      ],
+      "inertia_axes": [
+        0.9999861800225929,
+        -0.0052571617391280814,
+        9.460837502306423e-07,
+        4.4870658738644676e-05
+      ],
+      "center_of_mass": [
+        -0.002015809621578225,
+        -0.012656445822558893,
+        0.33318353811795204
+      ],
+      "part_origin_world": [
+        -0.002015809621578225,
+        -0.012656445822558893,
+        0.33318353811795204
+      ],
+      "volume": 0.0008894990225015247,
+      "bounds": {
+        "min": [
+          -0.440216,
+          -0.086216,
+          0.322097
+        ],
+        "max": [
+          0.436443,
+          0.027622,
+          0.342612
+        ],
+        "center": [
+          -0.001887,
+          -0.029297,
+          0.332354
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Lime",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_19",
+      "part_name": "center spine support block 1",
+      "source_part_name": "part_19",
+      "source_object_name": "part_19",
+      "part_index": 11,
+      "part_id": "part_19",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 0.5,
+      "density": 500.0,
+      "inertia": [
+        0.0006225588779588967,
+        0.0014093916426979028,
+        0.0020242540109338273
+      ],
+      "inertia_axes": [
+        0.9945520299196954,
+        0.0004015665584109687,
+        -0.00022638125025509226,
+        0.10424033422069458
+      ],
+      "center_of_mass": [
+        -0.01207670845698994,
+        -0.5395863753165021,
+        0.35202932161927464
+      ],
+      "part_origin_world": [
+        -0.01207670845698994,
+        -0.5395863753165021,
+        0.35202932161927464
+      ],
+      "volume": 0.00017889378163325628,
+      "bounds": {
+        "min": [
+          -0.119637,
+          -0.606201,
+          0.346952
+        ],
+        "max": [
+          0.080348,
+          -0.465293,
+          0.360061
+        ],
+        "center": [
+          -0.019644,
+          -0.535747,
+          0.353506
+        ]
+      },
+      "description": "Small support block beneath the center spine.",
+      "reasoning": "Flat central reinforcement block visible under the frame.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Dark Purple",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_2",
+      "part_name": "footboard lower rail",
+      "source_part_name": "part_2",
+      "source_object_name": "part_2",
+      "part_index": 12,
+      "part_id": "part_02",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 2.5,
+      "density": 650.0,
+      "inertia": [
+        0.0024600096518428353,
+        0.15704964685308928,
+        0.15933968723097133
+      ],
+      "inertia_axes": [
+        0.7075915886348146,
+        0.7066216010592851,
+        -0.0001062642520934798,
+        0.0002128792633413065
+      ],
+      "center_of_mass": [
+        -0.004021977283559505,
+        -1.1443149520251605,
+        0.2686523643179945
+      ],
+      "part_origin_world": [
+        -0.004021977283559505,
+        -1.1443149520251605,
+        0.2686523643179945
+      ],
+      "volume": 0.0018851304950516605,
+      "bounds": {
+        "min": [
+          -0.43805,
+          -1.158032,
+          0.215014
+        ],
+        "max": [
+          0.433335,
+          -1.133566,
+          0.323256
+        ],
+        "center": [
+          -0.002358,
+          -1.145799,
+          0.269135
+        ]
+      },
+      "description": "Horizontal rail spanning the lower part of the footboard.",
+      "reasoning": "Lower horizontal framing piece at the front of the bed.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_12",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_20",
+      "part_name": "center spine support block 2",
+      "source_part_name": "part_20",
+      "source_object_name": "part_20",
+      "part_index": 13,
+      "part_id": "part_20",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 0.5,
+      "density": 500.0,
+      "inertia": [
+        0.0012311415561187956,
+        0.002497739583527947,
+        0.003721291338664153
+      ],
+      "inertia_axes": [
+        0.9997680349206437,
+        0.0010620612695612318,
+        -0.0002077894374269418,
+        0.021510583449178094
+      ],
+      "center_of_mass": [
+        0.006560953438542815,
+        0.6287573521275404,
+        0.35157714554751085
+      ],
+      "part_origin_world": [
+        0.006560953438542815,
+        0.6287573521275404,
+        0.35157714554751085
+      ],
+      "volume": 0.00036954330739341086,
+      "bounds": {
+        "min": [
+          -0.130154,
+          0.519108,
+          0.345446
+        ],
+        "max": [
+          0.139984,
+          0.726416,
+          0.360054
+        ],
+        "center": [
+          0.004915,
+          0.622762,
+          0.35275
+        ]
+      },
+      "description": "Small support block beneath the center spine.",
+      "reasoning": "Secondary reinforcement block under the central spine.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_13",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_21",
+      "part_name": "pillow",
+      "source_part_name": "part_21",
+      "source_object_name": "part_21",
+      "part_index": 14,
+      "part_id": "part_21",
+      "material_name": "cotton_fabric",
+      "material": "cotton_fabric",
+      "mass": 1.5,
+      "density": 40.0,
+      "inertia": [
+        0.025651898569846277,
+        0.04369568154981654,
+        0.06382809995192239
+      ],
+      "inertia_axes": [
+        0.9999336411800126,
+        0.011412252773609452,
+        5.766066506895928e-05,
+        -0.0015717500949657573
+      ],
+      "center_of_mass": [
+        -0.001319091808998908,
+        0.589007917482575,
+        0.6185080284899523
+      ],
+      "part_origin_world": [
+        -0.001319091808998908,
+        0.589007917482575,
+        0.6185080284899523
+      ],
+      "volume": 0.0386765618508056,
+      "bounds": {
+        "min": [
+          -0.336438,
+          0.327461,
+          0.534811
+        ],
+        "max": [
+          0.332328,
+          0.854344,
+          0.714438
+        ],
+        "center": [
+          -0.002055,
+          0.590903,
+          0.624624
+        ]
+      },
+      "description": "Soft fabric pillow resting on the mattress.",
+      "reasoning": "Independent accessory. Should be a floating object not permanently affixed to the bed.",
+      "static_friction": 0.8,
+      "dynamic_friction": 0.7,
+      "restitution": 0.02,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_14",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_22",
+      "part_name": "left headboard leg",
+      "source_part_name": "part_22",
+      "source_object_name": "part_22",
+      "part_index": 15,
+      "part_id": "part_22",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 4.0,
+      "density": 650.0,
+      "inertia": [
+        0.0029772949989249763,
+        0.2782105829612423,
+        0.27968897285181926
+      ],
+      "inertia_axes": [
+        0.5048191359319963,
+        -0.49924843301999744,
+        -0.5003770683951758,
+        -0.4955112829676026
+      ],
+      "center_of_mass": [
+        -0.46940244953879595,
+        0.8635713175006084,
+        0.47711469771530063
+      ],
+      "part_origin_world": [
+        -0.46940244953879595,
+        0.8635713175006084,
+        0.47711469771530063
+      ],
+      "volume": 0.003357094966653386,
+      "bounds": {
+        "min": [
+          -0.509868,
+          0.823444,
+          -0.000379
+        ],
+        "max": [
+          -0.390209,
+          0.887743,
+          0.91966
+        ],
+        "center": [
+          -0.450038,
+          0.855593,
+          0.45964
+        ]
+      },
+      "description": "Tall vertical wooden leg supporting the left side of the headboard.",
+      "reasoning": "Vertical structural support for the headboard.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_15",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_23",
+      "part_name": "mattress",
+      "source_part_name": "part_23",
+      "source_object_name": "part_23",
+      "part_index": 16,
+      "part_id": "part_23",
+      "material_name": "foam_fabric",
+      "material": "foam_fabric",
+      "mass": 20.0,
+      "density": 50.0,
+      "inertia": [
+        1.5816045139046289,
+        6.509955429942277,
+        7.950498317997088
+      ],
+      "inertia_axes": [
+        0.7071125250800323,
+        0.00039232743820289307,
+        -0.0003195997265252881,
+        0.7071008561797509
+      ],
+      "center_of_mass": [
+        -0.0030256942120782723,
+        -0.1381441617191757,
+        0.45066376038472816
+      ],
+      "part_origin_world": [
+        -0.0030256942120782723,
+        -0.1381441617191757,
+        0.45066376038472816
+      ],
+      "volume": 0.39063704484666045,
+      "bounds": {
+        "min": [
+          -0.488225,
+          -1.134987,
+          0.343089
+        ],
+        "max": [
+          0.482474,
+          0.854186,
+          0.556637
+        ],
+        "center": [
+          -0.002876,
+          -0.140401,
+          0.449863
+        ]
+      },
+      "description": "Large foam-filled fabric mattress resting freely on the frame.",
+      "reasoning": "Large distinct part resting on the slats. Realistically separable, so it is floating.",
+      "static_friction": 0.8,
+      "dynamic_friction": 0.7,
+      "restitution": 0.05,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_16",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_24",
+      "part_name": "bed slat 6",
+      "source_part_name": "part_24",
+      "source_object_name": "part_24",
+      "part_index": 17,
+      "part_id": "part_24",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00031129040801505787,
+        0.06265909989895639,
+        0.06291579801470443
+      ],
+      "inertia_axes": [
+        0.999997993673468,
+        0.0020003268875076106,
+        1.1136006026091215e-05,
+        0.00010591209208617832
+      ],
+      "center_of_mass": [
+        -0.0023748328448233904,
+        0.47516947685406813,
+        0.33313127425595823
+      ],
+      "part_origin_world": [
+        -0.0023748328448233904,
+        0.47516947685406813,
+        0.33313127425595823
+      ],
+      "volume": 0.0009028803933540251,
+      "bounds": {
+        "min": [
+          -0.440034,
+          0.426739,
+          0.321874
+        ],
+        "max": [
+          0.436529,
+          0.53607,
+          0.34284
+        ],
+        "center": [
+          -0.001753,
+          0.481405,
+          0.332357
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_17",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_25",
+      "part_name": "bed slat 7",
+      "source_part_name": "part_25",
+      "source_object_name": "part_25",
+      "part_index": 18,
+      "part_id": "part_25",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00043555678249665734,
+        0.06344448175235401,
+        0.0638185878116371
+      ],
+      "inertia_axes": [
+        0.9999899507301101,
+        0.004478626876117726,
+        -0.00010104007113387328,
+        0.0001735828351618214
+      ],
+      "center_of_mass": [
+        -0.00031994051808335416,
+        -1.026997486437488,
+        0.33165304476093344
+      ],
+      "part_origin_world": [
+        -0.00031994051808335416,
+        -1.026997486437488,
+        0.33165304476093344
+      ],
+      "volume": 0.000656524733658726,
+      "bounds": {
+        "min": [
+          -0.441976,
+          -1.120905,
+          0.321905
+        ],
+        "max": [
+          0.438697,
+          -0.991187,
+          0.346137
+        ],
+        "center": [
+          -0.001639,
+          -1.056046,
+          0.334021
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_18",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_26",
+      "part_name": "left side rail",
+      "source_part_name": "part_26",
+      "source_object_name": "part_26",
+      "part_index": 19,
+      "part_id": "part_26",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 12.0,
+      "density": 650.0,
+      "inertia": [
+        0.023613165634597182,
+        3.8736525505701507,
+        3.8898027153185186
+      ],
+      "inertia_axes": [
+        0.5433746010272541,
+        0.45241069712570425,
+        -0.4524341856869811,
+        -0.5434812891962933
+      ],
+      "center_of_mass": [
+        -0.4742068123146793,
+        -0.14001901402081823,
+        0.30112190046983256
+      ],
+      "part_origin_world": [
+        -0.4742068123146793,
+        -0.14001901402081823,
+        0.30112190046983256
+      ],
+      "volume": 0.014314940603592058,
+      "bounds": {
+        "min": [
+          -0.50184,
+          -1.131764,
+          0.215053
+        ],
+        "max": [
+          -0.355761,
+          0.849292,
+          0.368382
+        ],
+        "center": [
+          -0.4288,
+          -0.141236,
+          0.291717
+        ]
+      },
+      "description": "Long primary structural side rail on the left of the bed.",
+      "reasoning": "Major structural framing member connecting head and footboards.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_19",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_27",
+      "part_name": "bed slat 8",
+      "source_part_name": "part_27",
+      "source_object_name": "part_27",
+      "part_index": 20,
+      "part_id": "part_27",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00029058995196019216,
+        0.062497780987937165,
+        0.06273340025269503
+      ],
+      "inertia_axes": [
+        0.9999971215392047,
+        0.002398142863658075,
+        8.038541662647171e-06,
+        -7.589131890320169e-05
+      ],
+      "center_of_mass": [
+        -0.002822621822960254,
+        0.5811698397436186,
+        0.3329662058953099
+      ],
+      "part_origin_world": [
+        -0.002822621822960254,
+        0.5811698397436186,
+        0.3329662058953099
+      ],
+      "volume": 0.000868558447186073,
+      "bounds": {
+        "min": [
+          -0.441816,
+          0.52556,
+          0.321866
+        ],
+        "max": [
+          0.436146,
+          0.625246,
+          0.342583
+        ],
+        "center": [
+          -0.002835,
+          0.575403,
+          0.332224
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_20",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_28",
+      "part_name": "bed slat 9",
+      "source_part_name": "part_28",
+      "source_object_name": "part_28",
+      "part_index": 21,
+      "part_id": "part_28",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0002897126877941021,
+        0.06363978819524571,
+        0.06387641531306543
+      ],
+      "inertia_axes": [
+        0.9999989154269455,
+        -0.001472756494607684,
+        -6.8082950923642454e-06,
+        -9.321338800871502e-06
+      ],
+      "center_of_mass": [
+        -0.0025245971708138526,
+        -0.2531602817880422,
+        0.33316054767562503
+      ],
+      "part_origin_world": [
+        -0.0025245971708138526,
+        -0.2531602817880422,
+        0.33316054767562503
+      ],
+      "volume": 0.0008610452853398864,
+      "bounds": {
+        "min": [
+          -0.441075,
+          -0.301569,
+          0.322022
+        ],
+        "max": [
+          0.437049,
+          -0.206041,
+          0.342606
+        ],
+        "center": [
+          -0.002013,
+          -0.253805,
+          0.332314
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_21",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_3",
+      "part_name": "bed slat 10",
+      "source_part_name": "part_3",
+      "source_object_name": "part_3",
+      "part_index": 22,
+      "part_id": "part_03",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00030108686529252047,
+        0.06245236680415693,
+        0.0626999303815225
+      ],
+      "inertia_axes": [
+        0.9999995729106481,
+        -0.0009238355649917636,
+        1.4817547520751262e-05,
+        2.2063787021563936e-05
+      ],
+      "center_of_mass": [
+        -0.002762374406916239,
+        -0.44928041682756936,
+        0.33321121379146
+      ],
+      "part_origin_world": [
+        -0.002762374406916239,
+        -0.44928041682756936,
+        0.33321121379146
+      ],
+      "volume": 0.0008757840216058158,
+      "bounds": {
+        "min": [
+          -0.439555,
+          -0.511248,
+          0.321884
+        ],
+        "max": [
+          0.435196,
+          -0.406222,
+          0.342731
+        ],
+        "center": [
+          -0.002179,
+          -0.458735,
+          0.332308
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_22",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_4",
+      "part_name": "bed slat 11",
+      "source_part_name": "part_4",
+      "source_object_name": "part_4",
+      "part_index": 23,
+      "part_id": "part_04",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00030702314946255173,
+        0.06252165816117843,
+        0.06277630509126121
+      ],
+      "inertia_axes": [
+        0.001995571309782104,
+        0.999998008092361,
+        -9.210699053944886e-06,
+        3.7704391118421636e-05
+      ],
+      "center_of_mass": [
+        -0.0015074756701497084,
+        -0.8452937315622633,
+        0.3329511452896466
+      ],
+      "part_origin_world": [
+        -0.0015074756701497084,
+        -0.8452937315622633,
+        0.3329511452896466
+      ],
+      "volume": 0.0008677519811412619,
+      "bounds": {
+        "min": [
+          -0.439929,
+          -0.893421,
+          0.321889
+        ],
+        "max": [
+          0.436406,
+          -0.798386,
+          0.342665
+        ],
+        "center": [
+          -0.001761,
+          -0.845904,
+          0.332277
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_23",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_5",
+      "part_name": "bed slat 12",
+      "source_part_name": "part_5",
+      "source_object_name": "part_5",
+      "part_index": 24,
+      "part_id": "part_05",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.0003020235304161649,
+        0.06230853079637543,
+        0.06255620921718338
+      ],
+      "inertia_axes": [
+        0.9999992673639218,
+        -0.0012101245922993588,
+        1.5400939886722755e-06,
+        -2.945706886666313e-05
+      ],
+      "center_of_mass": [
+        -0.0015882728766643366,
+        -0.3498160061184796,
+        0.33313150612652653
+      ],
+      "part_origin_world": [
+        -0.0015882728766643366,
+        -0.3498160061184796,
+        0.33313150612652653
+      ],
+      "volume": 0.0008965635998453153,
+      "bounds": {
+        "min": [
+          -0.439896,
+          -0.39551,
+          0.322209
+        ],
+        "max": [
+          0.436156,
+          -0.30005,
+          0.34256
+        ],
+        "center": [
+          -0.00187,
+          -0.34778,
+          0.332385
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_24",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_6",
+      "part_name": "right side rail",
+      "source_part_name": "part_6",
+      "source_object_name": "part_6",
+      "part_index": 25,
+      "part_id": "part_06",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 12.0,
+      "density": 650.0,
+      "inertia": [
+        0.012957478949459478,
+        4.393240741310375,
+        4.405505768883673
+      ],
+      "inertia_axes": [
+        0.707099085728479,
+        3.02523671807878e-06,
+        -7.124216110709904e-05,
+        -0.707114472965553
+      ],
+      "center_of_mass": [
+        -0.003449967060765765,
+        -0.11402457459432158,
+        0.3326204071103484
+      ],
+      "part_origin_world": [
+        -0.003449967060765765,
+        -0.11402457459432158,
+        0.3326204071103484
+      ],
+      "volume": 0.002973838556747893,
+      "bounds": {
+        "min": [
+          -0.060894,
+          -1.137226,
+          0.322282
+        ],
+        "max": [
+          0.053808,
+          0.855393,
+          0.350674
+        ],
+        "center": [
+          -0.003543,
+          -0.140916,
+          0.336478
+        ]
+      },
+      "description": "Long primary structural side rail on the right of the bed.",
+      "reasoning": "Major structural framing member connecting head and footboards.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_25",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_7",
+      "part_name": "bed slat 13",
+      "source_part_name": "part_7",
+      "source_object_name": "part_7",
+      "part_index": 26,
+      "part_id": "part_07",
+      "material_name": "pine_wood",
+      "material": "pine_wood",
+      "mass": 1.0,
+      "density": 500.0,
+      "inertia": [
+        0.00029479786499467145,
+        0.06322756480520976,
+        0.0634693090301731
+      ],
+      "inertia_axes": [
+        0.9999962858998556,
+        0.002725297972954974,
+        -2.664511042616003e-05,
+        1.508281439083094e-05
+      ],
+      "center_of_mass": [
+        -0.0036904861654570033,
+        -0.5501751535953472,
+        0.33301974428345044
+      ],
+      "part_origin_world": [
+        -0.0036904861654570033,
+        -0.5501751535953472,
+        0.33301974428345044
+      ],
+      "volume": 0.0008730580445731524,
+      "bounds": {
+        "min": [
+          -0.441667,
+          -0.584997,
+          0.322212
+        ],
+        "max": [
+          0.43603,
+          -0.507402,
+          0.342657
+        ],
+        "center": [
+          -0.002819,
+          -0.546199,
+          0.332434
+        ]
+      },
+      "description": "Wooden cross-slat providing lateral support for the mattress.",
+      "reasoning": "Horizontal mattress support slat.",
+      "static_friction": 0.6,
+      "dynamic_friction": 0.5,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_26",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_8",
+      "part_name": "headboard lower rail",
+      "source_part_name": "part_8",
+      "source_object_name": "part_8",
+      "part_index": 27,
+      "part_id": "part_08",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 2.5,
+      "density": 650.0,
+      "inertia": [
+        0.001262679478635706,
+        0.15536003408692234,
+        0.1556860066480116
+      ],
+      "inertia_axes": [
+        0.7045635536318845,
+        0.7096408941762301,
+        4.49761842902241e-06,
+        -1.3643413214126418e-05
+      ],
+      "center_of_mass": [
+        -0.0020965852844945783,
+        0.8640330256964829,
+        0.8856951150854051
+      ],
+      "part_origin_world": [
+        -0.0020965852844945783,
+        0.8640330256964829,
+        0.8856951150854051
+      ],
+      "volume": 0.0025004035665206134,
+      "bounds": {
+        "min": [
+          -0.436228,
+          0.840111,
+          0.85321
+        ],
+        "max": [
+          0.431429,
+          0.887815,
+          0.918407
+        ],
+        "center": [
+          -0.002399,
+          0.863963,
+          0.885808
+        ]
+      },
+      "description": "Horizontal rail spanning the lower part of the headboard.",
+      "reasoning": "Lower horizontal framing piece at the back of the bed.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_27",
+      "confidence": "high"
+    },
+    {
+      "canonical_name": "part_9",
+      "part_name": "center support spine",
+      "source_part_name": "part_9",
+      "source_object_name": "part_9",
+      "part_index": 28,
+      "part_id": "part_09",
+      "material_name": "oak_wood",
+      "material": "oak_wood",
+      "mass": 8.0,
+      "density": 650.0,
+      "inertia": [
+        0.01540670734242932,
+        2.5964429234350175,
+        2.6073631820129384
+      ],
+      "inertia_axes": [
+        0.4557427622030971,
+        -0.5406543083144482,
+        -0.5406166754768043,
+        0.45576865161716074
+      ],
+      "center_of_mass": [
+        0.46894774509480264,
+        -0.1412203333994584,
+        0.3007725426153544
+      ],
+      "part_origin_world": [
+        0.46894774509480264,
+        -0.1412203333994584,
+        0.3007725426153544
+      ],
+      "volume": 0.014312563148752745,
+      "bounds": {
+        "min": [
+          0.430423,
+          -1.132409,
+          0.215078
+        ],
+        "max": [
+          0.496531,
+          0.84926,
+          0.37019
+        ],
+        "center": [
+          0.463477,
+          -0.141575,
+          0.292634
+        ]
+      },
+      "description": "Long longitudinal beam supporting the slats in the middle of the bed.",
+      "reasoning": "Central structural spar running head-to-foot.",
+      "static_friction": 0.5,
+      "dynamic_friction": 0.4,
+      "restitution": 0.1,
+      "friction_combine_mode": "average",
+      "restitution_combine_mode": "average",
+      "physics_type": "rigid",
+      "is_structural_root": false,
+      "color_name": "Color_28",
+      "confidence": "high"
+    }
+  ],
+  "joint_relations": [
+    {
+      "child": "right headboard leg",
+      "parent": "headboard panel",
+      "joint_type": "fixed",
+      "name": "joint_headboard_panel__right_headboard_leg",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "bed slat 1",
+      "parent": "left side rail",
+      "joint_type": "fixed",
+      "name": "joint_left_side_rail__bed_slat_1",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "center spine support block 2",
+      "parent": "center support spine",
+      "joint_type": "fixed",
+      "name": "joint_center_support_spine__center_spine_support_block_2",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "bed slat 10",
+      "parent": "left side rail",
+      "joint_type": "fixed",
+      "name": "joint_left_side_rail__bed_slat_10",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "bed slat 11",
+      "parent": "left side rail",
+      "joint_type": "fixed",
+      "name": "joint_left_side_rail__bed_slat_11",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "bed slat 12",
+      "parent": "left side rail",
+      "joint_type": "fixed",
+      "name": "joint_left_side_rail__bed_slat_12",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "right side rail",
+      "parent": "headboard panel",
+      "joint_type": "fixed",
+      "name": "joint_headboard_panel__right_side_rail",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "bed slat 13",
+      "parent": "left side rail",
+      "joint_type": "fixed",
+      "name": "joint_left_side_rail__bed_slat_13",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    },
+    {
+      "child": "headboard lower rail",
+      "parent": "headboard panel",
+      "joint_type": "fixed",
+      "name": "joint_headboard_panel__headboard_lower_rail",
+      "damping": 0.0,
+      "effort": 0.0,
+      "friction": 0.0,
+      "stiffness": 0.0,
+      "velocity": 0.0,
+      "origin": [],
+      "joint_rotation_local": [],
+      "axis": [],
+      "motion_limits": null,
+      "revolute_mode": null,
+      "score": 0.9,
+      "rest_pose_state": "unknown",
+      "behavior_type": "normal"
+    }
+  ],
+  "base_link": "headboard panel",
+  "object_description": "A standard wooden bed frame assembly complete with a slatted support base, an independent floating foam mattress, and a fabric pillow.",
+  "total_mass": 110.0,
+  "center_of_mass": null,
+  "inertia": null,
+  "behavior_type": "normal",
+  "overall_assessment": "Solid static structure perfectly spanning a single kinematic tree using fixed joints. Mattress and pillow handled accurately as separable items.",
+  "num_parts": 29,
+  "object_type": "rigid_bodies"
+}
