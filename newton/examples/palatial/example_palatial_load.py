@@ -328,6 +328,10 @@ class Example:
         # joint_q of the FREE root joint — body_q is derived from it via FK
         # at every step, so lifting body_q alone gets overwritten.
         # For cloth, lift particle_q directly (one row per particle).
+        # Rods/cables always drop from 0.5 m; the --drop-height CLI arg is ignored
+        # for rods so the framing stays consistent across assets.
+        if bundle.body_type == "rod":
+            drop_height = 0.5
         if drop_height:
             import numpy as _np
             n_bodies = int(self.model.body_count)
@@ -744,8 +748,9 @@ def main(argv=None) -> int:
     p.add_argument("--gui", action="store_true",
                    help="Open ViewerGL and run until the window is closed")
     p.add_argument("--drop-height", type=float, default=0.0,
-                   help="Lift rigid or rod bodies by this many meters in z before sim "
-                        "(ignored for cloth — cloth drop height is baked into the USDA)")
+                   help="Lift rigid bodies by this many meters in z before sim "
+                        "(ignored for cloth — baked into the USDA; ignored for rods — "
+                        "always 0.5 m for consistent framing)")
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
     p.add_argument("--zero-gravity", action="store_true",
@@ -936,21 +941,21 @@ def main(argv=None) -> int:
 
    
     _bt: str | None = None
+    try:
+        from pxr import Usd as _Usd
+        from newton._src.palatial.load import _detect_body_type as _detect
+        _stage = _Usd.Stage.Open(args.usd)
+        _bt = _detect(_stage) if _stage is not None else "rigid"
+    except Exception as _e:
+        print(f"  warn: body-type auto-detect failed ({_e}); defaulting to rigid")
+        _bt = "rigid"
     if args.add_table is None:
-        try:
-            from pxr import Usd as _Usd
-            from newton._src.palatial.load import _detect_body_type as _detect
-            _stage = _Usd.Stage.Open(args.usd)
-            _bt = _detect(_stage) if _stage is not None else "rigid"
-        except Exception as _e:
-            print(f"  warn: body-type auto-detect failed ({_e}); defaulting to rigid")
-            _bt = "rigid"
         args.add_table = (_bt == "cloth")
         if args.add_table:
             print("  --add-table: auto-enabled (detected cloth asset)")
-        if _bt == "rod" and not args.top_view:
-            args.front_view = True
-            print("  --front-view: auto-enabled (detected rod asset)")
+    if _bt == "rod" and not args.top_view and not args.front_view:
+        args.front_view = True
+        print("  --front-view: auto-enabled (detected rod asset)")
     if args.rotate_x is None:
         args.rotate_x = 0.0
 
