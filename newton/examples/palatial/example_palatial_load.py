@@ -1063,7 +1063,7 @@ def main(argv=None) -> int:
             table_top_z = float(table_cfg["pos"][2] + table_cfg["size"][2])
         else:
             table_top_z = float(b_min[2])
-        mid_z = 0.75 * (spawn_top_z + table_top_z)
+        mid_z = 1.75 * (spawn_top_z + table_top_z)
         ext_x = float(b_max[0] - b_min[0])
         ext_y = float(b_max[1] - b_min[1])
         cloth_cx = float(0.5 * (b_min[0] + b_max[0]))
@@ -1071,7 +1071,7 @@ def main(argv=None) -> int:
         reference_extent = 2.0  # ~1.9 m gown after the -pi/2 X rotation
         scale = max(max(ext_x, ext_y) / reference_extent, 0.5)
         # Camera sits on -X side of the cloth centroid (yaw=0 → looks toward +X).
-        cam_x = cloth_cx - 3.6 * scale
+        cam_x = cloth_cx - 3.2 * scale
         pos = wp.vec3(cam_x, cloth_cy, mid_z)
         ex.viewer.set_camera(pos, -25.0, 0.0)
         print(
@@ -1115,7 +1115,7 @@ def main(argv=None) -> int:
         diag = math.sqrt(ext_x * ext_x + ext_y * ext_y + ext_z * ext_z)
         diag = max(diag, 1e-3)
         if ex.bundle.body_type == "cloth":
-            dist_mult = 2.8
+            dist_mult = 1.5
         elif ex.bundle.body_type == "rod":
             dist_mult = 1.5
         else:
