@@ -1073,7 +1073,7 @@ def main(argv=None) -> int:
         # Camera sits on -X side of the cloth centroid (yaw=0 → looks toward +X).
         cam_x = cloth_cx - 3.2 * scale
         pos = wp.vec3(cam_x, cloth_cy, mid_z)
-        ex.viewer.set_camera(pos, -25.0, 0.0)
+        ex.viewer.set_camera(pos, -35.0, 0.0)
         print(
             f"  table camera: pos=({cam_x:.3f},{cloth_cy:.3f},{mid_z:.3f}) "
             f"pitch=-25 yaw=0  (spawn_top={spawn_top_z:.3f} table_top={table_top_z:.3f}, "
