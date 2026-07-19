@@ -1036,12 +1036,24 @@ def main(argv=None) -> int:
         if n_p > 0:
             pts = ex.state_0.particle_q.numpy()
         elif int(ex.model.body_count) > 0:
+            # body_q holds body-frame origins, not geometry: co-located frames
+            # (e.g. multi-part rigid assets authored around one origin) collapse
+            # the AABB to a point, so pad below with the USD geometry extents.
             pts = ex.state_0.body_q.numpy()[:, 0:3]
         elif usd_bounds is not None:
             return usd_bounds
         else:
             return _np.zeros(3, dtype=float), _np.ones(3, dtype=float)
-        return _np.asarray(pts.min(axis=0), dtype=float), _np.asarray(pts.max(axis=0), dtype=float)
+        b_min = _np.asarray(pts.min(axis=0), dtype=float)
+        b_max = _np.asarray(pts.max(axis=0), dtype=float)
+        if usd_bounds is not None:
+            # Live-state bounds can never be smaller than the asset geometry:
+            # union with the USD geometry bounds (which carry the meshes'
+            # actual placement, offset from the body frames) so the camera
+            # frames the meshes, not just the body origins.
+            b_min = _np.minimum(b_min, _np.asarray(usd_bounds[0], dtype=float))
+            b_max = _np.maximum(b_max, _np.asarray(usd_bounds[1], dtype=float))
+        return b_min, b_max
 
     # Cloth + table: camera angles on an origin-centered table
     
@@ -1121,9 +1133,25 @@ def main(argv=None) -> int:
         else:
             dist_mult = 2.2
         dist = diag * dist_mult
-        # Z-up: camera in -Y, looking toward +Y → yaw=90, pitch=0.
-        ex.viewer.set_camera(wp.vec3(cx, cy - dist, cz_mid), 0.0, 90.0)
-        print(f"  front-view camera: pos=({cx:.3f},{cy - dist:.3f},{cz_mid:.3f})")
+        # Z-up: view across the longest horizontal axis so elongated assets
+        # (cables, rods) are seen broadside instead of edge-on. If the asset
+        # spans X more than Y, keep the -Y camera (yaw=90, looking +Y);
+        # otherwise move to -X (yaw=0, looking +X).
+        # Mild elevated 3/4 view: a pure horizontal look at flat assets
+        # (cables, plates on the ground plane) renders them as a 1-px line
+        # at the horizon. Raise the camera and pitch down instead.
+        pitch = -20.0
+        horiz = dist * math.cos(math.radians(-pitch))
+        cam_z = cz_mid + dist * math.sin(math.radians(-pitch))
+        if ext_x >= ext_y:
+            cam_pos = wp.vec3(cx, cy - horiz, cam_z)
+            yaw = 90.0
+        else:
+            cam_pos = wp.vec3(cx - horiz, cy, cam_z)
+            yaw = 0.0
+        ex.viewer.set_camera(cam_pos, pitch, yaw)
+        print(f"  front-view camera: pos=({cam_pos[0]:.3f},{cam_pos[1]:.3f},{cam_pos[2]:.3f}) "
+              f"pitch={pitch:.0f} yaw={yaw:.0f}")
 
     # ---- mp4 recorder (ffmpeg subprocess) ----
     ffmpeg_proc = None
