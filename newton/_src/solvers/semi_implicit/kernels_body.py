@@ -203,10 +203,7 @@ def eval_body_joints(
         axis_p = wp.transform_vector(X_wp, axis)
         axis_c = wp.transform_vector(X_wc, axis)
 
-        # swing twist decomposition
-        twist = wp.quat_twist(axis, r_err)
-
-        q = wp.acos(twist[3]) * 2.0 * wp.sign(wp.dot(axis, wp.vec3(twist[0], twist[1], twist[2])))
+        q = wp.quat_twist_angle_signed(axis, r_err)
         qd = wp.dot(w_err, axis_p)
 
         t_total = axis_p * (
@@ -239,7 +236,12 @@ def eval_body_joints(
         # TODO expose target_kd or target_ke for ball joints
         # t_total += target_kd * w_err + target_ke * wp.transform_vector(X_wp, ang_err)
         f_total += x_err * joint_attach_ke + v_err * joint_attach_kd
-        t_total += wp.vec3(-joint_f[qd_start], -joint_f[qd_start + 1], -joint_f[qd_start + 2])
+        axis_0 = wp.transform_vector(X_wp, joint_axis[qd_start + 0])
+        axis_1 = wp.transform_vector(X_wp, joint_axis[qd_start + 1])
+        axis_2 = wp.transform_vector(X_wp, joint_axis[qd_start + 2])
+        t_total += axis_0 * (-joint_f[qd_start + 0] + joint_damping[qd_start + 0] * wp.dot(axis_0, w_err))
+        t_total += axis_1 * (-joint_f[qd_start + 1] + joint_damping[qd_start + 1] * wp.dot(axis_1, w_err))
+        t_total += axis_2 * (-joint_f[qd_start + 2] + joint_damping[qd_start + 2] * wp.dot(axis_2, w_err))
 
     if type == JointType.D6:
         pos = wp.vec3(0.0)
@@ -341,10 +343,7 @@ def eval_body_joints(
             axis_p = wp.transform_vector(X_wp, axis)
             axis_c = wp.transform_vector(X_wc, axis)
 
-            # swing twist decomposition
-            twist = wp.quat_twist(axis, r_err)
-
-            q = wp.acos(twist[3]) * 2.0 * wp.sign(wp.dot(axis, wp.vec3(twist[0], twist[1], twist[2])))
+            q = wp.quat_twist_angle_signed(axis, r_err)
             qd = wp.dot(w_err, axis_p)
 
             t_total = axis_p * (
