@@ -33,7 +33,15 @@ Usage:
         solver.step(state_in, state_out, control, contacts, dt)
         state_in, state_out = state_out, state_in
 """
+
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+import warp as wp
+from pxr import Usd  # noqa: TID253
 
 # `import newton` registers the newton_usd_schemas plugin (NewtonSceneAPI,
 # NewtonXpbdSceneAPI, ...) AND the bundled schema-extension plugin
@@ -43,12 +51,6 @@ from __future__ import annotations
 # same process.
 import newton
 
-from pxr import Usd, UsdGeom
-
-from dataclasses import dataclass
-from typing import Any
-import numpy as np
-import warp as wp
 from .rod_connectors import (
     _normalize_vector,
     attach_rod_connector_component,
@@ -60,14 +62,15 @@ from .rod_connectors import (
 
 def _build_solver(name: str, model: Any, params: dict) -> Any:
     """Construct a solver, forwarding only kwargs the solver actually accepts."""
-    import inspect as _ins
+    import inspect as _ins  # noqa: PLC0415
+
     classes = {
-        "mujoco":        getattr(newton.solvers, "SolverMuJoCo",       None),
-        "xpbd":          getattr(newton.solvers, "SolverXPBD",         None),
-        "featherstone":  getattr(newton.solvers, "SolverFeatherstone", None),
-        "vbd":           getattr(newton.solvers, "SolverVBD",          None),
+        "mujoco": getattr(newton.solvers, "SolverMuJoCo", None),
+        "xpbd": getattr(newton.solvers, "SolverXPBD", None),
+        "featherstone": getattr(newton.solvers, "SolverFeatherstone", None),
+        "vbd": getattr(newton.solvers, "SolverVBD", None),
         "semi_implicit": getattr(newton.solvers, "SolverSemiImplicit", None),
-        "style3d":       getattr(newton.solvers, "SolverStyle3D",      None),
+        "style3d": getattr(newton.solvers, "SolverStyle3D", None),
     }
     cls = classes.get(name)
     if cls is None:
@@ -87,11 +90,32 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
     return cls(model, **kwargs)
 
 
+def _synchronize_newton_contact_capacity(model: Any, solver_name: str, solver_params: dict) -> None:
+    """Keep Newton and MuJoCo contact buffers aligned for Newton contacts."""
+    if solver_name != "mujoco":
+        return
+
+    use_mujoco_contacts = solver_params.get(
+        "useMujocoContacts",
+        solver_params.get("use_mujoco_contacts"),
+    )
+    if use_mujoco_contacts is not False:
+        return
+
+    authored_capacity = int(solver_params.get("nconmax", 0) or 0)
+    if authored_capacity <= 0:
+        return
+
+    current_capacity = int(getattr(model, "rigid_contact_max", 0) or 0)
+    model.rigid_contact_max = max(current_capacity, authored_capacity)
+
+
 def _untint_textured_shapes(builder: Any) -> None:
     """Force textured imported shapes to use white fallback vertex colors."""
     for i, src in enumerate(builder.shape_source):
         if src is not None and getattr(src, "texture", None) is not None:
             builder.shape_color[i] = (1.0, 1.0, 1.0)
+
 
 @dataclass
 class _RodBuildResult:
@@ -104,8 +128,9 @@ class _RodBuildResult:
 @dataclass
 class NewtonBundle:
     """Everything needed to step the converted asset in Newton."""
+
     usd_path: str
-    body_type: str           # "rigid", "cloth", or "rod"
+    body_type: str  # "rigid", "cloth", or "rod"
     solver_name: str
     fps: int
     model: Any
@@ -113,7 +138,7 @@ class NewtonBundle:
     state_in: Any
     state_out: Any
     control: Any
-    solver_params: dict      # raw newton:solver:* attrs from the USD
+    solver_params: dict  # raw newton:solver:* attrs from the USD
 
     @property
     def dt(self) -> float:
@@ -124,11 +149,11 @@ class NewtonBundle:
 # Centralized so _read_scene_params can dedupe duplicates and _build_solver can
 # translate names without diverging.
 _SOLVER_PARAM_ALIAS = {
-    "iterations":                          "iterations",
-    "substeps":                            "substeps",
-    "particleEnableSelfContact":           "particle_enable_self_contact",
-    "particleSelfContactRadius":           "particle_self_contact_radius",
-    "particleSelfContactMargin":           "particle_self_contact_margin",
+    "iterations": "iterations",
+    "substeps": "substeps",
+    "particleEnableSelfContact": "particle_enable_self_contact",
+    "particleSelfContactRadius": "particle_self_contact_radius",
+    "particleSelfContactMargin": "particle_self_contact_margin",
     "particleConservativeBoundRelaxation": "particle_conservative_bound_relaxation",
 }
 
@@ -180,7 +205,7 @@ def _read_scene_params(stage: Usd.Stage) -> tuple[str, int, dict]:
             name = attr.GetName()
             for pfx in ("newton:solver:", "palatial:solver:"):
                 if name.startswith(pfx) and attr.HasAuthoredValue():
-                    solver_params.setdefault(name[len(pfx):], attr.Get())
+                    solver_params.setdefault(name[len(pfx) :], attr.Get())
                     break
         break
     return solver, fps, _dedupe_solver_params(solver_params)
@@ -220,9 +245,9 @@ def _detect_body_type(stage: Usd.Stage) -> str:
     return "rod" if rod_found else "rigid"
 
 
-def _build_rigid(usd_path: str, *, device: str | None = None,
-                 fix_base: bool = False,
-                 solver_name: str | None = None) -> Any:
+def _build_rigid(
+    usd_path: str, *, device: str | None = None, fix_base: bool = False, solver_name: str | None = None
+) -> Any:
     """Use Newton's USD parser for rigid assets.
 
     fix_base: if True, anchor every floating root body to world via a
@@ -242,12 +267,13 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
             # of them to add_joint_fixed(parent=-1, child=...) so the root
             # is anchored to world like import_mjcf does for fixed_base.
             counter = [0]
-            def _free_to_fixed(child, parent_xform=None, child_xform=None,
-                               parent=-1, label=None, **kw):
+
+            def _free_to_fixed(child, parent_xform=None, child_xform=None, parent=-1, label=None, **kw):
                 counter[0] += 1
                 k = label or kw.pop("key", None) or f"fixed_base_{counter[0]}"
                 jid = builder.add_joint_fixed(
-                    parent=parent, child=child,
+                    parent=parent,
+                    child=child,
                     parent_xform=parent_xform,
                     child_xform=child_xform,
                     label=k,
@@ -259,6 +285,7 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
                 # never writes a 7-slice, so padding now causes a length
                 # mismatch in builder.finalize()._validate_structure().
                 return jid
+
             builder.add_joint_free = _free_to_fixed
             builder.add_free_joints_to_floating_bodies = lambda *a, **kw: None
 
@@ -278,8 +305,7 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
                     continue
                 if builder.body_mass[b] <= 0:
                     continue
-                j = builder.add_joint_fixed(parent=-1, child=b,
-                                            label=f"fixed_base_orphan_{b}")
+                j = builder.add_joint_fixed(parent=-1, child=b, label=f"fixed_base_orphan_{b}")
                 builder.add_articulation([j], label=f"articulation_orphan_{b}")
 
         # SolverVBD requires per-body graph coloring before finalize() when
@@ -293,9 +319,9 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
         return builder.finalize()
 
 
-def _build_cloth(usd_path: str, *, device: str | None = None,
-                 solver_name: str | None = None,
-                 table: dict | None = None) -> Any:
+def _build_cloth(
+    usd_path: str, *, device: str | None = None, solver_name: str | None = None, table: dict | None = None
+) -> Any:
     """Build a cloth model using params + mesh data baked into the USD.
 
     Reads both new (`newton:shell:*` on mesh + bound Material) and legacy
@@ -317,9 +343,10 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
         world size that need to be shrunk to fit the table — e.g. a
         ~1.9 m gown on an 0.8 m table needs cloth_scale ~ 0.4).
     """
-    import inspect as _ins
-    from .cloth import _extract_first_mesh, find_cloth_prim_path
-    from .shell import find_shell_prim_path, read_shell_params
+    import inspect as _ins  # noqa: PLC0415
+
+    from .cloth import _extract_first_mesh, find_cloth_prim_path  # noqa: PLC0415
+    from .shell import find_shell_prim_path, read_shell_params  # noqa: PLC0415
 
     cloth_path = find_shell_prim_path(usd_path) or find_cloth_prim_path(usd_path)
     if not cloth_path:
@@ -417,26 +444,26 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
 
         # Candidate kwargs covering both old and current Newton signatures.
         candidates = {
-            "pos":      wp.vec3(cloth_pos_x, cloth_pos_y, cloth_pos_z),
-            "rot":      cloth_rot,
-            "scale":    cloth_scale,
-            "vel":      wp.vec3(0.0, 0.0, 0.0),
+            "pos": wp.vec3(cloth_pos_x, cloth_pos_y, cloth_pos_z),
+            "rot": cloth_rot,
+            "scale": cloth_scale,
+            "vel": wp.vec3(0.0, 0.0, 0.0),
             "vertices": verts,
-            "indices":  tri,
-            "density":  float(p["density"]),
-            "tri_ke":   float(p["triStiffness"]),
-            "tri_ka":   float(p["triAreaStiffness"]),
-            "tri_kd":   float(p["triDamping"]),
+            "indices": tri,
+            "density": float(p["density"]),
+            "tri_ke": float(p["triStiffness"]),
+            "tri_ka": float(p["triAreaStiffness"]),
+            "tri_kd": float(p["triDamping"]),
             "tri_drag": float(p["triDrag"]),
             "tri_lift": float(p["triLift"]),
-            "edge_ke":  float(p["bendStiffness"]),
-            "edge_kd":  float(p["bendDamping"]),
-            "particle_radius":   float(p["particleRadius"]),
+            "edge_ke": float(p["bendStiffness"]),
+            "edge_kd": float(p["bendDamping"]),
+            "particle_radius": float(p["particleRadius"]),
             "add_bending_edges": bool(p["addBendingEdges"]),
         }
         # Style3D-only anisotropic stiffness; pass tuples when authored.
         if p.get("style3dTriAnisoKe") is not None:
-            candidates["tri_aniso_ke"]  = p["style3dTriAnisoKe"]
+            candidates["tri_aniso_ke"] = p["style3dTriAnisoKe"]
         if p.get("style3dEdgeAnisoKe") is not None:
             candidates["edge_aniso_ke"] = p["style3dEdgeAnisoKe"]
 
@@ -444,8 +471,7 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
             accepted = set(_ins.signature(builder.add_cloth_mesh).parameters)
         except (TypeError, ValueError):
             accepted = set(candidates)
-        kwargs = {k: v for k, v in candidates.items()
-                  if k in accepted and v is not None}
+        kwargs = {k: v for k, v in candidates.items() if k in accepted and v is not None}
         builder.add_cloth_mesh(**kwargs)
 
         # SolverVBD requires a particle graph coloring before finalize().
@@ -466,6 +492,7 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
                 reg(builder)
 
         return builder.finalize()
+
 
 def _copy_transform(xform: wp.transform) -> wp.transform:
     """Return a value copy of a Warp transform."""
@@ -498,10 +525,7 @@ def _set_rod_zero_curvature_rest_poses(
     rest_direction = _normalize_vector(points[-1] - points[0], fallback_tangent)
     distances = np.concatenate(([0.0], np.cumsum(segment_lengths)))
     rest_points_np = points[0] + distances[:, None] * rest_direction[None, :]
-    rest_positions = [
-        wp.vec3(float(point[0]), float(point[1]), float(point[2]))
-        for point in rest_points_np
-    ]
+    rest_positions = [wp.vec3(float(point[0]), float(point[1]), float(point[2])) for point in rest_points_np]
     rest_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
         rest_positions,
         twist_total=float(twist_total),
@@ -518,8 +542,9 @@ def _set_rod_zero_curvature_rest_poses(
     builder.body_q[:] = rest_body_q
     return initial_body_q
 
+
 def _build_rod_textured_tube(
-    builder: "newton.ModelBuilder",
+    builder: newton.ModelBuilder,
     *,
     rod_bodies: list[int],
     points: list[tuple[float, float, float]],
@@ -630,7 +655,7 @@ def _build_rod(
     tube_radial_segments: int = 12,
 ) -> _RodBuildResult:
     """Build an isotropic rod model from a NewtonRodAPI-authored USDA."""
-    from .rod import read_rod_params
+    from .rod import read_rod_params  # noqa: PLC0415
 
     params = read_rod_params(usd_path)
     frame_definition = str(params.get("frameDefinition") or "parallelTransport")
@@ -707,9 +732,7 @@ def _build_rod(
         attached_component_bodies: list[tuple[int, list[int]]] = []
 
         if bool(params["closed"]) and components:
-            raise RuntimeError(
-                f"Closed rod asset {usd_path} cannot auto-attach endpoint connector components"
-            )
+            raise RuntimeError(f"Closed rod asset {usd_path} cannot auto-attach endpoint connector components")
 
         if not bool(params["closed"]):
             for component in components:
@@ -767,11 +790,16 @@ def _scene_pins_solver(stage: Usd.Stage) -> bool:
     return False
 
 
-def load(usd_path: str, *, solver_override: str | None = None,
-         device: str | None = None, fix_base: bool = False,
-         table: dict | None = None,
-         rod_textured_tube: bool = False,
-         rod_tube_radial_segments: int = 12) -> NewtonBundle:
+def load(
+    usd_path: str,
+    *,
+    solver_override: str | None = None,
+    device: str | None = None,
+    fix_base: bool = False,
+    table: dict | None = None,
+    rod_textured_tube: bool = False,
+    rod_tube_radial_segments: int = 12,
+) -> NewtonBundle:
     """Read converted USD, build Newton model + solver, return ready-to-step bundle.
 
     device: warp device string ("cuda:0", "cpu", ...). Defaults to GPU if
@@ -798,8 +826,7 @@ def load(usd_path: str, *, solver_override: str | None = None,
     if body_type == "cloth" and not scene_pinned and not solver_override:
         style3d_used = False
         for prim in stage.Traverse():
-            for n in ("newton:shell:style3d:triAnisoKe",
-                      "newton:shell:style3d:edgeAnisoKe"):
+            for n in ("newton:shell:style3d:triAnisoKe", "newton:shell:style3d:edgeAnisoKe"):
                 a = prim.GetAttribute(n)
                 if a and a.HasAuthoredValue():
                     style3d_used = True
@@ -830,11 +857,12 @@ def load(usd_path: str, *, solver_override: str | None = None,
     # canonical source for these particle self-contact tunables; any
     # scene-level `newton:solver:*` equivalent is silently superseded.
     if body_type == "cloth":
-        from .shell import read_shell_params as _read_shell_params
+        from .shell import read_shell_params as _read_shell_params  # noqa: PLC0415
+
         _shell = _read_shell_params(usd_path)
         _shell_to_solver = {
-            "vbdSelfContactRadius":           "particleSelfContactRadius",
-            "vbdSelfContactMargin":           "particleSelfContactMargin",
+            "vbdSelfContactRadius": "particleSelfContactRadius",
+            "vbdSelfContactMargin": "particleSelfContactMargin",
             "vbdConservativeBoundRelaxation": "particleConservativeBoundRelaxation",
         }
         for sk, ck in _shell_to_solver.items():
@@ -859,9 +887,9 @@ def load(usd_path: str, *, solver_override: str | None = None,
         model = rod_result.model
         rod_initial_body_q = rod_result.initial_body_q
     else:
-        model = _build_rigid(usd_path, device=device, fix_base=fix_base,
-                             solver_name=solver_name)
+        model = _build_rigid(usd_path, device=device, fix_base=fix_base, solver_name=solver_name)
 
+    _synchronize_newton_contact_capacity(model, solver_name, solver_params)
     solver = _build_solver(solver_name, model, solver_params)
     state_in = model.state()
     state_out = model.state()
@@ -892,8 +920,8 @@ def load(usd_path: str, *, solver_override: str | None = None,
 
 if __name__ == "__main__":
     import argparse
-    p = argparse.ArgumentParser(prog="framework.load",
-                                description="Inspect what would be loaded from a converted USD.")
+
+    p = argparse.ArgumentParser(prog="framework.load", description="Inspect what would be loaded from a converted USD.")
     p.add_argument("usd")
     a = p.parse_args()
     b = load(a.usd)
