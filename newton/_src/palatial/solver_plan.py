@@ -39,6 +39,13 @@ _GLOBAL_PARAMETER_KEYS = {
 }
 
 _PARAMETER_ALIASES = {
+    "particleConservativeBoundRelaxation": "particle_conservative_bound_relaxation",
+    "particleEnableSelfContact": "particle_enable_self_contact",
+    "particleRestShapeContactExclusionRadius": "particle_rest_shape_contact_exclusion_radius",
+    "particleSelfContactMargin": "particle_self_contact_margin",
+    "particleSelfContactRadius": "particle_self_contact_radius",
+    "particleTopologicalContactFilterThreshold": "particle_topological_contact_filter_threshold",
+    "particleVertexContactBufferSize": "particle_vertex_contact_buffer_size",
     "particle_self_contact_enabled": "particle_enable_self_contact",
     "rigid_contact_constraint_weighting": "rigid_contact_con_weighting",
 }

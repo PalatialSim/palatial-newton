@@ -133,7 +133,7 @@ raises — it has to be `load(path, solver_override="vbd")`.
 @dataclass
 class NewtonBundle:
     usd_path: str
-    body_type: str        # "rigid", "cloth", or "rod"
+    body_type: str        # "rigid", "cloth", "rod", "soft", or "mixed"
     solver_name: str
     fps: int
     model: Any            # newton.Model
@@ -142,6 +142,8 @@ class NewtonBundle:
     state_out: Any        # model.state()
     control: Any          # model.control()
     solver_params: dict   # resolved kwargs the solver was built with (see below)
+    solver_plan: dict | None       # embedded/runtime-overridden Palatial plan
+    part_entities: dict | None     # stable part id -> realized Newton indices
 
     @property
     def dt(self) -> float: ...   # 1 / fps
@@ -229,10 +231,24 @@ nothing — the solver already exists.
 
 ### 2.2 Mixed-body solver plans
 
-`solver_from_plan()` is the lower-level bridge for a converter that has
-already finalized one Newton model containing rigid and soft parts. It accepts
-the `solver_plan` embedded in Palatial's `soft_body_spec` and a converter-owned
-mapping from stable part IDs to the model's global entity indices:
+`load()` automatically follows this path when the PhysicsScene contains a
+`palatial:softBodySpec` JSON string and every declared part root carries a
+`palatial:partId`. Newton imports the whole USD once with deformable results
+enabled, maps rigid bodies, shapes, joints, rods, surface particles, and volume
+particles from the importer's realized prim-path ranges, and constructs the
+embedded single or coupled plan. The resulting bundle reports
+`body_type="mixed"` when rigid and soft roles coexist.
+
+Explicit `solver_override` replaces an embedded plan with one solver covering
+every part. `solver_param_overrides` is then merged into the selected runtime
+assignment(s), so user overrides remain authoritative without rewriting the
+authored contract.
+
+`solver_from_plan()` remains the lower-level bridge for programmatic converters
+that have already finalized one Newton model containing rigid and soft parts.
+It accepts the `solver_plan` embedded in Palatial's `soft_body_spec` and a
+converter-owned mapping from stable part IDs to the model's global entity
+indices:
 
 ```python
 from newton.palatial import SolverPlanPartEntities, solver_from_plan
@@ -269,9 +285,9 @@ One plan cannot mix proxy and ADMM interfaces because Newton exposes them as
 different coupled-solver wrappers. Split such behavior into one supported
 coupling method or add a combined runtime wrapper explicitly.
 
-`load()` still owns the convenient single-body USDA path. The USD converter
-must build the mixed model and its part-entity map before calling
-`solver_from_plan()`; the bridge deliberately does not infer ownership from
+Untagged USDA files keep the existing cloth, rod, and rigid convenience paths.
+For tagged files, ownership comes from explicit `palatial:partId` attributes and
+native importer results; the loader deliberately does not infer ownership from
 prim names.
 
 ---
