@@ -10,12 +10,14 @@ The public surface lives at `newton.palatial` (re-exported from
 ```python
 from newton.palatial import (
     NewtonBundle,            # dataclass returned by load()
+    SolverPlanPartEntities,  # stable part id -> Newton model indices
     load,                    # USDA -> ready-to-step bundle
     find_shell_prim_path,    # prim path of the cloth/shell mesh (or None)
     find_cloth_prim_path,    # legacy: bodyType="cloth" mesh path
     find_rod_prim_path,      # prim path of the rod guide (or None)
     read_shell_params,       # resolved cloth/shell param dict
     read_rod_params,         # resolved rod centerline + material param dict
+    solver_from_plan,        # soft_body_spec.solver_plan -> Newton solver
 )
 ```
 
@@ -224,6 +226,53 @@ The takeaway: scene attrs go in first, shell + anti-pinch defaults layer on
 top, your explicit overrides win last, and **only then** is the solver
 constructed. Mutating `bundle.solver_params` after `load()` returns changes
 nothing — the solver already exists.
+
+### 2.2 Mixed-body solver plans
+
+`solver_from_plan()` is the lower-level bridge for a converter that has
+already finalized one Newton model containing rigid and soft parts. It accepts
+the `solver_plan` embedded in Palatial's `soft_body_spec` and a converter-owned
+mapping from stable part IDs to the model's global entity indices:
+
+```python
+from newton.palatial import SolverPlanPartEntities, solver_from_plan
+
+part_entities = {
+    "hinge_pin": SolverPlanPartEntities(bodies=[pin_body], shapes=[pin_shape]),
+    "foam_leaf": SolverPlanPartEntities(
+        particles=range(leaf_particle_start, leaf_particle_end),
+    ),
+}
+
+solver = solver_from_plan(
+    model,
+    physics_result,  # full result, soft_body_spec, or solver_plan
+    part_entities,
+    collision_pipeline_factory=lambda view: newton.CollisionPipeline(view),
+)
+```
+
+The bridge enforces exactly one assignment per part and supports:
+
+* `mode="single"`: construct the assignment's selected solver.
+* `method="proxy"`: construct `SolverCoupledProxy`; the `from` assignment's
+  entities are mirrored into the `to` assignment. Proxy parameters may set
+  `mass_scale`, `mode`, relaxation controls, and `proxy_iterations`. Joints
+  remain owned by their assignment; set `proxy_joints_enabled=true` only for
+  supported FIXED, PRISMATIC, or REVOLUTE joint proxies.
+* `method="admm"`: construct `SolverCoupledADMM`; model joints and registered
+  body-particle attachments provide the constraints. Set
+  `contacts_enabled=true` to add the declared interface as an ADMM contact
+  pair.
+
+One plan cannot mix proxy and ADMM interfaces because Newton exposes them as
+different coupled-solver wrappers. Split such behavior into one supported
+coupling method or add a combined runtime wrapper explicitly.
+
+`load()` still owns the convenient single-body USDA path. The USD converter
+must build the mixed model and its part-entity map before calling
+`solver_from_plan()`; the bridge deliberately does not infer ownership from
+prim names.
 
 ---
 
