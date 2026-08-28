@@ -7487,6 +7487,21 @@ class TestMuJoCoOptions(unittest.TestCase):
 
 
 class TestMuJoCoArticulationConversion(unittest.TestCase):
+    def test_rootless_articulation_reports_unsupported_topology(self):
+        """An unmapped articulation parent reports a compatibility error."""
+        builder = newton.ModelBuilder()
+        parent = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), label="parent")
+        child = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), label="child")
+        joint = builder.add_joint_revolute(parent=parent, child=child, label="rootless_joint")
+        builder.add_articulation([joint])
+        model = builder.finalize()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "SolverMuJoCo topology is unsupported.*reachable from a world-root joint",
+        ):
+            SolverMuJoCo(model, disable_contacts=True)
+
     @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
     def test_rootless_usd_mechanism_is_rejected(self):
         """A rootless mechanism without a standalone root for each body is unsupported."""

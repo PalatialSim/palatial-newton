@@ -817,7 +817,8 @@ user-prescribed rather than dynamically integrated:
 
 During Newton-to-MuJoCo conversion (at
 :class:`~newton.solvers.SolverMuJoCo` construction), roots are mapped
-by joint type:
+by joint type. Every converted body must be reachable from a joint to
+the world; rootless body components are not supported.
 
 - **Kinematic roots with non-fixed joints** become ordinary MuJoCo
   joints with the same Newton joint type and DOFs. A very large
