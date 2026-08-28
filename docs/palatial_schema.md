@@ -549,5 +549,3 @@ jt = arr.numpy().copy()
 jt[bundle.model.joint_qd_start.numpy()[joint_index]] = target_value
 arr.assign(jt)
 ```
-
----
