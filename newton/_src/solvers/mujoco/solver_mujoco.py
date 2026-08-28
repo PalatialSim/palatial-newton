@@ -5658,6 +5658,21 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
                 stacklevel=2,
             )
 
+        # Validate the complete body-creation order before mutating the MuJoCo spec.
+        # A graph root that is a Newton body rather than the world is a valid root
+        # to topological_sort(), but there is no MuJoCo body mapping for it yet.
+        joints_with_bodies = np.concatenate((joint_order, joints_dynamic_roots))
+        mapped_bodies = {-1}
+        for joint in np.concatenate((joints_static_roots, joints_with_bodies)):
+            parent = int(joint_parent[joint])
+            if parent not in mapped_bodies:
+                raise ValueError(
+                    "SolverMuJoCo topology is unsupported: "
+                    f"joint {int(joint)} references unmapped parent body {parent}. "
+                    "Every converted body must be reachable from a world-root joint."
+                )
+            mapped_bodies.add(int(joint_child[joint]))
+
         # Count the total joint coordinates and DOFs that belong to loop joints
         # across all worlds (not added to MuJoCo as joints). When
         # separate_worlds=True, joints_loop is per-template so we multiply by
@@ -6173,7 +6188,6 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
             add_geoms(child)
 
         # Add articulation joints and standalone dynamic roots.
-        joints_with_bodies = np.concatenate((joint_order, joints_dynamic_roots))
         for j in joints_with_bodies:
             parent = int(joint_parent[j])
             j_type = int(joint_type[j])

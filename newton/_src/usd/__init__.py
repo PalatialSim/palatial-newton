@@ -17,14 +17,16 @@ else:
 # cloth:* attributes off authored prims.
 import pathlib as _pathlib
 
-from pxr import Plug as _Plug
+try:
+    from pxr import Plug as _Plug
+except ImportError:
+    _Plug = None
 
-_Plug.Registry().RegisterPlugins([
-    str((_pathlib.Path(__file__).parent / "schemas_ext").absolute())
-])
-_p = _Plug.Registry().GetPluginWithName("newton_shell")
-if _p and not _p.isLoaded:
-    _p.Load()
+if _Plug is not None:
+    _Plug.Registry().RegisterPlugins([str((_pathlib.Path(__file__).parent / "schemas_ext").absolute())])
+    _p = _Plug.Registry().GetPluginWithName("newton_shell")
+    if _p and not _p.isLoaded:
+        _p.Load()
 
 from .utils import (
     get_attribute,

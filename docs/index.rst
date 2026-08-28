@@ -62,6 +62,8 @@ Newton Physics
    FAQ <faq>
    Migration Guide <migration>
    Isaac Lab <lab/isaac-lab>
+   Palatial Schema Guide <palatial_schema>
+   Palatial Package <palatial_package>
 
 
 .. toctree::

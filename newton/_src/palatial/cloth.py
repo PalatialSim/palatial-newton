@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
+# SPDX-License-Identifier: Apache-2.0
+
 """Read-side helpers for legacy ``newton:bodyType="cloth"`` USDAs."""
 from __future__ import annotations
 
