@@ -29,11 +29,20 @@ import argparse
 import math
 import sys
 
-# IMPORTANT: import newton stack BEFORE any pxr.Usd usage in the same process.
-import warp as wp  # noqa: F401
-import newton
 import numpy as np
 
+# IMPORTANT: import newton stack BEFORE any pxr.Usd usage in the same process.
+import warp as wp
+
+import newton
+from newton.examples.palatial.validation import (
+    NewtonValidationTracker,
+    clearance_translation,
+    compute_world_shape_points,
+    relocate_ground_plane_transform,
+    resolve_persistent_rigid_placement,
+    translate_free_roots,
+)
 from newton.palatial import load
 
 
@@ -48,7 +57,7 @@ def _to_newton_points(points, meters_per_unit: float, up_axis: str):
 
 def _read_usd_geometry_bounds(usd_path: str):
     try:
-        from pxr import Gf, Usd, UsdGeom  # noqa: PLC0415
+        from pxr import Usd, UsdGeom  # noqa: PLC0415
     except Exception:
         return None
 
@@ -88,6 +97,56 @@ def _read_usd_geometry_bounds(usd_path: str):
 
     merged = _np.concatenate(bounds, axis=0)
     return merged.min(axis=0), merged.max(axis=0)
+
+
+def _live_validation_state(model, state):
+    """Return live geometry points and linear velocities for validation."""
+    particle_count = int(model.particle_count)
+    if particle_count > 0 and state.particle_q is not None:
+        points = state.particle_q.numpy()
+        velocities = (
+            state.particle_qd.numpy()
+            if state.particle_qd is not None
+            else np.zeros((particle_count, 3), dtype=np.float32)
+        )
+        return points, velocities
+
+    body_count = int(model.body_count)
+    if body_count <= 0 or state.body_q is None:
+        return np.empty((0, 3), dtype=np.float32), np.empty((0, 3), dtype=np.float32)
+    body_q = state.body_q.numpy()
+    points = compute_world_shape_points(
+        body_q,
+        model.shape_body.numpy(),
+        model.shape_transform.numpy(),
+        model.shape_collision_aabb_lower.numpy(),
+        model.shape_collision_aabb_upper.numpy(),
+    )
+    if points.shape[0] == 0:
+        points = body_q[:, :3]
+    body_qd = state.body_qd.numpy() if state.body_qd is not None else None
+    velocities = (
+        body_qd[:, :3]
+        if body_qd is not None
+        else np.zeros((body_count, 3), dtype=np.float32)
+    )
+    return points, velocities
+
+
+def _live_validation_point_radii(model, point_count: int) -> np.ndarray:
+    """Return support radii for live particle centers or zero for shape points."""
+    particle_count = int(model.particle_count)
+    if particle_count <= 0:
+        return np.zeros(point_count, dtype=np.float32)
+    if particle_count != point_count:
+        raise RuntimeError("Newton validation particle geometry count is inconsistent")
+    particle_radius = getattr(model, "particle_radius", None)
+    if particle_radius is None:
+        return np.zeros(point_count, dtype=np.float32)
+    radii = np.asarray(particle_radius.numpy(), dtype=np.float32).reshape(-1)
+    if radii.shape[0] != point_count:
+        raise RuntimeError("Newton validation particle radius count is inconsistent")
+    return radii
 
 
 def _set_bodies_kinematic(model, body_indices: list[int]) -> None:
@@ -146,12 +205,20 @@ class Example:
                  rotate_x_deg: float = 0.0,
                  rotate_y_deg: float = 0.0,
                  rotate_z_deg: float = 0.0,
-                 table: dict | None = None):
+                 table: dict | None = None,
+                 validation_report: str | None = None):
         self.viewer = viewer
         self.graph = None
         self._cuda_graph_requested = bool(cuda_graph)
         self._step_diagnostics = bool(step_diagnostics)
         self._table = table
+        self._validation_report_path = validation_report
+        self._validation_tracker: NewtonValidationTracker | None = None
+        self._support_plane_z = (
+            float(table["pos"][2] + table["size"][2])
+            if table is not None
+            else 0.0
+        )
 
         # One call: parse USDA, build model, build solver with baked params.
         bundle = load(
@@ -165,6 +232,16 @@ class Example:
         self.state_0 = bundle.state_in
         self.state_1 = bundle.state_out
         self.control = bundle.control
+
+        # Particle collision radii define the cloth's physical support extent,
+        # so apply an explicit override before floor placement is computed.
+        self.cloth_particle_radius = cloth_particle_radius
+        if bundle.body_type == "cloth" and cloth_particle_radius is not None:
+            n_particles = int(self.model.particle_count)
+            if n_particles > 0:
+                self.model.particle_radius.assign(
+                    np.full(n_particles, float(cloth_particle_radius), dtype=np.float32)
+                )
 
         # Frame timing comes from newton:timeStepsPerSecond in the USDA.
         self.fps = bundle.fps
@@ -190,6 +267,27 @@ class Example:
             body_q_prev = getattr(self.solver, "body_q_prev", None)
             if body_q_prev is not None:
                 wp.copy(body_q_prev, self.state_0.body_q)
+
+        def _relocate_support_plane(support_plane_z: float) -> None:
+            transforms = relocate_ground_plane_transform(
+                self.model.shape_transform.numpy(),
+                shape_body=self.model.shape_body.numpy(),
+                shape_type=self.model.shape_type.numpy(),
+                shape_label=self.model.shape_label,
+                plane_type=int(newton.GeoType.PLANE),
+                support_plane_z=support_plane_z,
+            )
+            self.model.shape_transform.assign(
+                wp.array(
+                    transforms,
+                    dtype=wp.transform,
+                    device=self.model.device,
+                )
+            )
+            self.solver.notify_model_changed(
+                newton.solvers.SolverNotifyFlags.SHAPE_PROPERTIES
+            )
+            self._support_plane_z = float(support_plane_z)
 
         def _rebuild_solver_with_params(params: dict) -> None:
             import inspect as _inspect
@@ -323,7 +421,9 @@ class Example:
             if n_b > 0:
                 _sync_body_pose_teleport()
 
-        # Drop height: lift the asset by drop_height meters in z.
+        # Drop height is clearance above the active support plane, not a raw
+        # translation from the authored origin. This keeps off-origin meshes
+        # from starting inside the ground and receiving an explosive impulse.
         # For articulated assets with a floating base, world pose lives in
         # joint_q of the FREE root joint — body_q is derived from it via FK
         # at every step, so lifting body_q alone gets overwritten.
@@ -332,12 +432,24 @@ class Example:
         # for rods so the framing stays consistent across assets.
         if bundle.body_type == "rod":
             drop_height = 0.5
-        if drop_height:
-            import numpy as _np
+        if bundle.body_type in {"rigid", "rod", "cloth"}:
             n_bodies = int(self.model.body_count)
             n_joints = int(self.model.joint_count)
             n_particles = int(self.model.particle_count)
             n_lifted_free = 0
+            live_points, _velocities = _live_validation_state(self.model, self.state_0)
+            if live_points.shape[0] == 0:
+                raise RuntimeError("Cannot place Newton asset without live geometry bounds")
+            live_radii = _live_validation_point_radii(
+                self.model,
+                live_points.shape[0],
+            )
+            initial_min_z = float((live_points[:, 2] - live_radii).min())
+            translation_z = clearance_translation(
+                initial_min_z,
+                float(drop_height),
+                support_plane_z=self._support_plane_z,
+            )
 
             if bundle.body_type == "rigid":
                 # 1. Lift FREE root joints in joint_q (articulated assets).
@@ -347,57 +459,71 @@ class Example:
                     jtypes = self.model.joint_type.numpy()
                     jq_start = self.model.joint_q_start.numpy()
                     free = int(newton.JointType.FREE)  # = 4
-                    for i, t in enumerate(jtypes):
-                        if int(t) == free:
-                            jq[int(jq_start[i]) + 2] += float(drop_height)
-                            n_lifted_free += 1
+                    jq, n_lifted_free = translate_free_roots(
+                        jq,
+                        joint_type=jtypes,
+                        joint_q_start=jq_start,
+                        delta_z=translation_z,
+                        free_joint_type=free,
+                    )
+                    translation_z, resolved_support_plane_z = (
+                        resolve_persistent_rigid_placement(
+                            translation_z=translation_z,
+                            support_plane_z=self._support_plane_z,
+                            joint_count=n_joints,
+                            translated_free_joint_count=n_lifted_free,
+                        )
+                    )
                     if n_lifted_free:
                         self.state_0.joint_q.assign(jq)
                         # Re-derive body_q from the new joint_q via forward kinematics.
                         newton.eval_fk(self.model, self.state_0.joint_q,
                                        self.state_0.joint_qd, self.state_0)
                         _sync_body_pose_teleport()
+                    elif resolved_support_plane_z != self._support_plane_z:
+                        _relocate_support_plane(resolved_support_plane_z)
 
                 # 2. Otherwise (no free joints, plain rigid): lift body_q directly.
                 elif n_bodies > 0:
                     q = self.state_0.body_q.numpy().copy()
-                    q[:, 2] += float(drop_height)
+                    q[:, 2] += translation_z
                     self.state_0.body_q.assign(q)
                     _sync_body_pose_teleport()
 
             elif bundle.body_type == "rod" and n_bodies > 0:
                 q = self.state_0.body_q.numpy().copy()
-                q[:, 2] += float(drop_height)
+                q[:, 2] += translation_z
                 self.state_0.body_q.assign(q)
                 _sync_body_pose_teleport()
 
             elif bundle.body_type == "cloth" and n_particles > 0:
                 pq = self.state_0.particle_q.numpy().copy()
-                pq[:, 2] += float(drop_height)
+                pq[:, 2] += translation_z
                 self.state_0.particle_q.assign(pq)
 
+            placed_points, _velocities = _live_validation_state(self.model, self.state_0)
+            placed_radii = _live_validation_point_radii(
+                self.model,
+                placed_points.shape[0],
+            )
+            placed_min_z = float((placed_points[:, 2] - placed_radii).min())
+
             print(
-                f"  drop: +{drop_height}m  body={bundle.body_type}  "
+                f"  drop: clearance={drop_height}m translation={translation_z:+.6f}m "
+                f"support_z={self._support_plane_z:.6f}m min_z={placed_min_z:.6f}m "
+                f"body={bundle.body_type}  "
                 f"(free_joints={n_lifted_free}, bodies={n_bodies}, "
                 f"joints={n_joints}, particles={n_particles})"
             )
 
         # Cloth-friendly soft-contact defaults (overridden by viewer/asset later).
         if bundle.body_type == "cloth":
-            self.cloth_particle_radius = cloth_particle_radius
             self.model.soft_contact_ke = soft_contact_ke
             self.model.soft_contact_kd = soft_contact_kd
             self.model.soft_contact_mu = soft_contact_mu
             self.model.soft_contact_max = soft_contact_max
             # When unset, keep USDA's newton:shell:particleRadius (loaded
             # into model.particle_radius by the loader).
-            if cloth_particle_radius is not None:
-                import numpy as _np
-                n_particles = int(self.model.particle_count)
-                if n_particles > 0:
-                    self.model.particle_radius.assign(
-                        _np.full(n_particles, float(cloth_particle_radius), dtype=_np.float32)
-                    )
             self.model.cloth_body_contact_margin = cloth_body_contact_margin
 
             # VBD/Style3D read per-edge bend params from
@@ -668,7 +794,21 @@ class Example:
             f"contact_update_interval={self.contact_update_interval}  "
             f"params={bundle.solver_params}"
         )
+        if self._validation_report_path is not None:
+            points, velocities = _live_validation_state(self.model, self.state_0)
+            self._validation_tracker = NewtonValidationTracker(
+                points,
+                point_radii=_live_validation_point_radii(
+                    self.model,
+                    points.shape[0],
+                ),
+                support_plane_z=self._support_plane_z,
+            )
+            self._validation_tracker.observe(points, velocities)
         self.capture()
+        if self._validation_tracker is not None and self.graph is not None:
+            points, velocities = _live_validation_state(self.model, self.state_0)
+            self._validation_tracker.observe(points, velocities)
 
     def capture(self):
         self.graph = None
@@ -708,6 +848,9 @@ class Example:
         else:
             self.simulate()
         self.sim_time += self.frame_dt
+        if self._validation_tracker is not None:
+            points, velocities = _live_validation_state(self.model, self.state_0)
+            self._validation_tracker.observe(points, velocities)
         if not self._step_diagnostics:
             return
         # Per-frame debug: always print first 5 frames, then every 30.
@@ -727,6 +870,23 @@ class Example:
         self.viewer.log_state(self.state_0)
         self.viewer.log_contacts(self.contacts, self.state_0)
         self.viewer.end_frame()
+
+    def test_final(self, *, assert_valid: bool = True) -> dict[str, object] | None:
+        """Verify the final state and finalize semantic trajectory validation."""
+        if self._validation_tracker is None:
+            points, velocities = _live_validation_state(self.model, self.state_0)
+            assert points.shape[0] > 0, "Palatial example has no live geometry"
+            assert np.isfinite(points).all(), "Palatial example has non-finite transforms"
+            assert np.isfinite(velocities).all(), "Palatial example has non-finite velocities"
+            return None
+
+        report = self._validation_tracker.write(self._validation_report_path)
+        if assert_valid:
+            assert report["status"] == "passed", (
+                "Palatial semantic validation failed: "
+                f"{', '.join(report['failures'])}"
+            )
+        return report
 
 
 def main(argv=None) -> int:
@@ -748,9 +908,9 @@ def main(argv=None) -> int:
     p.add_argument("--gui", action="store_true",
                    help="Open ViewerGL and run until the window is closed")
     p.add_argument("--drop-height", type=float, default=0.0,
-                   help="Lift rigid bodies by this many meters in z before sim "
-                        "(ignored for cloth — baked into the USDA; ignored for rods — "
-                        "always 0.5 m for consistent framing)")
+                   help="Place the asset this many meters above its support plane "
+                        "using live geometry bounds (rods always use 0.5 m for "
+                        "consistent framing)")
     p.add_argument("--device", default=None,
                    help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
     p.add_argument("--zero-gravity", action="store_true",
@@ -846,6 +1006,8 @@ def main(argv=None) -> int:
     p.add_argument("--record-mp4", default=None,
                    help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
                         "and pipes frames to ffmpeg with a front-facing camera.")
+    p.add_argument("--validation-report", default=None,
+                   help="Write a palatial.newton-validation.v1 semantic trajectory report.")
     p.add_argument("--mp4-fps", type=int, default=60,
                    help="Output mp4 framerate (default 60)")
     p.add_argument("--top-view", action="store_true",
@@ -1023,7 +1185,8 @@ def main(argv=None) -> int:
                  rotate_x_deg=args.rotate_x,
                  rotate_y_deg=args.rotate_y,
                  rotate_z_deg=args.rotate_z,
-                 table=table_cfg)
+                 table=table_cfg,
+                 validation_report=args.validation_report)
 
     usd_bounds = _read_usd_geometry_bounds(args.usd)
 
@@ -1228,6 +1391,12 @@ def main(argv=None) -> int:
         except Exception:
             pass
 
+    validation_report = ex.test_final(assert_valid=False)
+    if validation_report is not None:
+        print(
+            f"  validation-report: {args.validation_report} "
+            f"status={validation_report['status']}"
+        )
     print(f"[done] frames={i}  sim_time={ex.sim_time:.3f}s")
     return 0
 

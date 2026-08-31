@@ -37,6 +37,29 @@ Recording works headless (no `--gui`) or alongside `--gui`.
   --record-mp4 /tmp/jean.mp4 --mp4-fps 60 --steps 1000
 ```
 
+`--drop-height` is support-plane clearance, not a raw Z translation. For
+example, `--drop-height 0.2` places the asset's live collision lower bound
+0.2 m above the ground (or table top) while preserving relative transforms in
+an articulation. Rod playback uses a fixed 0.5 m clearance for consistent
+framing.
+
+Use `--validation-report` when a machine-readable result is required:
+
+```bash
+... example_palatial_load ~/new_jean.newton.usda \
+  --drop-height 0.2 --steps 1000 \
+  --record-mp4 /tmp/jean.mp4 \
+  --validation-report /tmp/simulation_report.json
+```
+
+The `palatial.newton-validation.v1` report checks initial and maximum
+support-plane penetration, finite transforms, centroid displacement, linear
+speed, and the fraction of trajectory samples whose centroid stays inside a
+size-derived displacement envelope. That envelope ratio is simulator-state
+telemetry; it is not rendered-pixel visibility or a texture-quality score.
+MP4 recording is independent, so callers should validate the semantic report
+and the video artifact separately.
+
 Rod example:
 
 ```bash

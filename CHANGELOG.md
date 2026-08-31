@@ -90,6 +90,10 @@
 ### Fixed
 
 - Fix `remesh_convex_hull` raising `QhullError` on degenerate (coincident, collinear, or coplanar) point clouds; it now returns a zero-volume fallback mesh with a `UserWarning`, raises `ValueError` on empty input, and retries Qhull with `QJ` joggle as a last resort on the 3D path
+- Interpret Palatial playback drop height as support-plane clearance, relocate
+  the generated support plane for fixed-root articulations, account for cloth
+  particle collision radii, and emit semantic trajectory reports across the
+  simulation.
 - Fix `newton.palatial.load()` truncating Newton-generated contacts when an authored MuJoCo `nconmax` exceeds the model's rigid-contact buffer.
 - Fix palatial rod endpoint twisting to drive connector roots while keeping rod attachment joints stable through twisting and drop-contact scenarios
 - Fix palatial rod connector contact loading by adding simple hidden connector proxies and using a rod-scale rigid contact gap.
