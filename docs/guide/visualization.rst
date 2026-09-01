@@ -272,6 +272,36 @@ Rendering to USD
 
 Instead of rendering in real-time, you can also render the simulation as a time-sampled USD stage to be visualized in Omniverse or other USD-compatible tools using the :class:`~newton.viewer.ViewerUSD` backend.
 
+OVRTX Rendering
+~~~~~~~~~~~~~~~
+
+For an NVIDIA RTX-capable Linux host, install the optional OVRTX runtime and
+select ``ovrtx`` from the example runner. The backend first records Newton's
+portable, time-sampled USD output, then uses OVRTX and ovstage to compose a
+camera and RenderProduct over that recording. It renders the final simulation
+time into a PNG without modifying the original USD file.
+
+.. code-block:: bash
+
+    uv sync --extra ovrtx
+    python -m newton.examples basic_shapes --viewer ovrtx \
+        --num-frames 120 --output-path /workspace/basic_shapes.usd \
+        --ovrtx-output-path /workspace/basic_shapes.png
+
+The default camera is suitable for metre-scale scenes around the origin. For a
+different scene scale or framing, set ``--ovrtx-camera-position X Y Z`` and
+``--ovrtx-camera-target X Y Z``. ``--ovrtx-width`` and ``--ovrtx-height``
+control the output resolution. By default the renderer performs 40 warmup
+steps before it downloads the PNG, which is a quality-first setting for
+real-time path tracing. Use ``--ovrtx-warmup-frames`` to trade warmup time for
+latency, or choose ``--ovrtx-render-mode Minimal`` for throughput-oriented
+rasterization.
+
+OVRTX needs an RTX-capable GPU and a compatible NVIDIA driver. Its first render
+usually compiles and caches shaders, which can take one or two minutes; keep the
+cache on persistent storage when using a cloud pod. OVRTX is pre-release and is
+not a substitute for Newton physics validation.
+
 Constructor parameters:
 
 - ``output_path``: Path to the output USD file

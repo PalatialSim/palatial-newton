@@ -3393,6 +3393,25 @@ importers = [
     { name = "usd-core", marker = "(python_full_version < '3.14' and platform_machine != 'aarch64') or (python_full_version >= '3.14' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine == 'aarch64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
     { name = "usd-exchange", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64') or (python_full_version >= '3.13' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine != 'aarch64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
 ]
+ovrtx = [
+    { name = "alphashape" },
+    { name = "coacd", marker = "python_full_version < '3.14' or (extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "fast-simplification" },
+    { name = "meshio" },
+    { name = "newton-usd-schemas" },
+    { name = "open3d", marker = "(python_full_version < '3.13' and platform_machine != 'aarch64') or (python_full_version < '3.13' and sys_platform != 'linux') or (extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "ovrtx", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "ovstage", marker = "(platform_machine != 'aarch64' and platform_machine != 'x86_64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') or (sys_platform != 'linux' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "pillow" },
+    { name = "pycollada" },
+    { name = "requests" },
+    { name = "resolve-robotics-uri-py" },
+    { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11' or (extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "trimesh" },
+    { name = "usd-core", marker = "(python_full_version < '3.14' and platform_machine != 'aarch64') or (python_full_version >= '3.14' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine == 'aarch64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+    { name = "usd-exchange", marker = "(python_full_version < '3.13' and platform_machine == 'aarch64') or (python_full_version >= '3.13' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13') or (platform_machine != 'aarch64' and extra == 'extra-6-newton-torch-cu12' and extra == 'extra-6-newton-torch-cu13')" },
+]
 notebook = [
     { name = "alphashape" },
     { name = "cbor2" },
@@ -3513,12 +3532,16 @@ requires-dist = [
     { name = "newton", extras = ["examples"], marker = "extra == 'torch-cu13'" },
     { name = "newton", extras = ["importers"], marker = "extra == 'docs'" },
     { name = "newton", extras = ["importers"], marker = "extra == 'examples'" },
+    { name = "newton", extras = ["importers"], marker = "extra == 'ovrtx'" },
     { name = "newton", extras = ["sim"], marker = "extra == 'examples'" },
     { name = "newton-actuators", marker = "extra == 'sim'", specifier = ">=0.1.0" },
     { name = "newton-usd-schemas", marker = "extra == 'importers'", specifier = ">=0.2.0" },
     { name = "open3d", marker = "(python_full_version < '3.13' and platform_machine != 'aarch64' and extra == 'importers') or (python_full_version < '3.13' and sys_platform != 'linux' and extra == 'importers')", specifier = ">=0.19.0" },
     { name = "open3d", marker = "(python_full_version < '3.13' and platform_machine != 'aarch64' and extra == 'remesh') or (python_full_version < '3.13' and sys_platform != 'linux' and extra == 'remesh')", specifier = ">=0.19.0" },
+    { name = "ovrtx", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'ovrtx') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'ovrtx')", specifier = "==0.4.1.364340" },
+    { name = "ovstage", marker = "(platform_machine == 'aarch64' and sys_platform == 'linux' and extra == 'ovrtx') or (platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'ovrtx')", specifier = "==0.1.1.355824" },
     { name = "pillow", marker = "extra == 'examples'", specifier = ">=11.3.0" },
+    { name = "pillow", marker = "extra == 'ovrtx'", specifier = ">=11.3.0" },
     { name = "pycollada", marker = "extra == 'importers'", specifier = ">=0.9" },
     { name = "pydata-sphinx-theme", marker = "extra == 'docs'", specifier = ">=0.16.1" },
     { name = "pyfqmr", marker = "extra == 'remesh'", specifier = ">=0.5.0" },
@@ -3544,7 +3567,7 @@ requires-dist = [
     { name = "viser", marker = "extra == 'notebook'", specifier = "==1.0.26" },
     { name = "warp-lang", specifier = ">=1.13.0", index = "https://pypi.nvidia.com/" },
 ]
-provides-extras = ["sim", "importers", "remesh", "examples", "torch-cu12", "torch-cu13", "dev", "docs", "notebook"]
+provides-extras = ["sim", "importers", "remesh", "ovrtx", "examples", "torch-cu12", "torch-cu13", "dev", "docs", "notebook"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "asv", specifier = ">=0.6.4" }]
@@ -4100,6 +4123,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/36/86/b585f53236dec60aba864e050778b25045f857e17f6e5ea0ae95fe80edd2/overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a", size = 22812, upload-time = "2024-01-27T21:01:33.423Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/ab/fc8290c6a4c722e5514d80f62b2dc4c4df1a68a41d1364e625c35990fcf3/overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49", size = 17832, upload-time = "2024-01-27T21:01:31.393Z" },
+]
+
+[[package]]
+name = "ovrtx"
+version = "0.4.1.364340"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/3e/ecefd14d7dc8b377607aafe19e426f40b921b2be9a8f73ebc6e4d180ecd1/ovrtx-0.4.1.364340.tar.gz", hash = "sha256:1b20e48a69a091246b0537412e0434ee5d5437a8bfc3bbe02599f13ac7488927", size = 23382, upload-time = "2026-08-14T22:43:40.756472Z" }
+
+[[package]]
+name = "ovstage"
+version = "0.1.1.355824"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/fd/a1650d436b3c304720236178848d4e7ad523a2b9f2b76918d7b902934cac/ovstage-0.1.1.355824-py3-none-manylinux_2_35_aarch64.whl", hash = "sha256:046aa360959bf5344d912470aaa11d3ec1fc750e28816e5239ce0438864c9863", size = 59799282, upload-time = "2026-08-05T20:07:10.538268Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/2e/e5d03719d9ab8e412187be84efe11bc6b912eca02bd8dfb09a1bf522bbe4/ovstage-0.1.1.355824-py3-none-manylinux_2_35_x86_64.whl", hash = "sha256:b4affd9e5b23620ec71901a164df4ae373d25de2c76b9fae4d193d97aa2df0ec", size = 64302147, upload-time = "2026-08-05T20:06:18.013482Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/d0/ff9124f524ffadc87f8893e99de1679e7c517ca6ceb60e0b870a284b71a3/ovstage-0.1.1.355824-py3-none-win_amd64.whl", hash = "sha256:fc8ae7fe950aa2ff8fd24643047f7156ffa1b9b384ce3f024ee2193929e21a3b", size = 35031430, upload-time = "2026-08-05T20:05:29.880023Z" },
 ]
 
 [[package]]

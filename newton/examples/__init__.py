@@ -481,8 +481,8 @@ def create_parser():
         "--viewer",
         type=str,
         default="gl",
-        choices=["gl", "usd", "rerun", "null", "viser"],
-        help="Viewer to use (gl, usd, rerun, null, or viser).",
+        choices=["gl", "usd", "ovrtx", "rerun", "null", "viser"],
+        help="Viewer to use (gl, usd, ovrtx, rerun, null, or viser).",
     )
     parser.add_argument(
         "--rerun-address",
@@ -492,6 +492,52 @@ def create_parser():
     )
     parser.add_argument(
         "--output-path", type=str, default="output.usd", help="Path to the output USD file (required for usd viewer)."
+    )
+    parser.add_argument(
+        "--ovrtx-output-path",
+        type=str,
+        default="output.png",
+        help="Path to the PNG rendered by the OVRTX viewer.",
+    )
+    parser.add_argument(
+        "--ovrtx-width",
+        type=int,
+        default=1280,
+        help="OVRTX output width in pixels.",
+    )
+    parser.add_argument(
+        "--ovrtx-height",
+        type=int,
+        default=720,
+        help="OVRTX output height in pixels.",
+    )
+    parser.add_argument(
+        "--ovrtx-camera-position",
+        type=float,
+        nargs=3,
+        default=(3.0, -3.0, 2.5),
+        metavar=("X", "Y", "Z"),
+        help="OVRTX camera position in stage metres.",
+    )
+    parser.add_argument(
+        "--ovrtx-camera-target",
+        type=float,
+        nargs=3,
+        default=(0.0, 0.0, 0.5),
+        metavar=("X", "Y", "Z"),
+        help="Point at which the OVRTX camera is aimed, in stage metres.",
+    )
+    parser.add_argument(
+        "--ovrtx-render-mode",
+        choices=["RealTimePathTracing", "PathTracing", "Minimal"],
+        default="RealTimePathTracing",
+        help="OVRTX camera render mode.",
+    )
+    parser.add_argument(
+        "--ovrtx-warmup-frames",
+        type=int,
+        default=40,
+        help="Renderer steps before downloading the OVRTX PNG.",
     )
     parser.add_argument("--num-frames", type=int, default=100, help="Total number of frames.")
     parser.add_argument(
@@ -735,6 +781,20 @@ def init(parser=None):
         if args.output_path is None:
             raise ValueError("--output-path is required when using usd viewer")
         viewer = newton.viewer.ViewerUSD(output_path=args.output_path, num_frames=args.num_frames)
+    elif args.viewer == "ovrtx":
+        if args.output_path is None:
+            raise ValueError("--output-path is required when using ovrtx viewer")
+        viewer = newton.viewer.ViewerOVRTX(
+            output_path=args.output_path,
+            render_output_path=args.ovrtx_output_path,
+            width=args.ovrtx_width,
+            height=args.ovrtx_height,
+            camera_position=tuple(args.ovrtx_camera_position),
+            camera_target=tuple(args.ovrtx_camera_target),
+            render_mode=args.ovrtx_render_mode,
+            warmup_frames=args.ovrtx_warmup_frames,
+            num_frames=args.num_frames,
+        )
     elif args.viewer == "rerun":
         viewer = newton.viewer.ViewerRerun(address=args.rerun_address)
     elif args.viewer == "null":

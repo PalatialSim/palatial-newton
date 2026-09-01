@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add optional OVRTX/ovstage rendering through `--viewer ovrtx`, which records
+  Newton USD and renders the final selected simulation state to PNG on an RTX
+  Linux host
 - Add Newton rod/cable USD schema support with palatial cable loading, including
   `NewtonRodAPI`, `NewtonRodMaterialAPI`, anisotropic `add_rod()` dispatch, and
   VBD anisotropic cable joint slots

@@ -71,6 +71,16 @@ remesh = [
     "pyfqmr>=0.5.0",               # for fast mesh simplification
 ]
 
+# NVIDIA RTX rendering for USD recordings. OVRTX publishes Linux wheels for the
+# RunPod targets supported by this integration; the runtime import remains lazy
+# so normal Newton installs retain no OVRTX dependency.
+ovrtx = [
+    "newton[importers]",
+    "ovrtx==0.4.1.364340; sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
+    "ovstage==0.1.1.355824; sys_platform == 'linux' and (platform_machine == 'x86_64' or platform_machine == 'aarch64')",
+    "Pillow>=11.3.0",
+]
+
 # Examples dependencies including visualization
 examples = [
     "newton[sim]",          # include simulation dependencies
