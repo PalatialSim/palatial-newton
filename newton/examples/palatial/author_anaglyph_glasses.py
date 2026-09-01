@@ -24,8 +24,8 @@ except ImportError as error:  # pragma: no cover - exercised by the CLI error pa
 
 
 DEFAULT_LENS_MESH = "/World/part_3/part_3_NewtonVisual"
-DEFAULT_RED_COLOR = (0.75, 0.04, 0.03)
-DEFAULT_GREEN_COLOR = (0.02, 0.58, 0.08)
+DEFAULT_RED_COLOR = (0.95, 0.02, 0.015)
+DEFAULT_GREEN_COLOR = (0.01, 0.78, 0.035)
 DEFAULT_FRAME_COLOR = (0.004, 0.005, 0.006)
 
 
@@ -158,7 +158,7 @@ def author_anaglyph_glasses(
     output_path: str | Path,
     *,
     lens_mesh_path: str = DEFAULT_LENS_MESH,
-    opacity: float = 0.14,
+    opacity: float = 0.06,
     roughness: float = 0.04,
     ior: float = 1.49,
     red_color: tuple[float, float, float] = DEFAULT_RED_COLOR,
@@ -246,7 +246,7 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("source", help="Source glasses USD")
     parser.add_argument("output", help="Corrected output USD")
     parser.add_argument("--lens-mesh", default=DEFAULT_LENS_MESH)
-    parser.add_argument("--opacity", type=float, default=0.14)
+    parser.add_argument("--opacity", type=float, default=0.06)
     parser.add_argument("--roughness", type=float, default=0.04)
     parser.add_argument("--ior", type=float, default=1.49)
     parser.add_argument("--red-color", type=float, nargs=3, default=DEFAULT_RED_COLOR, metavar=("R", "G", "B"))

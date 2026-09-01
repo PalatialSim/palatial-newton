@@ -157,7 +157,7 @@ materials:
 uv run python -m newton.examples.palatial.author_anaglyph_glasses \
   /workspace/glasses/glasses.usd \
   /workspace/glasses/glasses_anaglyph.usd \
-  --opacity 0.14 --roughness 0.04 --ior 1.49
+  --opacity 0.06 --roughness 0.04 --ior 1.49
 ```
 
 The author preserves collision and rigid-body schemas, makes the frame an
