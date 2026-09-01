@@ -512,6 +512,12 @@ def create_parser():
         help="OVRTX output height in pixels.",
     )
     parser.add_argument(
+        "--ovrtx-fps",
+        type=int,
+        default=60,
+        help="OVRTX video and USD-stage frame rate; set this to the example's simulation frame rate.",
+    )
+    parser.add_argument(
         "--ovrtx-camera-position",
         type=float,
         nargs=3,
@@ -848,6 +854,7 @@ def init(parser=None):
             config=config,
             camera_position=tuple(args.ovrtx_camera_position),
             camera_target=tuple(args.ovrtx_camera_target),
+            fps=args.ovrtx_fps,
             num_frames=args.num_frames,
         )
     elif args.viewer == "rerun":

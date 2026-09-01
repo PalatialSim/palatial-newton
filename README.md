@@ -846,7 +846,7 @@ python -m newton.examples basic_viewer --viewer usd --output-path my_output.usd
 uv sync --extra ovrtx
 python -m newton.examples basic_shapes --viewer ovrtx --num-frames 120 \
     --output-path /workspace/basic_shapes.usd \
-    --ovrtx-output-path /workspace/basic_shapes.mp4
+    --ovrtx-output-path /workspace/basic_shapes.mp4 --ovrtx-fps 100
 
 # Run on a selected device
 python -m newton.examples basic_urdf --device cuda:0
@@ -867,8 +867,10 @@ delivery from the target: an image path retains the latest frame, a video path
 streams live RGBA frames to FFmpeg, and a suffix-free path receives numbered
 PNG frames plus requested sensor arrays. Use `--ovrtx-render-vars` for buffers
 such as `rgb depth normals semantic_segmentation`, and
-`--ovrtx-render-every N` to decouple simulation and render cadence. Render
-scripts may define `compose_stage`, `on_stage_open`, `before_frame`,
+`--ovrtx-render-every N` to decouple simulation and render cadence. Set
+`--ovrtx-fps` to the simulation frame rate so USD time samples and encoded
+playback duration agree. Render scripts may define `compose_stage`,
+`on_stage_open`, `before_frame`,
 `after_frame`, `on_render_complete`, and `on_stage_close` hooks.
 
 ## Contributing and Development
