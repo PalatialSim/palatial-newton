@@ -4,10 +4,11 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 
 import numpy as np
 
-from newton.examples.palatial.example_palatial_load import Example
+from newton.examples.palatial.example_palatial_load import Example, _live_validation_state
 from newton.examples.palatial.validation import (
     NewtonValidationTracker,
     clearance_translation,
@@ -46,6 +47,83 @@ class TestPalatialValidation(unittest.TestCase):
 
         self.assertAlmostEqual(delta_z, 0.655)
         self.assertAlmostEqual(float(after[:, 2].min()), 0.2)
+
+    def test_support_extent_excludes_visual_only_shapes(self):
+        """Red-mug validation must measure colliders, not render bounds.
+
+        The failed mug runs reported about 41 mm of support penetration even
+        though their authored collision packages were aligned.  This fixture
+        reproduces that signature: one collision-enabled shape rests exactly
+        on the support plane while a larger visual-only mug bound reaches
+        40 mm below it.  Visual geometry is not part of Newton contact, so it
+        must not decide collision integrity.
+        """
+        body_q = np.array([[0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 1.0]])
+        shape_body = np.array([0, 0])
+        shape_transform = np.array(
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            ]
+        )
+        shape_aabb_lower = np.array(
+            [
+                [-0.05, -0.05, -0.02],
+                [-0.06, -0.05, -0.06],
+            ]
+        )
+        shape_aabb_upper = np.array(
+            [
+                [0.05, 0.05, 0.02],
+                [0.06, 0.05, 0.06],
+            ]
+        )
+
+        points = compute_world_shape_points(
+            body_q,
+            shape_body,
+            shape_transform,
+            shape_aabb_lower,
+            shape_aabb_upper,
+            shape_flags=np.array([0b10, 0b01]),
+            collide_shapes_flag=0b10,
+        )
+
+        self.assertAlmostEqual(float(points[:, 2].min()), 0.0)
+        tracker = NewtonValidationTracker(points, support_plane_z=0.0)
+        tracker.observe(points, np.zeros((1, 3)))
+        self.assertEqual(tracker.report()["status"], "passed")
+
+    def test_live_validation_state_passes_collision_flags(self):
+        def array(value):
+            return SimpleNamespace(numpy=lambda: np.asarray(value))
+
+        model = SimpleNamespace(
+            particle_count=0,
+            body_count=1,
+            shape_body=array([0, 0]),
+            shape_transform=array(
+                [
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+            shape_collision_aabb_lower=array([[-0.05, -0.05, -0.02], [-0.06, -0.05, -0.06]]),
+            shape_collision_aabb_upper=array([[0.05, 0.05, 0.02], [0.06, 0.05, 0.06]]),
+            shape_flags=array([0b10, 0b01]),
+        )
+        state = SimpleNamespace(
+            particle_q=None,
+            particle_qd=None,
+            body_q=array([[0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 1.0]]),
+            body_qd=array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]]),
+        )
+
+        points, velocities = _live_validation_state(model, state)
+
+        self.assertAlmostEqual(float(points[:, 2].min()), 0.0)
+        self.assertEqual(points.shape, (8, 3))
+        self.assertEqual(velocities.shape, (1, 3))
 
     def test_articulated_clearance_moves_only_free_roots(self):
         joint_q = np.array([0.0, 0.0, -0.1, 0.0, 0.0, 0.0, 1.0, 0.015, -0.02])
