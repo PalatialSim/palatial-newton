@@ -121,6 +121,8 @@ def _live_validation_state(model, state):
         model.shape_transform.numpy(),
         model.shape_collision_aabb_lower.numpy(),
         model.shape_collision_aabb_upper.numpy(),
+        shape_flags=model.shape_flags.numpy(),
+        collide_shapes_flag=int(newton.ShapeFlags.COLLIDE_SHAPES),
     )
     if points.shape[0] == 0:
         points = body_q[:, :3]

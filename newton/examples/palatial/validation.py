@@ -35,11 +35,15 @@ def compute_world_shape_points(
     shape_transform: np.ndarray,
     shape_aabb_lower: np.ndarray,
     shape_aabb_upper: np.ndarray,
+    *,
+    shape_flags: np.ndarray | None = None,
+    collide_shapes_flag: int | None = None,
 ) -> np.ndarray:
     """Return world-space AABB corners for body-bound collision shapes.
 
-    Static shapes are excluded so a support plane cannot hide penetration by
-    becoming the minimum bound itself.
+    Static and visual-only shapes are excluded so neither a support plane nor
+    a render bound can decide collision penetration.  ``shape_flags`` remains
+    optional for callers that provide collision-only arrays themselves.
     """
     body_q = np.asarray(body_q, dtype=np.float64)
     shape_body = np.asarray(shape_body, dtype=np.int64).reshape(-1)
@@ -48,10 +52,21 @@ def compute_world_shape_points(
     shape_aabb_upper = np.asarray(shape_aabb_upper, dtype=np.float64)
     if not (shape_body.shape[0] == shape_transform.shape[0] == shape_aabb_lower.shape[0] == shape_aabb_upper.shape[0]):
         raise ValueError("shape arrays must have matching leading dimensions")
+    if shape_flags is None:
+        if collide_shapes_flag is not None:
+            raise ValueError("collide_shapes_flag requires shape_flags")
+        collision_enabled = np.ones(shape_body.shape[0], dtype=bool)
+    else:
+        flags = np.asarray(shape_flags, dtype=np.int64).reshape(-1)
+        if flags.shape[0] != shape_body.shape[0]:
+            raise ValueError("shape_flags must contain one value per shape")
+        if collide_shapes_flag is None:
+            raise ValueError("shape_flags requires collide_shapes_flag")
+        collision_enabled = (flags & int(collide_shapes_flag)) != 0
 
     world_points: list[np.ndarray] = []
     for index, body_index in enumerate(shape_body):
-        if body_index < 0:
+        if body_index < 0 or not collision_enabled[index]:
             continue
         if body_index >= body_q.shape[0]:
             raise ValueError("shape body index is outside body_q")
