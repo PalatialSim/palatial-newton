@@ -217,6 +217,8 @@ class ViewerUSD(ViewerBase):
         color: tuple[float, float, float] | None = None,
         roughness: float | None = None,
         metallic: float | None = None,
+        opacity: float | None = None,
+        ior: float | None = None,
     ):
         """
         Create a USD mesh prototype from vertex and index data.
@@ -236,6 +238,8 @@ class ViewerUSD(ViewerBase):
                 smooth, ``1`` is fully rough.
             metallic: Metallicity in ``[0, 1]``. ``0`` is dielectric, ``1``
                 is metal.
+            opacity: Surface opacity in ``[0, 1]``.
+            ior: Index of refraction for dielectric surfaces.
         """
 
         # Convert warp arrays to numpy

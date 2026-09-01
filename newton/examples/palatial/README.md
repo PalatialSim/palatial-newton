@@ -141,6 +141,44 @@ The output set is:
 `--ovrtx-script render_scene.py` exposes the same stage composition and
 per-frame scripting hooks as the shared Newton OVRTX viewer.
 
+OVRTX also preserves mesh `opacity` and index of refraction (`ior`) alongside
+base color, texture, roughness, and metallic values. These are authored as
+portable `UsdPreviewSurface` inputs in the retained recording.
+
+### Red/cyan transparent glasses
+
+The supplied glasses asset has texture image files beside it, but its USD does
+not connect those files to either material. Both lenses also arrive as one
+combined mesh. Create a corrected, portable asset by splitting the two
+connected lens components and binding red/cyan transparent materials:
+
+```bash
+uv run python -m newton.examples.palatial.author_anaglyph_glasses \
+  /workspace/glasses/glasses.usd \
+  /workspace/glasses/glasses_anaglyph.usd \
+  --opacity 0.38 --roughness 0.08 --ior 1.49
+```
+
+The author preserves collision and rigid-body schemas, makes the frame an
+opaque `UsdPreviewSurface`, removes the unresolved `OmniSurface.mdl`
+dependency, hides the old combined lens visual, and binds red to the negative-X
+lens and cyan to the positive-X lens. Render the result head-on with the same
+Palatial playback command:
+
+```bash
+uv run python -m newton.examples.palatial.example_palatial_load \
+  /workspace/glasses/glasses_anaglyph.usd \
+  --device cuda:0 --viewer ovrtx \
+  --camera-position 0 0.42 0.08 \
+  --camera-target 0 0.02 0.018 \
+  --steps 600 --mp4-fps 60 \
+  --record-mp4 /workspace/results/glasses_anaglyph.mp4 \
+  --validation-report /workspace/results/glasses_anaglyph_validation.json
+```
+
+`--camera-position` and `--camera-target` are a paired generic look-at override
+for both ViewerGL and ViewerOVRTX; omitting them keeps the automatic camera.
+
 `--drop-height` is support-plane clearance, not a raw Z translation. For
 example, `--drop-height 0.2` places the asset's live collision lower bound
 0.2 m above the ground (or table top) while preserving relative transforms in

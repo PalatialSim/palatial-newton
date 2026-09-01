@@ -136,7 +136,7 @@ class ViewerOVRTX(ViewerUSD):
         self._pending_matrices: dict[str, np.ndarray] = {}
         self._mesh_materials: dict[
             str,
-            tuple[tuple[float, float, float], float, float, np.ndarray | str | None, bool],
+            tuple[tuple[float, float, float], float, float, float, float, np.ndarray | str | None, bool],
         ] = {}
         self._latest_render_vars: dict[str, np.ndarray] = {}
         self._render_count = 0
@@ -214,6 +214,8 @@ class ViewerOVRTX(ViewerUSD):
         color: tuple[float, float, float] | None = None,
         roughness: float | None = None,
         metallic: float | None = None,
+        opacity: float | None = None,
+        ior: float | None = None,
     ):
         result = super().log_mesh(
             name,
@@ -227,6 +229,8 @@ class ViewerOVRTX(ViewerUSD):
             color,
             roughness,
             metallic,
+            opacity,
+            ior,
         )
         mesh = self._meshes.get(name)
         has_uvs = False
@@ -254,6 +258,8 @@ class ViewerOVRTX(ViewerUSD):
             (0.8, 0.8, 0.8) if color is None else tuple(float(value) for value in color),
             self.config.default_material_roughness if roughness is None else float(roughness),
             0.0 if metallic is None else float(metallic),
+            1.0 if opacity is None else float(opacity),
+            1.5 if ior is None else float(ior),
             texture,
             has_uvs,
         )
@@ -307,7 +313,7 @@ class ViewerOVRTX(ViewerUSD):
             mesh = self._meshes.get(name)
             if mesh is None:
                 continue
-            color, roughness, metallic, texture, has_uvs = values
+            color, roughness, metallic, opacity, ior, texture, has_uvs = values
             material_path = material_scope.GetPath().AppendChild(f"Mesh_{index}")
             material = UsdShade.Material.Define(self.stage, material_path)
             shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("PreviewSurface"))
@@ -342,6 +348,8 @@ class ViewerOVRTX(ViewerUSD):
                 )
             shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(roughness)
             shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(metallic)
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(opacity)
+            shader.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(ior)
             material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
             UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
 

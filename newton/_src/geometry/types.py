@@ -148,6 +148,8 @@ class Mesh:
         roughness: float | None = None,
         metallic: float | None = None,
         texture: str | np.ndarray | None = None,
+        opacity: float | None = None,
+        ior: float | None = None,
         *,
         sdf: "SDF | None" = None,
     ):
@@ -170,6 +172,9 @@ class Mesh:
             roughness: Optional mesh roughness in [0, 1].
             metallic: Optional mesh metallic in [0, 1].
             texture: Optional texture path/URL or image data (H, W, C).
+            opacity: Optional mesh opacity in [0, 1]. Values below one allow
+                the renderer to show objects behind the surface.
+            ior: Optional index of refraction for dielectric surfaces.
             sdf: Optional prebuilt SDF object owned by this mesh.
         """
         from .inertia import compute_inertia_mesh  # noqa: PLC0415
@@ -184,6 +189,8 @@ class Mesh:
         self._texture = _normalize_texture_input(texture)
         self._roughness = roughness
         self._metallic = metallic
+        self._opacity = opacity
+        self._ior = ior
         self.is_solid = is_solid
         self.has_inertia = compute_inertia
         self.mesh = None
@@ -707,6 +714,8 @@ class Mesh:
             else (self._texture.copy() if self._texture is not None else None),
             roughness=self._roughness,
             metallic=self._metallic,
+            opacity=self._opacity,
+            ior=self._ior,
         )
         if not recompute_inertia:
             m.inertia = self.inertia
@@ -968,6 +977,24 @@ class Mesh:
         self._metallic = value
         self._cached_hash = None
 
+    @property
+    def opacity(self) -> float | None:
+        return self._opacity
+
+    @opacity.setter
+    def opacity(self, value: float | None):
+        self._opacity = value
+        self._cached_hash = None
+
+    @property
+    def ior(self) -> float | None:
+        return self._ior
+
+    @ior.setter
+    def ior(self, value: float | None):
+        self._ior = value
+        self._cached_hash = None
+
     # construct simulation ready buffers from points
     def finalize(self, device: Devicelike = None, requires_grad: bool = False) -> wp.uint64:
         """
@@ -1037,6 +1064,8 @@ class Mesh:
                     self._compute_texture_hash(),
                     self._roughness,
                     self._metallic,
+                    self._opacity,
+                    self._ior,
                 )
             )
         return self._cached_hash

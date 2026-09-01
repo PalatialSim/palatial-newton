@@ -860,7 +860,9 @@ session from the authored USD stage, sends changing instance transforms to
 OVStage through one batched direct write per rendered frame, and renders during
 `end_frame()` rather than post-processing during `close()`. Camera, lights,
 `UsdPreviewSurface` materials, `UsdRender` product, and requested sensor AOVs
-are authored into the retained USD stage.
+are authored into the retained USD stage. Newton mesh materials preserve base
+color, texture, roughness, metallic, opacity, and index of refraction, so
+transparent dielectric surfaces remain part of the same live viewer path.
 
 There is no separate delivery-mode setting. `--ovrtx-output-path` infers the
 delivery from the target: an image path retains the latest frame, a video path
@@ -893,6 +895,24 @@ That command produces the video, an editable animated USD stage at
 independent semantic validation report. The simulation rate remains the rate
 authored in the input USD; OVRTX derives `render_every` from that rate and
 `--mp4-fps`, so encoded video duration matches simulated time.
+
+For anaglyph glasses whose two lenses arrive as one untextured mesh, first
+split the connected lens components and author portable red/cyan transparent
+materials, then use an explicit front camera:
+
+```bash
+uv run python -m newton.examples.palatial.author_anaglyph_glasses \
+    /workspace/glasses/glasses.usd \
+    /workspace/glasses/glasses_anaglyph.usd
+
+uv run python -m newton.examples.palatial.example_palatial_load \
+    /workspace/glasses/glasses_anaglyph.usd \
+    --device cuda:0 --viewer ovrtx \
+    --camera-position 0 0.42 0.08 --camera-target 0 0.02 0.018 \
+    --steps 600 --mp4-fps 60 \
+    --record-mp4 /workspace/results/glasses_anaglyph.mp4 \
+    --validation-report /workspace/results/glasses_anaglyph_validation.json
+```
 
 For a RunPod pod, use an RTX GPU with graphics-capable NVIDIA drivers, expose
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video`, install FFmpeg and

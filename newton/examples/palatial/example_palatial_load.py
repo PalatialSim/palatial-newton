@@ -1032,6 +1032,10 @@ def create_parser() -> argparse.ArgumentParser:
                    help="Skip the front-view auto-framer so the viewer keeps its default "
                         "camera (useful when rotating the asset and you want the view "
                         "to stay constant).")
+    p.add_argument("--camera-position", type=float, nargs=3, metavar=("X", "Y", "Z"), default=None,
+                   help="Explicit world-space camera position; requires --camera-target")
+    p.add_argument("--camera-target", type=float, nargs=3, metavar=("X", "Y", "Z"), default=None,
+                   help="Explicit world-space look-at target; requires --camera-position")
     p.add_argument("--ovrtx-width", type=int, default=1280)
     p.add_argument("--ovrtx-height", type=int, default=720)
     p.add_argument("--ovrtx-render-mode",
@@ -1090,6 +1094,8 @@ def _create_viewer(args, fps: int):
 def main(argv=None) -> int:
     p = create_parser()
     args = p.parse_args(argv)
+    if (args.camera_position is None) != (args.camera_target is None):
+        p.error("--camera-position and --camera-target must be provided together")
 
     # ----  preset for cloth-on-table drops --------------------
     # Mirrors example_cloth_gown_franka in meter scalee.
@@ -1293,6 +1299,7 @@ def main(argv=None) -> int:
         and ex.bundle.body_type == "cloth"
         and (args.record_mp4 or args.gui)
         and not args.no_auto_camera
+        and args.camera_position is None
         and hasattr(ex.viewer, "set_camera")
     ):
         # With pitch=0 (horizontal look) the screen's vertical axis is world Z,
@@ -1327,7 +1334,22 @@ def main(argv=None) -> int:
         print(f"  cable-axis={args.cable_axis!r}: hint ignored — using authored "
               f"BasisCurves centerline from the USDA.")
 
-    if args.add_table and ex.bundle.body_type == "cloth":
+    if args.camera_position is not None and hasattr(ex.viewer, "set_camera"):
+        camera_position = np.asarray(args.camera_position, dtype=float)
+        camera_target = np.asarray(args.camera_target, dtype=float)
+        direction = camera_target - camera_position
+        planar_distance = math.hypot(float(direction[0]), float(direction[1]))
+        if planar_distance == 0.0 and float(direction[2]) == 0.0:
+            p.error("--camera-position and --camera-target must differ")
+        pitch = math.degrees(math.atan2(float(direction[2]), planar_distance))
+        yaw = math.degrees(math.atan2(float(direction[1]), float(direction[0])))
+        ex.viewer.set_camera(wp.vec3(*camera_position.tolist()), pitch, yaw)
+        print(
+            "  explicit camera: "
+            f"pos=({camera_position[0]:.3f},{camera_position[1]:.3f},{camera_position[2]:.3f}) "
+            f"target=({camera_target[0]:.3f},{camera_target[1]:.3f},{camera_target[2]:.3f})"
+        )
+    elif args.add_table and ex.bundle.body_type == "cloth":
         # Already set above; skip the front/top auto-framers.
         pass
     elif args.top_view and not args.front_view and hasattr(ex.viewer, "set_camera"):

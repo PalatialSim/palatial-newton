@@ -57,6 +57,24 @@ class TestPalatialOVRTXViewer(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires --record-mp4"):
             _create_viewer(args, fps=60)
 
+    def test_parser_accepts_explicit_camera_look_at(self):
+        args = create_parser().parse_args(
+            [
+                "scene.usd",
+                "--camera-position",
+                "0",
+                "-0.4",
+                "0.08",
+                "--camera-target",
+                "0",
+                "0.04",
+                "0.02",
+            ]
+        )
+
+        self.assertEqual(args.camera_position, [0.0, -0.4, 0.08])
+        self.assertEqual(args.camera_target, [0.0, 0.04, 0.02])
+
     @unittest.skipIf(UsdGeom is None, "USD Python bindings are not installed")
     def test_textured_mesh_authors_uv_material_and_portable_texture(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -81,6 +99,32 @@ class TestPalatialOVRTXViewer(unittest.TestCase):
             asset = shader.GetInput("file").Get()
             self.assertEqual(asset.path, "recording_textures/mesh_000_albedo.ppm")
             self.assertTrue((root / asset.path).is_file())
+            viewer.close()
+
+    @unittest.skipIf(UsdShade is None, "USD Python bindings are not installed")
+    def test_transparent_mesh_authors_preview_surface_opacity_and_ior(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "recording.usd"
+            viewer = ViewerOVRTX(str(output), num_frames=1)
+            points = wp.array([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], dtype=wp.vec3)
+            indices = wp.array([0, 1, 2], dtype=wp.int32)
+
+            viewer.log_mesh(
+                "/geometry/lens",
+                points,
+                indices,
+                color=(1.0, 0.0, 0.0),
+                roughness=0.08,
+                opacity=0.38,
+                ior=1.49,
+            )
+            viewer._author_render_stage()
+
+            shader = UsdShade.Shader(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/PreviewSurface"))
+            self.assertAlmostEqual(shader.GetInput("opacity").Get(), 0.38, places=6)
+            self.assertAlmostEqual(shader.GetInput("ior").Get(), 1.49, places=6)
+            display_color = UsdShade.Shader(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/DisplayColor"))
+            np.testing.assert_allclose(display_color.GetInput("fallback").Get(), (1.0, 0.0, 0.0), atol=1e-6)
             viewer.close()
 
 

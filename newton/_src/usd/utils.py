@@ -1495,7 +1495,14 @@ def _get_input_value(shader: UsdShade.Shader | None, names: tuple[str, ...]) -> 
 
 def _empty_material_properties() -> dict[str, Any]:
     """Return an empty material properties dictionary."""
-    return {"color": None, "metallic": None, "roughness": None, "texture": None}
+    return {
+        "color": None,
+        "metallic": None,
+        "roughness": None,
+        "opacity": None,
+        "ior": None,
+        "texture": None,
+    }
 
 
 def _coerce_color(value: Any) -> tuple[float, float, float] | None:
@@ -1526,7 +1533,7 @@ def _extract_preview_surface_properties(shader: UsdShade.Shader | None, prim: Us
         prim: The prim providing stage context for asset resolution.
 
     Returns:
-        Dictionary with ``color``, ``metallic``, ``roughness``, and ``texture``.
+        Dictionary with common preview-surface material properties.
     """
     properties = _empty_material_properties()
     if shader is None:
@@ -1598,6 +1605,14 @@ def _extract_preview_surface_properties(shader: UsdShade.Shader | None, prim: Us
         else:
             properties["roughness"] = _coerce_float(roughness_input.Get())
 
+    opacity_input = shader.GetInput("opacity")
+    if opacity_input:
+        properties["opacity"] = _coerce_float(opacity_input.Get())
+
+    ior_input = shader.GetInput("ior")
+    if ior_input:
+        properties["ior"] = _coerce_float(ior_input.Get())
+
     return properties
 
 
@@ -1612,7 +1627,7 @@ def _extract_shader_properties(shader: UsdShade.Shader | None, prim: Usd.Prim) -
         prim: The prim providing stage context for asset resolution.
 
     Returns:
-        Dictionary with ``color``, ``metallic``, ``roughness``, and ``texture``.
+        Dictionary with common surface material properties.
     """
     properties = _extract_preview_surface_properties(shader, prim)
     if shader is None:
@@ -1642,6 +1657,12 @@ def _extract_shader_properties(shader: UsdShade.Shader | None, prim: Usd.Prim) -
     if properties["roughness"] is None:
         roughness_value = _get_input_value(shader, ("reflection_roughness_constant", "roughness_constant", "roughness"))
         properties["roughness"] = _coerce_float(roughness_value)
+    if properties["opacity"] is None:
+        opacity_value = _get_input_value(shader, ("opacity", "opacity_constant"))
+        properties["opacity"] = _coerce_float(opacity_value)
+    if properties["ior"] is None:
+        ior_value = _get_input_value(shader, ("ior", "specular_ior"))
+        properties["ior"] = _coerce_float(ior_value)
 
     if properties["texture"] is None:
         for inp in shader.GetInputs():
@@ -1717,6 +1738,17 @@ def _extract_material_input_properties(material: UsdShade.Material | None, prim:
             if roughness is not None:
                 properties["roughness"] = roughness
 
+        if properties["opacity"] is None and name_lower in ("opacity", "opacity_constant"):
+            opacity = _coerce_float(value)
+            if opacity is not None:
+                properties["opacity"] = opacity
+                continue
+
+        if properties["ior"] is None and name_lower in ("ior", "specular_ior"):
+            ior = _coerce_float(value)
+            if ior is not None:
+                properties["ior"] = ior
+
     return properties
 
 
@@ -1785,7 +1817,7 @@ def _resolve_prim_material_properties(target_prim: Usd.Prim) -> dict[str, Any] |
     # it has fallback logic for common shader input names.
     properties = _extract_shader_properties(source_shader, target_prim)
     material_props = _extract_material_input_properties(material, target_prim)
-    for key in ("texture", "color", "metallic", "roughness"):
+    for key in ("texture", "color", "metallic", "roughness", "opacity", "ior"):
         if properties.get(key) is None and material_props.get(key) is not None:
             properties[key] = material_props[key]
     if properties["color"] is None and properties["texture"] is None:
@@ -1803,7 +1835,7 @@ def resolve_material_properties_for_prim(prim: Usd.Prim) -> dict[str, Any]:
         prim: The prim whose bound material should be inspected.
 
     Returns:
-        Dictionary with ``color``, ``metallic``, ``roughness``, and ``texture``.
+        Dictionary with common surface material properties.
     """
     if not prim or not prim.IsValid():
         return _empty_material_properties()

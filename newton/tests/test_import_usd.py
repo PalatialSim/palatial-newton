@@ -6966,7 +6966,15 @@ def Xform "BodyWithoutVisuals" (
         self.assertTrue(flags_no_load & ShapeFlags.VISIBLE)
 
     @staticmethod
-    def _create_stage_with_pbr_collision_mesh(color, roughness, metallic, *, add_visual_sphere=False):
+    def _create_stage_with_pbr_collision_mesh(
+        color,
+        roughness,
+        metallic,
+        *,
+        opacity=1.0,
+        ior=1.5,
+        add_visual_sphere=False,
+    ):
         """Create a stage with a rigid body containing a collision mesh with PBR material."""
         from pxr import Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
 
@@ -7002,6 +7010,8 @@ def Xform "BodyWithoutVisuals" (
         shader.CreateInput("baseColor", Sdf.ValueTypeNames.Color3f).Set(color)
         shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(roughness)
         shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(metallic)
+        shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(opacity)
+        shader.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(ior)
         material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
         UsdShade.MaterialBindingAPI.Apply(collision_mesh_prim).Bind(material)
 
@@ -7025,6 +7035,25 @@ def Xform "BodyWithoutVisuals" (
         np.testing.assert_allclose(np.array(mesh.color), np.array([0.2, 0.4, 0.6]), atol=1e-6, rtol=1e-6)
         self.assertAlmostEqual(mesh.roughness, 0.35, places=6)
         self.assertAlmostEqual(mesh.metallic, 0.75, places=6)
+        self.assertAlmostEqual(mesh.opacity, 1.0, places=6)
+        self.assertAlmostEqual(mesh.ior, 1.5, places=6)
+
+    @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
+    def test_visible_collision_mesh_inherits_transparent_material_properties(self):
+        stage = self._create_stage_with_pbr_collision_mesh(
+            color=(1.0, 0.0, 0.0),
+            roughness=0.08,
+            metallic=0.0,
+            opacity=0.38,
+            ior=1.49,
+        )
+
+        builder = newton.ModelBuilder()
+        result = builder.add_usd(stage, hide_collision_shapes=True)
+        mesh = builder.shape_source[result["path_shape_map"]["/Body/CollisionMesh"]]
+
+        self.assertAlmostEqual(mesh.opacity, 0.38, places=6)
+        self.assertAlmostEqual(mesh.ior, 1.49, places=6)
 
     @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
     def test_visible_collision_mesh_texture_does_not_change_body_mass(self):
