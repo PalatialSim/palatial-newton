@@ -281,8 +281,11 @@ class ViewerUSD(ViewerBase):
             # TODO: Implement UV support for USD meshes
             pass
 
-        # how to hide the prototype mesh but not the instances in USD?
-        mesh_prim.GetVisibilityAttr().Set("inherited" if not hidden else "invisible", self._frame_index)
+        # Prototype visibility is structural state and must exist at USD's
+        # default time for consumers that populate before timeline evaluation.
+        # Later calls may animate visibility as a time sample.
+        visibility_time = Usd.TimeCode.Default() if is_new_mesh else self._frame_index
+        mesh_prim.GetVisibilityAttr().Set("inherited" if not hidden else "invisible", visibility_time)
 
     # log a set of instances as individual mesh prims, slower but makes it easier
     # to do post-editing of instance materials etc. default for Newton shapes

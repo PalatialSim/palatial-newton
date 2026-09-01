@@ -128,13 +128,15 @@ class TestViewerUSD(unittest.TestCase):
         indices = wp.array([0, 1, 2], dtype=wp.int32)
 
         viewer.begin_frame(0.0)
-        viewer.log_mesh("/static_triangle", points, indices)
+        viewer.log_mesh("/static_triangle", points, indices, hidden=True)
         mesh = UsdGeom.Mesh.Get(viewer.stage, "/root/static_triangle")
 
         self.assertEqual(len(mesh.GetPointsAttr().Get()), 3)
         self.assertEqual(mesh.GetPointsAttr().GetTimeSamples(), [])
         self.assertEqual(list(mesh.GetFaceVertexCountsAttr().Get()), [3])
         self.assertEqual(list(mesh.GetFaceVertexIndicesAttr().Get()), [0, 1, 2])
+        self.assertEqual(mesh.GetVisibilityAttr().Get(), "invisible")
+        self.assertEqual(mesh.GetVisibilityAttr().GetTimeSamples(), [])
 
 
 if __name__ == "__main__":

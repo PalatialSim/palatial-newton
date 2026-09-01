@@ -151,6 +151,22 @@ class ViewerOVRTX(ViewerUSD):
         if model is None or self.stage is None:
             return
 
+        # ViewerBase builds instance batches in set_model(), while ViewerUSD
+        # normally creates their USD prims lazily on the first log_state().
+        # OVRTX population happens here, so author those stable paths before
+        # opening OVStage; the first live frame replaces these seed transforms.
+        for shapes in self._shape_instances.values():
+            visible = self._should_show_shape(shapes.flags, shapes.static)
+            self.log_instances(
+                shapes.name,
+                shapes.mesh,
+                shapes.xforms,
+                shapes.scales,
+                shapes.colors,
+                shapes.materials,
+                hidden=not visible,
+            )
+
         self._author_render_stage()
         self.stage.GetRootLayer().Save()
         self._session = OVRTXStage(
@@ -351,6 +367,13 @@ class ViewerOVRTX(ViewerUSD):
             )
         self._camera_position = tuple(position)
         self._camera_target = tuple(position + front * 5.0)
+        if self.stage is not None:
+            camera = UsdGeom.Camera.Get(self.stage, "/NewtonCamera")
+            if camera:
+                xformable = UsdGeom.Xformable(camera)
+                ops = xformable.GetOrderedXformOps()
+                if ops:
+                    ops[0].Set(Gf.Matrix4d(*self._camera_matrix()[0].ravel()))
         self._write_camera()
 
     def _write_camera(self) -> None:
@@ -418,10 +441,11 @@ class ViewerOVRTX(ViewerUSD):
             self._write_video_frame(target, pixels)
         elif not suffix:
             target.mkdir(parents=True, exist_ok=True)
-            _save_image(target / f"frame_{self._frame_index:06d}.png", pixels)
+            sequence_index = self._render_count - 1
+            _save_image(target / f"frame_{sequence_index:06d}.png", pixels)
             for name, values in self._latest_render_vars.items():
                 if name != "rgb":
-                    np.save(target / f"{name}_{self._frame_index:06d}.npy", values)
+                    np.save(target / f"{name}_{sequence_index:06d}.npy", values)
         else:
             supported = sorted(IMAGE_SUFFIXES | VIDEO_SUFFIXES)
             raise ValueError(f"Unsupported OVRTX target suffix {suffix!r}; use one of {supported} or a directory")
