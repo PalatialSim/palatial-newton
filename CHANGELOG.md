@@ -4,6 +4,10 @@
 
 <!-- towncrier release notes start -->
 
+### Fixed
+
+- Load Palatial fixed multipart rigid USD assets as compound bodies and disable their intra-asset self-collision, preventing contact-buffer exhaustion while preserving self-collision for movable articulations.
+
 ## [1.5.1] - 2026-08-27
 
 ### Fixed
