@@ -497,7 +497,7 @@ def create_parser():
         "--ovrtx-output-path",
         type=str,
         default="output.png",
-        help="Path to the PNG rendered by the OVRTX viewer.",
+        help="OVRTX target: image, video, or suffix-free frame directory.",
     )
     parser.add_argument(
         "--ovrtx-width",
@@ -537,7 +537,43 @@ def create_parser():
         "--ovrtx-warmup-frames",
         type=int,
         default=40,
-        help="Renderer steps before downloading the OVRTX PNG.",
+        help="Renderer steps before capturing the first OVRTX frame.",
+    )
+    parser.add_argument(
+        "--ovrtx-samples-per-frame",
+        type=int,
+        default=1,
+        help="Renderer steps for each OVRTX frame after warmup.",
+    )
+    parser.add_argument(
+        "--ovrtx-frame-step",
+        type=int,
+        default=1,
+        help="USD frame stride used for OVRTX video or frame-directory targets.",
+    )
+    parser.add_argument(
+        "--ovrtx-script",
+        type=str,
+        default=None,
+        help="Python script with optional OVRTX stage and frame lifecycle hooks.",
+    )
+    parser.add_argument(
+        "--ovrtx-video-codec",
+        type=str,
+        default="libx264",
+        help="FFmpeg codec used when the OVRTX target is a video.",
+    )
+    parser.add_argument(
+        "--ovrtx-video-crf",
+        type=int,
+        default=18,
+        help="FFmpeg CRF quality used when the OVRTX target is a video.",
+    )
+    parser.add_argument(
+        "--ovrtx-video-preset",
+        type=str,
+        default="medium",
+        help="FFmpeg encoder preset used when the OVRTX target is a video.",
     )
     parser.add_argument("--num-frames", type=int, default=100, help="Total number of frames.")
     parser.add_argument(
@@ -793,6 +829,12 @@ def init(parser=None):
             camera_target=tuple(args.ovrtx_camera_target),
             render_mode=args.ovrtx_render_mode,
             warmup_frames=args.ovrtx_warmup_frames,
+            samples_per_frame=args.ovrtx_samples_per_frame,
+            frame_step=args.ovrtx_frame_step,
+            script_path=args.ovrtx_script,
+            video_codec=args.ovrtx_video_codec,
+            video_crf=args.ovrtx_video_crf,
+            video_preset=args.ovrtx_video_preset,
             num_frames=args.num_frames,
         )
     elif args.viewer == "rerun":

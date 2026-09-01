@@ -4,6 +4,7 @@
 FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     XDG_CACHE_HOME=/workspace/.cache
@@ -11,9 +12,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
+        ffmpeg \
         git \
+        libegl1 \
         libgl1 \
         libglib2.0-0 \
+        libopengl0 \
         libvulkan1 \
         libx11-6 \
         libxext6 \

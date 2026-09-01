@@ -26,6 +26,12 @@ class TestOVRTXCli(unittest.TestCase):
         self.assertEqual(args.ovrtx_camera_target, (0.0, 0.0, 0.5))
         self.assertEqual(args.ovrtx_render_mode, "RealTimePathTracing")
         self.assertEqual(args.ovrtx_warmup_frames, 40)
+        self.assertEqual(args.ovrtx_samples_per_frame, 1)
+        self.assertEqual(args.ovrtx_frame_step, 1)
+        self.assertIsNone(args.ovrtx_script)
+        self.assertEqual(args.ovrtx_video_codec, "libx264")
+        self.assertEqual(args.ovrtx_video_crf, 18)
+        self.assertEqual(args.ovrtx_video_preset, "medium")
 
     def test_init_constructs_ovrtx_viewer_with_arguments(self):
         parser = create_parser()
@@ -53,6 +59,18 @@ class TestOVRTXCli(unittest.TestCase):
             "Minimal",
             "--ovrtx-warmup-frames",
             "4",
+            "--ovrtx-samples-per-frame",
+            "2",
+            "--ovrtx-frame-step",
+            "3",
+            "--ovrtx-script",
+            "render_scene.py",
+            "--ovrtx-video-codec",
+            "h264_nvenc",
+            "--ovrtx-video-crf",
+            "20",
+            "--ovrtx-video-preset",
+            "fast",
         ]
         with patch.object(sys, "argv", argv), patch("newton.viewer.ViewerOVRTX") as viewer_class:
             viewer, args = init(parser)
@@ -68,5 +86,11 @@ class TestOVRTXCli(unittest.TestCase):
             camera_target=(0.0, 1.0, 0.5),
             render_mode="Minimal",
             warmup_frames=4,
+            samples_per_frame=2,
+            frame_step=3,
+            script_path="render_scene.py",
+            video_codec="h264_nvenc",
+            video_crf=20,
+            video_preset="fast",
             num_frames=100,
         )
