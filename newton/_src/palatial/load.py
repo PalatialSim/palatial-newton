@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import newton
 
-from pxr import Usd, UsdGeom
+from pxr import Usd, UsdGeom, UsdPhysics
 
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -162,6 +162,17 @@ def _detect_body_type(stage: Usd.Stage) -> str:
     return "rod" if rod_found else "rigid"
 
 
+def _has_movable_rigid_joint(usd_path: str) -> bool:
+    """Whether the rigid asset needs collisions between articulated bodies."""
+    stage = Usd.Stage.Open(usd_path)
+    if stage is None:
+        return False
+    return any(
+        prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint)
+        for prim in stage.Traverse()
+    )
+
+
 def _build_rigid(usd_path: str, *, device: str | None = None,
                  fix_base: bool = False,
                  solver_name: str | None = None) -> Any:
@@ -189,7 +200,12 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
             builder.add_joint_free = _free_to_fixed
             builder.add_free_joints_to_floating_bodies = lambda *a, **kw: None
 
-        builder.add_usd(usd_path, skip_mesh_approximation=True)
+        builder.add_usd(
+            usd_path,
+            skip_mesh_approximation=True,
+            collapse_fixed_joints=True,
+            enable_self_collisions=_has_movable_rigid_joint(usd_path),
+        )
 
         _untint_textured_shapes(builder)
 
