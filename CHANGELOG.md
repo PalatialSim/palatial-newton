@@ -90,6 +90,7 @@
 ### Fixed
 
 - Fix `remesh_convex_hull` raising `QhullError` on degenerate (coincident, collinear, or coplanar) point clouds; it now returns a zero-volume fallback mesh with a `UserWarning`, raises `ValueError` on empty input, and retries Qhull with `QJ` joggle as a last resort on the 3D path
+- Collapse fixed Palatial rigid parts into compound bodies while preserving movable articulations, preventing redundant self-contacts from overwhelming validation.
 - Fix Palatial rigid drop validation measuring visual-only render bounds as collision penetration instead of collision-enabled shape bounds.
 - Interpret Palatial playback drop height as support-plane clearance, relocate
   the generated support plane for fixed-root articulations, account for cloth

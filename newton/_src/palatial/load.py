@@ -41,7 +41,7 @@ from typing import Any
 
 import numpy as np
 import warp as wp
-from pxr import Usd  # noqa: TID253
+from pxr import Usd, UsdPhysics  # noqa: TID253
 
 # `import newton` registers the newton_usd_schemas plugin (NewtonSceneAPI,
 # NewtonXpbdSceneAPI, ...) AND the bundled schema-extension plugin
@@ -245,6 +245,17 @@ def _detect_body_type(stage: Usd.Stage) -> str:
     return "rod" if rod_found else "rigid"
 
 
+def _has_movable_rigid_joint(usd_path: str) -> bool:
+    """Whether the rigid asset needs collisions between articulated bodies."""
+    stage = Usd.Stage.Open(usd_path)
+    if stage is None:
+        return False
+    return any(
+        prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint)
+        for prim in stage.Traverse()
+    )
+
+
 def _build_rigid(
     usd_path: str, *, device: str | None = None, fix_base: bool = False, solver_name: str | None = None
 ) -> Any:
@@ -290,7 +301,15 @@ def _build_rigid(
             builder.add_free_joints_to_floating_bodies = lambda *a, **kw: None
 
         # SimReady ships pre-decomposed convex pieces; tell parser to trust them.
-        builder.add_usd(usd_path, skip_mesh_approximation=True)
+        # Fixed part boundaries do not represent independently moving bodies.
+        # Collapsing them avoids redundant internal contacts while preserving
+        # authored movable articulations.
+        builder.add_usd(
+            usd_path,
+            skip_mesh_approximation=True,
+            collapse_fixed_joints=True,
+            enable_self_collisions=_has_movable_rigid_joint(usd_path),
+        )
 
         # Workaround for textured USD imports being tinted by palette colors.
         _untint_textured_shapes(builder)
