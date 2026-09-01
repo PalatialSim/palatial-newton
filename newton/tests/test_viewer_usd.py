@@ -119,6 +119,23 @@ class TestViewerUSD(unittest.TestCase):
         self.assertEqual(interpolation, UsdGeom.Tokens.constant)
         np.testing.assert_allclose(widths, np.array([0.2], dtype=np.float32), atol=1e-6)
 
+    def test_log_mesh_authors_static_topology_at_default_time(self):
+        viewer = self._make_viewer()
+        points = wp.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=wp.vec3,
+        )
+        indices = wp.array([0, 1, 2], dtype=wp.int32)
+
+        viewer.begin_frame(0.0)
+        viewer.log_mesh("/static_triangle", points, indices)
+        mesh = UsdGeom.Mesh.Get(viewer.stage, "/root/static_triangle")
+
+        self.assertEqual(len(mesh.GetPointsAttr().Get()), 3)
+        self.assertEqual(mesh.GetPointsAttr().GetTimeSamples(), [])
+        self.assertEqual(list(mesh.GetFaceVertexCountsAttr().Get()), [3])
+        self.assertEqual(list(mesh.GetFaceVertexIndicesAttr().Get()), [0, 1, 2])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

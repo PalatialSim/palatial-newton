@@ -530,13 +530,13 @@ def create_parser():
     parser.add_argument(
         "--ovrtx-render-mode",
         choices=["RealTimePathTracing", "PathTracing", "Minimal"],
-        default="RealTimePathTracing",
+        default="Minimal",
         help="OVRTX camera render mode.",
     )
     parser.add_argument(
         "--ovrtx-warmup-frames",
         type=int,
-        default=40,
+        default=4,
         help="Renderer steps before capturing the first OVRTX frame.",
     )
     parser.add_argument(
@@ -546,10 +546,19 @@ def create_parser():
         help="Renderer steps for each OVRTX frame after warmup.",
     )
     parser.add_argument(
+        "--ovrtx-render-every",
         "--ovrtx-frame-step",
+        dest="ovrtx_render_every",
         type=int,
         default=1,
-        help="USD frame stride used for OVRTX video or frame-directory targets.",
+        help="Render every N simulation frames (the old --ovrtx-frame-step spelling remains supported).",
+    )
+    parser.add_argument(
+        "--ovrtx-render-vars",
+        nargs="+",
+        choices=sorted(newton.ovrtx.RENDER_VARS),
+        default=("rgb",),
+        help="OVRTX RGB and sensor buffers to read each rendered frame.",
     )
     parser.add_argument(
         "--ovrtx-script",
@@ -820,21 +829,25 @@ def init(parser=None):
     elif args.viewer == "ovrtx":
         if args.output_path is None:
             raise ValueError("--output-path is required when using ovrtx viewer")
-        viewer = newton.viewer.ViewerOVRTX(
-            output_path=args.output_path,
-            render_output_path=args.ovrtx_output_path,
+        config = newton.viewer.OVRTXConfig(
             width=args.ovrtx_width,
             height=args.ovrtx_height,
-            camera_position=tuple(args.ovrtx_camera_position),
-            camera_target=tuple(args.ovrtx_camera_target),
             render_mode=args.ovrtx_render_mode,
+            render_every=args.ovrtx_render_every,
             warmup_frames=args.ovrtx_warmup_frames,
             samples_per_frame=args.ovrtx_samples_per_frame,
-            frame_step=args.ovrtx_frame_step,
+            render_vars=tuple(args.ovrtx_render_vars),
             script_path=args.ovrtx_script,
             video_codec=args.ovrtx_video_codec,
             video_crf=args.ovrtx_video_crf,
             video_preset=args.ovrtx_video_preset,
+        )
+        viewer = newton.viewer.ViewerOVRTX(
+            output_path=args.output_path,
+            render_output_path=args.ovrtx_output_path,
+            config=config,
+            camera_position=tuple(args.ovrtx_camera_position),
+            camera_target=tuple(args.ovrtx_camera_target),
             num_frames=args.num_frames,
         )
     elif args.viewer == "rerun":

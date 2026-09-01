@@ -826,7 +826,7 @@ The examples support the following command-line arguments:
 
 | Argument        | Description                                                                                         | Default                      |
 | --------------- | --------------------------------------------------------------------------------------------------- | ---------------------------- |
-| `--viewer`      | Viewer type: `gl` (OpenGL window), `usd` (USD file output), `ovrtx` (RTX PNG via OVRTX), `rerun` (ReRun), or `null` (no viewer). | `gl`                         |
+| `--viewer`      | Viewer type: `gl` (OpenGL window), `usd` (USD stage), `ovrtx` (live RTX rendering plus USD stage), `rerun` (ReRun), or `null` (no viewer). | `gl`                         |
 | `--device`      | Compute device to use, e.g., `cpu`, `cuda:0`, etc.                                                  | `None` (default Warp device) |
 | `--num-frames`  | Number of frames to simulate (for USD output).                                                      | `100`                        |
 | `--output-path` | Output path for USD files (required if `--viewer usd` is used).                                     | `None`                       |
@@ -842,11 +842,11 @@ python -m newton.examples --list
 # Run with the USD viewer and save to my_output.usd
 python -m newton.examples basic_viewer --viewer usd --output-path my_output.usd
 
-# Render a time-sampled Newton USD recording with OVRTX on an RTX Linux host
+# Render Newton live with OVRTX on an RTX Linux host and retain the USD stage
 uv sync --extra ovrtx
 python -m newton.examples basic_shapes --viewer ovrtx --num-frames 120 \
-    --output-path /workspace/basic_shapes.usd --ovrtx-output-path /workspace/basic_shapes.png \
-    --ovrtx-warmup-frames 40
+    --output-path /workspace/basic_shapes.usd \
+    --ovrtx-output-path /workspace/basic_shapes.mp4
 
 # Run on a selected device
 python -m newton.examples basic_urdf --device cuda:0
@@ -854,6 +854,22 @@ python -m newton.examples basic_urdf --device cuda:0
 # Combine options
 python -m newton.examples basic_viewer --viewer gl --num-frames 500 --device cpu
 ```
+
+`ViewerOVRTX` is a first-class viewer backend: it populates one OVRTX/OVStage
+session from the authored USD stage, sends changing instance transforms to
+OVStage through one batched direct write per rendered frame, and renders during
+`end_frame()` rather than post-processing during `close()`. Camera, lights,
+`UsdPreviewSurface` materials, `UsdRender` product, and requested sensor AOVs
+are authored into the retained USD stage.
+
+There is no separate delivery-mode setting. `--ovrtx-output-path` infers the
+delivery from the target: an image path retains the latest frame, a video path
+streams live RGBA frames to FFmpeg, and a suffix-free path receives numbered
+PNG frames plus requested sensor arrays. Use `--ovrtx-render-vars` for buffers
+such as `rgb depth normals semantic_segmentation`, and
+`--ovrtx-render-every N` to decouple simulation and render cadence. Render
+scripts may define `compose_stage`, `on_stage_open`, `before_frame`,
+`after_frame`, `on_render_complete`, and `on_stage_close` hooks.
 
 ## Contributing and Development
 

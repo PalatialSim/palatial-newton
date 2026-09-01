@@ -13,11 +13,23 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from newton import ovrtx as newton_ovrtx
+from newton._src.viewer.viewer_ovrtx import _transforms_to_matrices
+from newton._src.viewer.viewer_usd import _usd_add_xform, _usd_set_xform
 
 try:
-    from pxr import Sdf
+    from pxr import Sdf, Usd, UsdGeom
 except ImportError:
-    Sdf = None
+    Sdf = Usd = UsdGeom = None
+
+
+class _RenderProductSetOutputs:
+    """Match OVRTX's native indexing contract (which deliberately has no get)."""
+
+    def __init__(self, values):
+        self._values = values
+
+    def __getitem__(self, key):
+        return self._values[key]
 
 
 def _fake_runtime(width: int = 2, height: int = 2):
@@ -29,7 +41,7 @@ def _fake_runtime(width: int = 2, height: int = 2):
     frame.render_vars = {"LdrColor": ldr_color}
     product = MagicMock(frames=[frame])
     renderer = MagicMock()
-    renderer.step.return_value = {"/Render/Newton": product}
+    renderer.step.return_value = _RenderProductSetOutputs({"/Render/Newton": product})
     ovrtx = MagicMock()
     ovrtx.Renderer.return_value = renderer
     ovrtx.Device.CPU = "cpu"
@@ -60,6 +72,27 @@ class TestOVRTXRendering(unittest.TestCase):
         self.assertIn("uniform int2 resolution = (640, 480)", stage)
         self.assertIn('custom token omni:rtx:rendermode = "RealTimePathTracing"', stage)
         self.assertIn('uniform string sourceName = "LdrColor"', stage)
+
+    def test_config_uses_exact_ovrtx_aov_names_without_an_output_mode(self):
+        config = newton_ovrtx.OVRTXConfig(render_vars=("rgb", "depth", "normals", "semantic_segmentation"))
+
+        self.assertFalse(hasattr(config, "output"))
+        self.assertEqual(newton_ovrtx.RENDER_VARS["depth"], "DepthSD")
+        self.assertEqual(newton_ovrtx.RENDER_VARS["normals"], "NormalSD")
+        self.assertEqual(newton_ovrtx.RENDER_VARS["semantic_segmentation"], "SemanticSegmentation")
+
+    @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
+    def test_live_transform_matrix_matches_usd_xform_ops(self):
+        stage = Usd.Stage.CreateInMemory()
+        prim = stage.DefinePrim("/Instance")
+        _usd_add_xform(prim)
+        xform = np.array([[1.0, 2.0, 3.0, 0.2, 0.3, 0.4, 0.84]], dtype=np.float64)
+        xform[:, 3:] /= np.linalg.norm(xform[:, 3:], axis=1, keepdims=True)
+        scales = np.array([[2.0, 3.0, 4.0]], dtype=np.float64)
+        _usd_set_xform(prim, xform[0, :3], xform[0, 3:], scales[0], 0.0)
+
+        expected = np.asarray(UsdGeom.Xformable(prim).GetLocalTransformation(0.0), dtype=np.float64)
+        np.testing.assert_allclose(_transforms_to_matrices(xform, scales)[0], expected, atol=1e-6)
 
     @unittest.skipIf(Sdf is None, "USD Python bindings are not installed")
     def test_composed_render_stage_is_valid_usda(self):

@@ -12,8 +12,10 @@ from ._src.viewer import (
     ViewerUSD,
     ViewerViser,
 )
+from .ovrtx import OVRTXConfig, ovrtx_available
 
 __all__ = [
+    "OVRTXConfig",
     "ViewerBase",
     "ViewerFile",
     "ViewerGL",
@@ -22,4 +24,5 @@ __all__ = [
     "ViewerRerun",
     "ViewerUSD",
     "ViewerViser",
+    "ovrtx_available",
 ]

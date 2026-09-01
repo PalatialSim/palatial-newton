@@ -242,7 +242,8 @@ class ViewerUSD(ViewerBase):
         points_np = points.numpy().astype(np.float32)
         indices_np = indices.numpy().astype(np.uint32)
 
-        if name not in self._meshes:
+        is_new_mesh = name not in self._meshes
+        if is_new_mesh:
             self._ensure_scopes_for_path(self.stage, self._get_path(name))
 
             mesh_prim = UsdGeom.Mesh.Define(self.stage, self._get_path(name))
@@ -256,12 +257,23 @@ class ViewerUSD(ViewerBase):
             self._meshes[name] = mesh_prim
 
         mesh_prim = self._meshes[name]
-        mesh_prim.GetPointsAttr().Set(points_np, self._frame_index)
+        # Static topology must exist at USD's default time. Authoring the first
+        # points value only at time code 0 makes OVStage initially populate an
+        # empty mesh, then reject the non-empty buffer as a topology change when
+        # animation time is applied. Later calls retain time samples for genuine
+        # deforming meshes.
+        if is_new_mesh:
+            mesh_prim.GetPointsAttr().Set(points_np)
+        else:
+            mesh_prim.GetPointsAttr().Set(points_np, self._frame_index)
 
         # Set normals if provided
         if normals is not None:
             normals_np = normals.numpy().astype(np.float32)
-            mesh_prim.GetNormalsAttr().Set(normals_np, self._frame_index)
+            if is_new_mesh:
+                mesh_prim.GetNormalsAttr().Set(normals_np)
+            else:
+                mesh_prim.GetNormalsAttr().Set(normals_np, self._frame_index)
             mesh_prim.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
 
         # Set UVs if provided (simplified for now)

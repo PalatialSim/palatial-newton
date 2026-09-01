@@ -19,21 +19,95 @@ import importlib.util
 import math
 import shutil
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 RENDER_MODES = frozenset({"RealTimePathTracing", "PathTracing", "Minimal"})
 IMAGE_SUFFIXES = frozenset({".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff"})
 VIDEO_SUFFIXES = frozenset({".mkv", ".mov", ".mp4"})
+
+# Friendly public names map to the exact OVRTX 0.4.1 render-var source names.
+# Keep this table explicit: Replicator names such as ``Normals`` and
+# ``InstanceSegmentation`` are not OVRTX camera AOVs.
+RENDER_VARS = {
+    "rgb": "LdrColor",
+    "hdr": "HdrColor",
+    "normals": "NormalSD",
+    "depth": "DepthSD",
+    "distance_to_camera": "DistanceToCameraSD",
+    "distance_to_image_plane": "DistanceToImagePlaneSD",
+    "albedo": "DiffuseAlbedoSD",
+    "camera_position": "Camera3dPositionSD",
+    "semantic_segmentation": "SemanticSegmentation",
+    "semantic_id_map": "SemanticIdMap",
+}
+
+
+@dataclass(frozen=True)
+class OVRTXConfig:
+    """Live OVRTX viewer configuration.
+
+    Delivery is intentionally absent from this object. A target path is an
+    image, video, or suffix-free frame directory by its shape; callers do not
+    select a second output mode.
+    """
+
+    width: int = 1280
+    height: int = 720
+    render_mode: str = "Minimal"
+    render_every: int = 1
+    warmup_frames: int = 4
+    samples_per_frame: int = 1
+    render_vars: tuple[str, ...] = ("rgb",)
+    camera_focal_length: float = 24.0
+    camera_horizontal_aperture: float = 20.955
+    dome_light_intensity: float = 1000.0
+    key_light_intensity: float = 3000.0
+    default_material_roughness: float = 0.6
+    script_path: str | None = None
+    video_codec: str = "libx264"
+    video_crf: int = 18
+    video_preset: str = "medium"
+    render_product_path: str = "/Render/Newton"
+    app_id: str = "newton.ovrtx"
+    on_frame: Callable[[int, dict[str, np.ndarray]], None] | None = None
+
+    def __post_init__(self) -> None:
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError("OVRTX width and height must be positive")
+        if self.render_mode not in RENDER_MODES:
+            raise ValueError(f"Unsupported OVRTX render mode: {self.render_mode}")
+        if self.render_every <= 0:
+            raise ValueError("OVRTX render_every must be positive")
+        if self.warmup_frames <= 0 or self.samples_per_frame <= 0:
+            raise ValueError("OVRTX warmup and samples-per-frame values must be positive")
+        if not self.render_vars:
+            raise ValueError("OVRTX render_vars must contain at least one render variable")
+        unknown = set(self.render_vars) - RENDER_VARS.keys()
+        if unknown:
+            raise ValueError(f"Unknown OVRTX render vars {sorted(unknown)}; choose from {sorted(RENDER_VARS)}")
+        if "rgb" not in self.render_vars:
+            raise ValueError("OVRTX render_vars must include 'rgb' for image/video delivery")
+        if not self.render_product_path.startswith("/Render/"):
+            raise ValueError("OVRTX render product path must be of the form '/Render/<name>'")
+
+
+def ovrtx_available(*, verbose: bool = False) -> bool:
+    """Return whether the optional native OVRTX runtime imports successfully."""
+    try:
+        import ovrtx  # noqa: F401, PLC0415
+        import ovstage  # noqa: F401, PLC0415
+    except ImportError as error:
+        if verbose:
+            print(f"OVRTX unavailable: {error} (install with: uv sync --extra ovrtx)")
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -96,6 +170,69 @@ class OVRTXScriptContext:
         self._backend._publish(ordinal)
 
 
+class OVRTXAttributeBinding:
+    """Persistent OVStage query used for low-overhead live attribute writes."""
+
+    def __init__(
+        self,
+        backend: OVRTXStage,
+        prim_paths: Sequence[str],
+        attribute_name: str,
+        *,
+        is_array: bool,
+        semantic: Any,
+    ):
+        if not prim_paths:
+            raise ValueError("OVRTX attribute bindings require at least one prim path")
+        self._backend = backend
+        self._size = len(prim_paths)
+        self._paths = backend._ovstage.PathDictionary(backend.stage)
+        self._paths.__enter__()
+        self._path_list = self._paths.create_path_list_from_strings(list(prim_paths))
+        self._query = backend.stage.query_from_path_list(self._path_list)
+        self._attribute = self._paths.intern_token(attribute_name)
+        self._is_array = is_array
+        self._semantic = semantic
+        self._closed = False
+
+    def write(self, values: np.ndarray, *, ordinal: int | None = None, publish: bool = True) -> int:
+        """Write one value per bound prim and optionally publish the ordinal."""
+        if self._closed:
+            raise RuntimeError("OVRTX attribute binding is closed")
+        values = np.ascontiguousarray(values)
+        if len(values) != self._size:
+            raise ValueError(f"OVRTX binding expected {self._size} values, got {len(values)}")
+        if ordinal is None:
+            ordinal = self._backend._next_ordinal()
+        lanes = int(np.prod(values.shape[1:])) if values.ndim > 1 else 1
+        dtype = self._backend._ovstage.numpy_to_dldatatype(values.dtype, lanes=lanes)
+        tensor = self._backend._ovstage.make_dltensor(values, dtype=dtype, shape=[len(values)], ndim=1)
+        kwargs = {
+            "ordinal": ordinal,
+            "tensors": tensor,
+            "is_array": self._is_array,
+        }
+        if self._semantic is not None:
+            kwargs["semantic"] = self._semantic
+        self._backend.stage.write_attribute(self._query, self._attribute, **kwargs).wait()
+        if publish:
+            self._backend._publish(ordinal)
+        return ordinal
+
+    def close(self) -> None:
+        """Release the native query, path list, and dictionary."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._query.release().wait()
+        finally:
+            try:
+                self._paths.destroy_path_list(self._path_list)
+            finally:
+                self._paths.__exit__(None, None, None)
+
+
 class OVRTXStage:
     """Own one OVStage + OVRTX session for a complete USD timeline.
 
@@ -132,6 +269,7 @@ class OVRTXStage:
         fps: float = 60.0,
         script_path: str | Path | None = None,
         app_id: str = "newton.ovrtx",
+        render_vars: Sequence[str] = ("rgb",),
     ):
         self.source_path = Path(source_path).expanduser().resolve()
         if not self.source_path.is_file():
@@ -151,6 +289,7 @@ class OVRTXStage:
             camera_position,
             camera_target,
             render_mode,
+            render_vars,
         )
         self.render_product_path = render_product_path
         self.width = width
@@ -160,6 +299,10 @@ class OVRTXStage:
         self.fps = fps
         self.script_path = Path(script_path).expanduser().resolve() if script_path is not None else None
         self.app_id = app_id
+        self.render_vars = tuple(render_vars)
+        unknown = set(self.render_vars) - RENDER_VARS.keys()
+        if unknown:
+            raise ValueError(f"Unknown OVRTX render vars {sorted(unknown)}; choose from {sorted(RENDER_VARS)}")
 
         self._ovrtx: ModuleType | None = None
         self._ovstage: ModuleType | None = None
@@ -169,6 +312,18 @@ class OVRTXStage:
         self._ordinal = 0
         self._context = OVRTXScriptContext(self)
         self._closed = False
+
+    def bind_attribute(
+        self,
+        prim_paths: Sequence[str],
+        attribute_name: str,
+        *,
+        is_array: bool = False,
+        semantic: Any = None,
+    ) -> OVRTXAttributeBinding:
+        """Create a persistent direct-write binding for populated prims."""
+        self.open()
+        return OVRTXAttributeBinding(self, prim_paths, attribute_name, is_array=is_array, semantic=semantic)
 
     @property
     def stage(self) -> Any:
@@ -327,12 +482,44 @@ class OVRTXStage:
         self._context.frame_index = frame_index
         self._context.time_seconds = time_seconds
         self._call_script("before_frame", self._context)
-        pixels = self._step_and_copy(steps)
+        render_vars = self.step_and_read(steps)
+        pixels = render_vars["rgb"]
         scripted_pixels = self._call_script("after_frame", self._context, pixels)
         if scripted_pixels is not None:
             pixels = np.asarray(scripted_pixels)
         pixels = _validate_pixels(pixels, self.width, self.height)
         return RenderedFrame(index=frame_index, time_seconds=time_seconds, pixels=pixels)
+
+    def step_and_read(self, steps: int | None = None) -> dict[str, np.ndarray]:
+        """Step the attached renderer and copy configured render vars to NumPy."""
+        self.open()
+        if steps is None:
+            steps = self.samples_per_frame
+        if steps <= 0:
+            raise ValueError("OVRTX renderer steps must be positive")
+        return self._step_and_copy(steps)
+
+    def render_live_frame(self, frame_index: int, *, steps: int | None = None) -> dict[str, np.ndarray]:
+        """Render the current directly-mutated OVStage state.
+
+        Unlike :meth:`render_frame`, this method does not evaluate USD time.
+        It is the live-viewer path used after simulation attributes have been
+        written through persistent OVStage bindings.
+        """
+        if frame_index < 0:
+            raise ValueError("OVRTX frame index must be non-negative")
+        self._context.frame_index = frame_index
+        self._context.time_seconds = frame_index / self.fps
+        self._call_script("before_frame", self._context)
+        render_vars = self.step_and_read(steps)
+        scripted_pixels = self._call_script("after_frame", self._context, render_vars["rgb"])
+        if scripted_pixels is not None:
+            render_vars["rgb"] = _validate_pixels(np.asarray(scripted_pixels), self.width, self.height)
+        return render_vars
+
+    def notify_render_complete(self, output: Path | None) -> None:
+        """Invoke the optional completion hook for a live viewer target."""
+        self._call_script("on_render_complete", self._context, output)
 
     def _render_sequence(self, output_dir: Path, frame_indices: range) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -406,28 +593,38 @@ class OVRTXStage:
         if not output.is_file() or output.stat().st_size == 0:
             raise RuntimeError(f"FFmpeg did not produce a video: {output}")
 
-    def _step_and_copy(self, steps: int) -> np.ndarray:
-        products: dict[str, Any] = {}
+    def _step_and_copy(self, steps: int) -> dict[str, np.ndarray]:
+        products: Any = None
         for _ in range(steps):
             products = self.renderer.step(
                 render_products={self.render_product_path},
                 delta_time=1.0 / self.fps,
                 ordinal=self.ordinal,
             )
-        product = products.get(self.render_product_path)
-        if product is None:
-            raise RuntimeError(f"OVRTX returned no render product for {self.render_product_path}")
+        try:
+            product = products[self.render_product_path]
+        except (KeyError, TypeError) as error:
+            raise RuntimeError(f"OVRTX returned no render product for {self.render_product_path}") from error
 
-        for frame in reversed(product.frames):
-            ldr_color = frame.render_vars.get("LdrColor")
-            if ldr_color is None:
-                continue
-            mapped = ldr_color.map(device=self._ovrtx.Device.CPU)
+        frames = list(product.frames)
+        if not frames:
+            raise RuntimeError(f"OVRTX returned no frames for {self.render_product_path}")
+        frame = frames[-1]
+        outputs: dict[str, np.ndarray] = {}
+        for friendly_name in self.render_vars:
+            source_name = RENDER_VARS[friendly_name]
             try:
-                return np.from_dlpack(mapped).copy()
+                render_var = frame.render_vars[source_name]
+            except (KeyError, TypeError) as error:
+                raise RuntimeError(
+                    f"OVRTX returned no {source_name} render var for {self.render_product_path}"
+                ) from error
+            mapped = render_var.map(device=self._ovrtx.Device.CPU)
+            try:
+                outputs[friendly_name] = np.from_dlpack(mapped).copy()
             finally:
                 mapped.unmap()
-        raise RuntimeError(f"OVRTX returned no LdrColor frame for {self.render_product_path}")
+        return outputs
 
     def _next_ordinal(self) -> int:
         self._ordinal += 1
@@ -514,6 +711,7 @@ def _compose_render_stage(
     camera_position: tuple[float, float, float],
     camera_target: tuple[float, float, float],
     render_mode: str,
+    render_vars: Sequence[str] = ("rgb",),
 ) -> str:
     """Compose renderer-owned presentation over the complete source USD stage."""
     if not render_product_path.startswith("/"):
@@ -522,6 +720,9 @@ def _compose_render_stage(
         raise ValueError("OVRTX output width and height must be positive")
     if render_mode not in RENDER_MODES:
         raise ValueError(f"Unsupported OVRTX render mode: {render_mode}")
+    unknown = set(render_vars) - RENDER_VARS.keys()
+    if unknown:
+        raise ValueError(f"Unknown OVRTX render vars {sorted(unknown)}; choose from {sorted(RENDER_VARS)}")
 
     product_parts = [part for part in render_product_path.split("/") if part]
     if len(product_parts) != 2 or product_parts[0] != "Render":
@@ -529,6 +730,15 @@ def _compose_render_stage(
 
     quat_w, quat_x, quat_y, quat_z = _camera_orientation(camera_position, camera_target)
     source_asset_path = source_path.as_posix().replace("@", "%40")
+    source_names = [RENDER_VARS[name] for name in render_vars]
+    ordered_vars = ", ".join(f"<{name}>" for name in source_names)
+    render_var_defs = "\n".join(
+        f'''        def RenderVar "{name}"
+        {{
+            uniform string sourceName = "{name}"
+        }}'''
+        for name in source_names
+    )
     return f'''#usda 1.0
 (
     subLayers = [
@@ -546,6 +756,22 @@ def Camera "NewtonCamera"
     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
 }}
 
+def "Lighting"
+{{
+    def DomeLight "Dome"
+    {{
+        float inputs:intensity = 1000
+    }}
+
+    def DistantLight "Key"
+    {{
+        float inputs:angle = 1
+        float inputs:intensity = 3000
+        float3 xformOp:rotateXYZ = (-55, 30, 0)
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+    }}
+}}
+
 def "Render"
 {{
     def RenderProduct "{product_parts[1]}"
@@ -553,12 +779,9 @@ def "Render"
         custom token omni:rtx:rendermode = "{render_mode}"
         uniform int2 resolution = ({width}, {height})
         rel camera = </NewtonCamera>
-        rel orderedVars = [<LdrColor>]
+        rel orderedVars = [{ordered_vars}]
 
-        def RenderVar "LdrColor"
-        {{
-            uniform string sourceName = "LdrColor"
-        }}
+{render_var_defs}
     }}
 }}
 '''
@@ -586,6 +809,7 @@ def render_usd(
     video_crf: int = 18,
     video_preset: str = "medium",
     app_id: str = "newton.ovrtx",
+    render_vars: Sequence[str] = ("rgb",),
 ) -> Path:
     """Render a full USD stage to an image, video, or frame directory.
 
@@ -613,6 +837,7 @@ def render_usd(
         fps=fps,
         script_path=script_path,
         app_id=app_id,
+        render_vars=render_vars,
     ) as stage:
         return stage.render(
             output_path,
