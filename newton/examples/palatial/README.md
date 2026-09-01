@@ -142,8 +142,12 @@ The output set is:
 per-frame scripting hooks as the shared Newton OVRTX viewer.
 
 OVRTX also preserves mesh `opacity` and index of refraction (`ior`) alongside
-base color, texture, roughness, and metallic values. These are authored as
-portable `UsdPreviewSurface` inputs in the retained recording.
+base color, texture, roughness, and metallic values. An explicit
+`newton.viewer.OVRTXMaterial` adds a MaterialX/OpenPBR context for transmission,
+coating, and thin-film interference while retaining portable
+`UsdPreviewSurface` as the fallback. Newton USD import retains the OpenPBR
+descriptor on each visual mesh, so Palatial simulation playback does not
+flatten it back to scalar color and opacity.
 
 ### Subtle red/green transparent glasses
 
@@ -160,14 +164,17 @@ uv run python -m newton.examples.palatial.author_anaglyph_glasses \
   --opacity 0.03 --roughness 0.04 --ior 1.49
 ```
 
-The author preserves collision and rigid-body schemas, makes the frame an
-opaque `UsdPreviewSurface`, removes the unresolved `OmniSurface.mdl`
-dependency, hides the old combined lens visual, and binds red to the negative-X
-lens and green to the positive-X lens. The defaults use a matte-black frame and
-subtle lens transmission based on the physical reference. Use `--red-color R G B`,
-`--green-color R G B`, `--frame-color R G B`, and `--frame-roughness` to
-calibrate a different physical filter. Render the result head-on with the same
-Palatial playback command:
+The author preserves collision and rigid-body schemas, removes the unresolved
+`OmniSurface.mdl` dependency, hides the old combined lens visual, and binds red
+to the negative-X lens and green to the positive-X lens. Each material carries
+an OVRTX-native MaterialX/OpenPBR context and a Preview Surface fallback. The
+defaults use full, lightly tinted transmission plus restrained coating and
+physical thin-film interference based on the photographed reference. Use
+`--red-color R G B`, `--green-color R G B`, `--transmission`,
+`--coat-weight`, `--thin-film-weight`, `--thin-film-thickness`,
+`--frame-color R G B`, and `--frame-roughness` to calibrate a different
+physical filter. Render the result head-on with the same Palatial playback
+command:
 
 ```bash
 uv run python -m newton.examples.palatial.example_palatial_load \

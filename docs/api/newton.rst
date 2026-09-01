@@ -54,6 +54,7 @@ newton
    Mesh
    Model
    ModelBuilder
+   OpenPBRMaterial
    ParticleFlags
    SDF
    ShapeFlags

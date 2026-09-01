@@ -13,6 +13,8 @@ newton.viewer
    :toctree: _generated
    :nosignatures:
 
+   OVRTXConfig
+   OVRTXMaterial
    ViewerBase
    ViewerFile
    ViewerGL
@@ -21,3 +23,11 @@ newton.viewer
    ViewerRerun
    ViewerUSD
    ViewerViser
+
+.. rubric:: Functions
+
+.. autosummary::
+   :toctree: _generated
+   :signatures: long
+
+   ovrtx_available

@@ -314,6 +314,9 @@ PN = "PN"
 pnd = "pnd"
 
 [tool.typos.default.extend-identifiers]
+ND_image_color3 = "ND_image_color3"
+ND_open_pbr_surface_surfaceshader = "ND_open_pbr_surface_surfaceshader"
 PNGs = "PNGs"
 Haa = "Haa"
+base_metalness = "base_metalness"
 iy = "iy"

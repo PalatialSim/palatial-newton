@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +22,10 @@ from ...ovrtx import (
     OVRTXStage,
     _camera_orientation,
     _save_image,
+    author_material,
 )
 from ..core.types import override
+from ..geometry.types import Mesh, OpenPBRMaterial
 from .viewer_usd import ViewerUSD
 
 try:
@@ -61,6 +64,19 @@ def _transforms_to_matrices(xforms: np.ndarray, scales: np.ndarray) -> np.ndarra
     return matrices
 
 
+@dataclass(frozen=True)
+class _MeshMaterial:
+    color: tuple[float, float, float]
+    has_explicit_color: bool
+    roughness: float
+    metallic: float
+    opacity: float
+    ior: float
+    texture: np.ndarray | str | None
+    has_uvs: bool
+    material: OpenPBRMaterial | None
+
+
 class ViewerOVRTX(ViewerUSD):
     """USD-stage viewer whose live frames are rendered by one OVRTX session.
 
@@ -69,6 +85,11 @@ class ViewerOVRTX(ViewerUSD):
     USD serialization and re-population. The target path itself determines
     delivery: image, video, or suffix-free frame directory.
     """
+
+    @override
+    def _mesh_log_options(self, geo_src: Mesh) -> dict[str, Any]:
+        material = geo_src.visual_material
+        return {"material": material} if material is not None else {}
 
     def __init__(
         self,
@@ -134,10 +155,7 @@ class ViewerOVRTX(ViewerUSD):
         self._camera_binding: Any = None
         self._instance_paths: dict[str, list[str]] = {}
         self._pending_matrices: dict[str, np.ndarray] = {}
-        self._mesh_materials: dict[
-            str,
-            tuple[tuple[float, float, float], bool, float, float, float, float, np.ndarray | str | None, bool],
-        ] = {}
+        self._mesh_materials: dict[str, _MeshMaterial] = {}
         self._latest_render_vars: dict[str, np.ndarray] = {}
         self._render_count = 0
         self._video_process: subprocess.Popen | None = None
@@ -216,7 +234,16 @@ class ViewerOVRTX(ViewerUSD):
         metallic: float | None = None,
         opacity: float | None = None,
         ior: float | None = None,
+        material: OpenPBRMaterial | None = None,
     ):
+        if material is not None:
+            if not isinstance(material, OpenPBRMaterial):
+                raise TypeError("ViewerOVRTX material must be an OpenPBRMaterial")
+            color = material.color
+            roughness = material.roughness
+            metallic = material.metallic
+            opacity = material.fallback_opacity
+            ior = material.ior
         result = super().log_mesh(
             name,
             points,
@@ -254,15 +281,16 @@ class ViewerOVRTX(ViewerUSD):
             )
             primvar.Set(uv_values)
             has_uvs = True
-        self._mesh_materials[name] = (
-            (0.8, 0.8, 0.8) if color is None else tuple(float(value) for value in color),
-            color is not None,
-            self.config.default_material_roughness if roughness is None else float(roughness),
-            0.0 if metallic is None else float(metallic),
-            1.0 if opacity is None else float(opacity),
-            1.5 if ior is None else float(ior),
-            texture,
-            has_uvs,
+        self._mesh_materials[name] = _MeshMaterial(
+            color=(0.8, 0.8, 0.8) if color is None else tuple(float(value) for value in color),
+            has_explicit_color=color is not None,
+            roughness=self.config.default_material_roughness if roughness is None else float(roughness),
+            metallic=0.0 if metallic is None else float(metallic),
+            opacity=1.0 if opacity is None else float(opacity),
+            ior=1.5 if ior is None else float(ior),
+            texture=texture,
+            has_uvs=has_uvs,
+            material=material,
         )
         return result
 
@@ -314,12 +342,24 @@ class ViewerOVRTX(ViewerUSD):
             mesh = self._meshes.get(name)
             if mesh is None:
                 continue
-            color, has_explicit_color, roughness, metallic, opacity, ior, texture, has_uvs = values
             material_path = material_scope.GetPath().AppendChild(f"Mesh_{index}")
+            texture_asset = None
+            if values.texture is not None and values.has_uvs:
+                texture_asset = self._stage_texture_asset(values.texture, index)
+            if values.material is not None:
+                material = author_material(
+                    self.stage,
+                    material_path,
+                    values.material,
+                    base_color_texture=texture_asset,
+                )
+                UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
+                continue
+
             material = UsdShade.Material.Define(self.stage, material_path)
             shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("PreviewSurface"))
             shader.CreateIdAttr("UsdPreviewSurface")
-            if texture is not None and has_uvs:
+            if texture_asset is not None:
                 st_reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("TexCoordReader"))
                 st_reader.CreateIdAttr("UsdPrimvarReader_float2")
                 st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
@@ -327,9 +367,7 @@ class ViewerOVRTX(ViewerUSD):
 
                 texture_shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("BaseColorTexture"))
                 texture_shader.CreateIdAttr("UsdUVTexture")
-                texture_shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
-                    self._stage_texture_asset(texture, index)
-                )
+                texture_shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(texture_asset)
                 texture_shader.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("sRGB")
                 texture_shader.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(
                     st_reader.ConnectableAPI(), "result"
@@ -338,21 +376,21 @@ class ViewerOVRTX(ViewerUSD):
                 shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
                     texture_shader.ConnectableAPI(), "rgb"
                 )
-            elif has_explicit_color:
-                shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+            elif values.has_explicit_color:
+                shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*values.color))
             else:
                 reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("DisplayColor"))
                 reader.CreateIdAttr("UsdPrimvarReader_float3")
                 reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("displayColor")
-                reader.CreateInput("fallback", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+                reader.CreateInput("fallback", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*values.color))
                 reader.CreateOutput("result", Sdf.ValueTypeNames.Float3)
                 shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
                     reader.ConnectableAPI(), "result"
                 )
-            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(roughness)
-            shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(metallic)
-            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(opacity)
-            shader.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(ior)
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(values.roughness)
+            shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(values.metallic)
+            shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(values.opacity)
+            shader.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(values.ior)
             material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
             UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim()).Bind(material)
 

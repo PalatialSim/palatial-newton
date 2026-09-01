@@ -13,8 +13,10 @@ from unittest.mock import patch
 import numpy as np
 import warp as wp
 
+import newton
 from newton._src.viewer.viewer_ovrtx import ViewerOVRTX
 from newton.examples.palatial.example_palatial_load import _create_viewer, create_parser
+from newton.ovrtx import OVRTXMaterial
 
 try:
     from pxr import UsdGeom, UsdShade
@@ -125,6 +127,42 @@ class TestPalatialOVRTXViewer(unittest.TestCase):
             self.assertAlmostEqual(shader.GetInput("ior").Get(), 1.49, places=6)
             np.testing.assert_allclose(shader.GetInput("diffuseColor").Get(), (1.0, 0.0, 0.0), atol=1e-6)
             self.assertFalse(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/DisplayColor"))
+            viewer.close()
+
+    @unittest.skipIf(UsdShade is None, "USD Python bindings are not installed")
+    def test_mesh_accepts_first_class_openpbr_material(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output = Path(temp_dir) / "recording.usd"
+            viewer = ViewerOVRTX(str(output), num_frames=1)
+            points = wp.array([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)], dtype=wp.vec3)
+            indices = wp.array([0, 1, 2], dtype=wp.int32)
+            material = OVRTXMaterial(
+                color=(0.2, 0.9, 0.3),
+                transmission=1.0,
+                transmission_color=(0.82, 0.98, 0.84),
+                thin_film=0.12,
+            )
+
+            mesh = newton.Mesh(
+                points.numpy(),
+                indices.numpy(),
+                compute_inertia=False,
+                visual_material=material,
+            )
+            viewer.log_geo(
+                "/geometry/lens",
+                newton.GeoType.MESH,
+                (1.0, 1.0, 1.0),
+                0.0,
+                True,
+                geo_src=mesh,
+            )
+            viewer._author_render_stage()
+
+            shader = UsdShade.Shader(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/OpenPBR"))
+            self.assertEqual(shader.GetIdAttr().Get(), "ND_open_pbr_surface_surfaceshader")
+            self.assertAlmostEqual(shader.GetInput("transmission_weight").Get(), 1.0, places=6)
+            self.assertAlmostEqual(shader.GetInput("thin_film_weight").Get(), 0.12, places=6)
             viewer.close()
 
 

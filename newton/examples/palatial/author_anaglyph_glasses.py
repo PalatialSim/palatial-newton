@@ -5,8 +5,9 @@
 
 The input asset may keep both lenses in one mesh. This utility finds the two
 connected mesh components, writes each as an independent visual mesh, binds
-portable ``UsdPreviewSurface`` materials, and hides the original combined
-visual. Collision geometry and rigid-body schemas are left untouched.
+dual-context MaterialX/OpenPBR and ``UsdPreviewSurface`` materials, and hides
+the original combined visual. Collision geometry and rigid-body schemas are
+left untouched.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+
+from newton.ovrtx import OVRTXMaterial, author_material
 
 try:
     from pxr import Gf, Sdf, Usd, UsdGeom, UsdShade
@@ -27,6 +30,14 @@ DEFAULT_LENS_MESH = "/World/part_3/part_3_NewtonVisual"
 DEFAULT_RED_COLOR = (1.0, 0.01, 0.01)
 DEFAULT_GREEN_COLOR = (0.005, 0.9, 0.02)
 DEFAULT_FRAME_COLOR = (0.004, 0.005, 0.006)
+DEFAULT_RED_LENS_COAT_COLOR = (0.12, 0.95, 0.48)
+DEFAULT_GREEN_LENS_COAT_COLOR = (1.0, 0.42, 0.55)
+DEFAULT_TRANSMISSION = 1.0
+DEFAULT_COAT_WEIGHT = 0.16
+DEFAULT_COAT_ROUGHNESS = 0.05
+DEFAULT_THIN_FILM_WEIGHT = 0.14
+DEFAULT_THIN_FILM_THICKNESS = 0.45
+DEFAULT_THIN_FILM_IOR = 1.4
 
 
 def _face_components(face_indices: np.ndarray, point_count: int) -> list[np.ndarray]:
@@ -100,25 +111,41 @@ def _copy_mesh_component(
     return target
 
 
-def _author_preview_material(
-    stage: Usd.Stage,
-    path: Sdf.Path,
+def _light_transmission_color(color: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Keep the filter identity while allowing most visible light through."""
+    return tuple(0.82 + 0.18 * channel for channel in color)
+
+
+def _lens_material(
     color: tuple[float, float, float],
+    edge_color: tuple[float, float, float],
     *,
     opacity: float,
     roughness: float,
     ior: float,
-) -> UsdShade.Material:
-    material = UsdShade.Material.Define(stage, path)
-    shader = UsdShade.Shader.Define(stage, path.AppendChild("PreviewSurface"))
-    shader.CreateIdAttr("UsdPreviewSurface")
-    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
-    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(roughness))
-    shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(0.0)
-    shader.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(opacity))
-    shader.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(float(ior))
-    material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
-    return material
+    transmission: float,
+    coat_weight: float,
+    coat_roughness: float,
+    thin_film_weight: float,
+    thin_film_thickness: float,
+    thin_film_ior: float,
+) -> OVRTXMaterial:
+    return OVRTXMaterial(
+        color=color,
+        roughness=roughness,
+        opacity=1.0,
+        ior=ior,
+        preview_opacity=opacity,
+        transmission=transmission,
+        transmission_color=_light_transmission_color(color),
+        coat=coat_weight,
+        coat_color=edge_color,
+        coat_roughness=coat_roughness,
+        coat_ior=ior,
+        thin_film=thin_film_weight,
+        thin_film_thickness=thin_film_thickness,
+        thin_film_ior=thin_film_ior,
+    )
 
 
 def _repair_source_materials(
@@ -130,13 +157,15 @@ def _repair_source_materials(
     """Replace non-portable MDL material state inherited from the source asset."""
     plastic_path = Sdf.Path("/World/Looks/material_plastic")
     stage.RemovePrim(plastic_path)
-    _author_preview_material(
+    author_material(
         stage,
         plastic_path,
-        frame_color,
-        opacity=1.0,
-        roughness=frame_roughness,
-        ior=1.5,
+        OVRTXMaterial(
+            color=frame_color,
+            roughness=frame_roughness,
+            coat=0.35,
+            coat_roughness=0.12,
+        ),
     )
 
     # The combined source lens is hidden below and its collision mesh must not
@@ -165,8 +194,14 @@ def author_anaglyph_glasses(
     green_color: tuple[float, float, float] = DEFAULT_GREEN_COLOR,
     frame_color: tuple[float, float, float] = DEFAULT_FRAME_COLOR,
     frame_roughness: float = 0.32,
+    transmission: float = DEFAULT_TRANSMISSION,
+    coat_weight: float = DEFAULT_COAT_WEIGHT,
+    coat_roughness: float = DEFAULT_COAT_ROUGHNESS,
+    thin_film_weight: float = DEFAULT_THIN_FILM_WEIGHT,
+    thin_film_thickness: float = DEFAULT_THIN_FILM_THICKNESS,
+    thin_film_ior: float = DEFAULT_THIN_FILM_IOR,
 ) -> Path:
-    """Create a Newton-ready copy with a matte frame and subtle red/green lenses."""
+    """Create a Newton-ready copy with physical red/green thin-film lenses."""
     source_path = Path(source_path).expanduser().resolve()
     output_path = Path(output_path).expanduser().resolve()
     if not source_path.is_file():
@@ -208,21 +243,39 @@ def author_anaglyph_glasses(
 
     looks_path = Sdf.Path("/World/Looks")
     UsdGeom.Scope.Define(stage, looks_path)
-    red = _author_preview_material(
+    red = author_material(
         stage,
         looks_path.AppendChild("AnaglyphRed"),
-        red_color,
-        opacity=opacity,
-        roughness=roughness,
-        ior=ior,
+        _lens_material(
+            red_color,
+            DEFAULT_RED_LENS_COAT_COLOR,
+            opacity=opacity,
+            roughness=roughness,
+            ior=ior,
+            transmission=transmission,
+            coat_weight=coat_weight,
+            coat_roughness=coat_roughness,
+            thin_film_weight=thin_film_weight,
+            thin_film_thickness=thin_film_thickness,
+            thin_film_ior=thin_film_ior,
+        ),
     )
-    green = _author_preview_material(
+    green = author_material(
         stage,
         looks_path.AppendChild("AnaglyphGreen"),
-        green_color,
-        opacity=opacity,
-        roughness=roughness,
-        ior=ior,
+        _lens_material(
+            green_color,
+            DEFAULT_GREEN_LENS_COAT_COLOR,
+            opacity=opacity,
+            roughness=roughness,
+            ior=ior,
+            transmission=transmission,
+            coat_weight=coat_weight,
+            coat_roughness=coat_roughness,
+            thin_film_weight=thin_film_weight,
+            thin_film_thickness=thin_film_thickness,
+            thin_film_ior=thin_film_ior,
+        ),
     )
 
     parent_path = source.GetPath().GetParentPath()
@@ -253,6 +306,12 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--green-color", type=float, nargs=3, default=DEFAULT_GREEN_COLOR, metavar=("R", "G", "B"))
     parser.add_argument("--frame-color", type=float, nargs=3, default=DEFAULT_FRAME_COLOR, metavar=("R", "G", "B"))
     parser.add_argument("--frame-roughness", type=float, default=0.32)
+    parser.add_argument("--transmission", type=float, default=DEFAULT_TRANSMISSION)
+    parser.add_argument("--coat-weight", type=float, default=DEFAULT_COAT_WEIGHT)
+    parser.add_argument("--coat-roughness", type=float, default=DEFAULT_COAT_ROUGHNESS)
+    parser.add_argument("--thin-film-weight", type=float, default=DEFAULT_THIN_FILM_WEIGHT)
+    parser.add_argument("--thin-film-thickness", type=float, default=DEFAULT_THIN_FILM_THICKNESS)
+    parser.add_argument("--thin-film-ior", type=float, default=DEFAULT_THIN_FILM_IOR)
     return parser
 
 
@@ -269,6 +328,12 @@ def main(argv: list[str] | None = None) -> int:
         green_color=tuple(args.green_color),
         frame_color=tuple(args.frame_color),
         frame_roughness=args.frame_roughness,
+        transmission=args.transmission,
+        coat_weight=args.coat_weight,
+        coat_roughness=args.coat_roughness,
+        thin_film_weight=args.thin_film_weight,
+        thin_film_thickness=args.thin_film_thickness,
+        thin_film_ior=args.thin_film_ior,
     )
     print(f"Anaglyph glasses USD saved in: {output}")
     return 0

@@ -12,7 +12,7 @@ import numpy as np
 import warp as wp
 
 from ..core.types import Axis, AxisType
-from ..geometry import Gaussian, Mesh
+from ..geometry import Gaussian, Mesh, OpenPBRMaterial
 from ..sim.model import Model
 
 AttributeAssignment = Model.AttributeAssignment
@@ -1141,6 +1141,9 @@ def get_mesh(
         texture=material_props.get("texture"),
         metallic=material_props.get("metallic"),
         roughness=material_props.get("roughness"),
+        opacity=material_props.get("opacity"),
+        ior=material_props.get("ior"),
+        visual_material=material_props.get("visual_material"),
     )
     if return_uv_indices:
         return mesh_out, uv_indices
@@ -1502,6 +1505,7 @@ def _empty_material_properties() -> dict[str, Any]:
         "opacity": None,
         "ior": None,
         "texture": None,
+        "visual_material": None,
     }
 
 
@@ -1752,6 +1756,61 @@ def _extract_material_input_properties(material: UsdShade.Material | None, prim:
     return properties
 
 
+def _get_direct_shader_input(shader: UsdShade.Shader, name: str, default: Any) -> Any:
+    """Read an unconnected shader input, returning a schema default otherwise."""
+    inp = shader.GetInput(name)
+    if not inp:
+        return default
+    try:
+        if inp.HasConnectedSource():
+            return default
+    except Exception:
+        return default
+    value = inp.Get()
+    return default if value is None else value
+
+
+def _extract_openpbr_material(
+    shader: UsdShade.Shader | None,
+    fallback_properties: dict[str, Any],
+) -> OpenPBRMaterial | None:
+    """Convert a MaterialX OpenPBR shader to Newton's physical descriptor."""
+    if shader is None or shader.GetIdAttr().Get() != "ND_open_pbr_surface_surfaceshader":
+        return None
+
+    color = _coerce_color(_get_direct_shader_input(shader, "base_color", None))
+    if color is None:
+        color = fallback_properties.get("color") or (0.8, 0.8, 0.8)
+    transmission_color = _coerce_color(_get_direct_shader_input(shader, "transmission_color", color)) or color
+    coat_color = _coerce_color(_get_direct_shader_input(shader, "coat_color", (1.0, 1.0, 1.0)))
+    if coat_color is None:
+        coat_color = (1.0, 1.0, 1.0)
+
+    try:
+        return OpenPBRMaterial(
+            color=color,
+            roughness=float(_get_direct_shader_input(shader, "specular_roughness", 0.3)),
+            metallic=float(_get_direct_shader_input(shader, "base_metalness", 0.0)),
+            opacity=float(_get_direct_shader_input(shader, "geometry_opacity", 1.0)),
+            ior=float(_get_direct_shader_input(shader, "specular_ior", 1.5)),
+            preview_opacity=fallback_properties.get("opacity"),
+            transmission=float(_get_direct_shader_input(shader, "transmission_weight", 0.0)),
+            transmission_color=transmission_color,
+            transmission_depth=float(_get_direct_shader_input(shader, "transmission_depth", 0.0)),
+            coat=float(_get_direct_shader_input(shader, "coat_weight", 0.0)),
+            coat_color=coat_color,
+            coat_roughness=float(_get_direct_shader_input(shader, "coat_roughness", 0.0)),
+            coat_ior=float(_get_direct_shader_input(shader, "coat_ior", 1.6)),
+            thin_film=float(_get_direct_shader_input(shader, "thin_film_weight", 0.0)),
+            thin_film_thickness=float(_get_direct_shader_input(shader, "thin_film_thickness", 0.5)),
+            thin_film_ior=float(_get_direct_shader_input(shader, "thin_film_ior", 1.4)),
+            thin_walled=bool(_get_direct_shader_input(shader, "geometry_thin_walled", False)),
+        )
+    except (TypeError, ValueError) as error:
+        warnings.warn(f"Ignoring invalid OpenPBR material: {error}", stacklevel=2)
+        return None
+
+
 def _get_bound_material(target_prim: Usd.Prim) -> UsdShade.Material | None:
     """Get the material bound to a prim."""
     if not target_prim or not target_prim.IsValid():
@@ -1788,6 +1847,15 @@ def _resolve_prim_material_properties(target_prim: Usd.Prim) -> dict[str, Any] |
     if not material:
         return None
 
+    mtlx_output = material.GetSurfaceOutput("mtlx")
+    if not mtlx_output:
+        mtlx_output = material.GetOutput("mtlx:surface")
+    mtlx_shader = None
+    if mtlx_output:
+        source = mtlx_output.GetConnectedSource()
+        if source:
+            mtlx_shader = UsdShade.Shader(source[0].GetPrim())
+
     surface_output = material.GetSurfaceOutput()
     if not surface_output:
         surface_output = material.GetOutput("surface")
@@ -1799,6 +1867,9 @@ def _resolve_prim_material_properties(target_prim: Usd.Prim) -> dict[str, Any] |
         source = surface_output.GetConnectedSource()
         if source:
             source_shader = UsdShade.Shader(source[0].GetPrim())
+
+    if source_shader is None:
+        source_shader = mtlx_shader
 
     if source_shader is None:
         # Fallback: scan material children for a shader node (MDL-style materials).
@@ -1824,6 +1895,8 @@ def _resolve_prim_material_properties(target_prim: Usd.Prim) -> dict[str, Any] |
         display_color = UsdGeom.PrimvarsAPI(target_prim).GetPrimvar("displayColor")
         if display_color:
             properties["color"] = _coerce_color(display_color.Get())
+
+    properties["visual_material"] = _extract_openpbr_material(mtlx_shader, properties)
 
     return properties
 

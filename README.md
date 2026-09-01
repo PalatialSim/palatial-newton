@@ -859,10 +859,15 @@ python -m newton.examples basic_viewer --viewer gl --num-frames 500 --device cpu
 session from the authored USD stage, sends changing instance transforms to
 OVStage through one batched direct write per rendered frame, and renders during
 `end_frame()` rather than post-processing during `close()`. Camera, lights,
-`UsdPreviewSurface` materials, `UsdRender` product, and requested sensor AOVs
-are authored into the retained USD stage. Newton mesh materials preserve base
-color, texture, roughness, metallic, opacity, and index of refraction, so
-transparent dielectric surfaces remain part of the same live viewer path.
+materials, `UsdRender` product, and requested sensor AOVs are authored into the
+retained USD stage. Ordinary Newton mesh materials use portable
+`UsdPreviewSurface`. A `newton.viewer.OVRTXMaterial` passed directly to
+`ViewerOVRTX.log_mesh()`, or retained as a Newton mesh's `visual_material`,
+additionally authors a MaterialX/OpenPBR context for native transmission,
+coating, and physical thin-film interference while retaining Preview Surface
+as the fallback. Newton reconstructs that physical descriptor when it imports
+a dual-context USD, so the material survives simulation-stage rebuilding.
+Textures are connected to both contexts from the same staged asset.
 
 There is no separate delivery-mode setting. `--ovrtx-output-path` infers the
 delivery from the target: an image path retains the latest frame, a video path
@@ -897,8 +902,8 @@ authored in the input USD; OVRTX derives `render_every` from that rate and
 `--mp4-fps`, so encoded video duration matches simulated time.
 
 For anaglyph glasses whose two lenses arrive as one untextured mesh, first
-split the connected lens components and author portable, subtly tinted red and
-green transparent materials, then use an explicit front camera:
+split the connected lens components and author dual-context red/green glass,
+then use an explicit front camera:
 
 ```bash
 uv run python -m newton.examples.palatial.author_anaglyph_glasses \
@@ -914,11 +919,13 @@ uv run python -m newton.examples.palatial.example_palatial_load \
     --validation-report /workspace/results/glasses_anaglyph_validation.json
 ```
 
-The defaults approximate the photographed glasses: `opacity=0.03`, low lens
-roughness, a matte-black frame, and green rather than saturated cyan. For a
-different physical filter, calibrate `--red-color R G B`,
-`--green-color R G B`, `--opacity`, and `--frame-roughness`; these remain
-ordinary USD material inputs in the retained stage.
+The MaterialX/OpenPBR context uses full transmission, lightly tinted transmitted
+light, a restrained colored coat, and low-weight physical thin-film
+interference. The `opacity=0.03` default belongs only to the Preview Surface
+fallback. For a different physical filter, calibrate `--red-color R G B`,
+`--green-color R G B`, `--transmission`, `--coat-weight`,
+`--thin-film-weight`, `--thin-film-thickness`, and `--frame-roughness`; both
+material contexts remain in the retained USD stage.
 
 For a RunPod pod, use an RTX GPU with graphics-capable NVIDIA drivers, expose
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video`, install FFmpeg and

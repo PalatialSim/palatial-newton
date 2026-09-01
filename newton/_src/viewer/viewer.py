@@ -834,6 +834,15 @@ class ViewerBase(ABC):
         # finally, log the instances
         self.log_instances(name, mesh_path, xforms, scales, colors, materials, hidden=hidden)
 
+    def _mesh_log_options(self, geo_src: newton.Mesh) -> dict[str, Any]:
+        """Return backend-specific options for one visual mesh.
+
+        The base viewer keeps geometry independent of any rendering backend.
+        Specialized viewers can override this narrow seam to consume richer
+        visual descriptors retained on :class:`newton.Mesh`.
+        """
+        return {}
+
     def log_geo(
         self,
         name: str,
@@ -935,6 +944,7 @@ class ViewerBase(ABC):
                 metallic=geo_src.metallic,
                 opacity=geo_src.opacity,
                 ior=geo_src.ior,
+                **self._mesh_log_options(geo_src),
             )
             return
 

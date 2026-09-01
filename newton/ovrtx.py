@@ -28,6 +28,8 @@ from typing import Any
 
 import numpy as np
 
+from ._src.geometry.types import OpenPBRMaterial
+
 RENDER_MODES = frozenset({"RealTimePathTracing", "PathTracing", "Minimal"})
 IMAGE_SUFFIXES = frozenset({".bmp", ".jpeg", ".jpg", ".png", ".tif", ".tiff"})
 VIDEO_SUFFIXES = frozenset({".mkv", ".mov", ".mp4"})
@@ -47,6 +49,117 @@ RENDER_VARS = {
     "semantic_segmentation": "SemanticSegmentation",
     "semantic_id_map": "SemanticIdMap",
 }
+
+
+@dataclass(frozen=True)
+class OVRTXMaterial(OpenPBRMaterial):
+    """One dual-context visual material for OVRTX and portable USD viewers.
+
+    OVRTX consumes the MaterialX/OpenPBR context, including transmission,
+    coating, and physical thin-film interference. Other USD viewers receive a
+    ``UsdPreviewSurface`` fallback authored from the same description.
+    ``preview_opacity`` may approximate transmission for viewers whose preview
+    surface implementation has no transmissive BSDF.
+    """
+
+
+def author_material(
+    stage: Any,
+    path: Any,
+    material_spec: OpenPBRMaterial,
+    *,
+    base_color_texture: Any | None = None,
+) -> Any:
+    """Author one MaterialX/OpenPBR material with a Preview Surface fallback.
+
+    Args:
+        stage: Writable ``pxr.Usd.Stage``.
+        path: Absolute material prim path.
+        material_spec: Renderer-independent material values.
+        base_color_texture: Optional staged texture asset path. The mesh must
+            provide its primary UV set as ``primvars:st``/MaterialX ``UV0``.
+
+    Returns:
+        The authored ``pxr.UsdShade.Material``.
+    """
+    try:
+        from pxr import Gf, Sdf, UsdShade
+    except ImportError as error:  # pragma: no cover - import error is environment-specific
+        raise ImportError("OVRTX material authoring requires the optional USD dependencies") from error
+
+    if not isinstance(material_spec, OpenPBRMaterial):
+        raise TypeError("material_spec must be an OpenPBRMaterial")
+    material_path = path if isinstance(path, Sdf.Path) else Sdf.Path(str(path))
+    if not material_path.IsAbsolutePath() or not material_path.IsPrimPath():
+        raise ValueError(f"OVRTX material path must be an absolute prim path: {material_path}")
+
+    for child_name in ("PreviewSurface", "TexCoordReader", "BaseColorTexture", "OpenPBR", "BaseColorImage"):
+        stage.RemovePrim(material_path.AppendChild(child_name))
+
+    material = UsdShade.Material.Define(stage, material_path)
+    preview = UsdShade.Shader.Define(stage, material_path.AppendChild("PreviewSurface"))
+    preview.CreateIdAttr("UsdPreviewSurface")
+    preview.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(float(material_spec.roughness))
+    preview.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(float(material_spec.metallic))
+    preview.CreateInput("opacity", Sdf.ValueTypeNames.Float).Set(float(material_spec.fallback_opacity))
+    preview.CreateInput("ior", Sdf.ValueTypeNames.Float).Set(float(material_spec.ior))
+    preview.CreateInput("clearcoat", Sdf.ValueTypeNames.Float).Set(float(material_spec.coat))
+    preview.CreateInput("clearcoatRoughness", Sdf.ValueTypeNames.Float).Set(float(material_spec.coat_roughness))
+
+    texture_asset = None
+    if base_color_texture is not None:
+        texture_asset = (
+            base_color_texture
+            if isinstance(base_color_texture, Sdf.AssetPath)
+            else Sdf.AssetPath(str(base_color_texture))
+        )
+        st_reader = UsdShade.Shader.Define(stage, material_path.AppendChild("TexCoordReader"))
+        st_reader.CreateIdAttr("UsdPrimvarReader_float2")
+        st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+        st_reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+        texture = UsdShade.Shader.Define(stage, material_path.AppendChild("BaseColorTexture"))
+        texture.CreateIdAttr("UsdUVTexture")
+        texture.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(texture_asset)
+        texture.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("sRGB")
+        texture.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(st_reader.ConnectableAPI(), "result")
+        texture.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+        preview.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(texture.ConnectableAPI(), "rgb")
+    else:
+        preview.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*material_spec.color))
+    preview.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+    material.CreateSurfaceOutput().ConnectToSource(preview.ConnectableAPI(), "surface")
+
+    openpbr = UsdShade.Shader.Define(stage, material_path.AppendChild("OpenPBR"))
+    openpbr.CreateIdAttr("ND_open_pbr_surface_surfaceshader")
+    if texture_asset is not None:
+        image = UsdShade.Shader.Define(stage, material_path.AppendChild("BaseColorImage"))
+        image.CreateIdAttr("ND_image_color3")
+        image.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(texture_asset)
+        image.GetInput("file").GetAttr().SetColorSpace("sRGB")
+        image.CreateOutput("out", Sdf.ValueTypeNames.Color3f)
+        openpbr.CreateInput("base_color", Sdf.ValueTypeNames.Color3f).ConnectToSource(image.ConnectableAPI(), "out")
+    else:
+        openpbr.CreateInput("base_color", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*material_spec.color))
+    openpbr.CreateInput("base_metalness", Sdf.ValueTypeNames.Float).Set(float(material_spec.metallic))
+    openpbr.CreateInput("specular_roughness", Sdf.ValueTypeNames.Float).Set(float(material_spec.roughness))
+    openpbr.CreateInput("specular_ior", Sdf.ValueTypeNames.Float).Set(float(material_spec.ior))
+    openpbr.CreateInput("transmission_weight", Sdf.ValueTypeNames.Float).Set(float(material_spec.transmission))
+    openpbr.CreateInput("transmission_color", Sdf.ValueTypeNames.Color3f).Set(
+        Gf.Vec3f(*material_spec.transmitted_color)
+    )
+    openpbr.CreateInput("transmission_depth", Sdf.ValueTypeNames.Float).Set(float(material_spec.transmission_depth))
+    openpbr.CreateInput("coat_weight", Sdf.ValueTypeNames.Float).Set(float(material_spec.coat))
+    openpbr.CreateInput("coat_color", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*material_spec.coat_color))
+    openpbr.CreateInput("coat_roughness", Sdf.ValueTypeNames.Float).Set(float(material_spec.coat_roughness))
+    openpbr.CreateInput("coat_ior", Sdf.ValueTypeNames.Float).Set(float(material_spec.coat_ior))
+    openpbr.CreateInput("thin_film_weight", Sdf.ValueTypeNames.Float).Set(float(material_spec.thin_film))
+    openpbr.CreateInput("thin_film_thickness", Sdf.ValueTypeNames.Float).Set(float(material_spec.thin_film_thickness))
+    openpbr.CreateInput("thin_film_ior", Sdf.ValueTypeNames.Float).Set(float(material_spec.thin_film_ior))
+    openpbr.CreateInput("geometry_opacity", Sdf.ValueTypeNames.Float).Set(float(material_spec.opacity))
+    openpbr.CreateInput("geometry_thin_walled", Sdf.ValueTypeNames.Bool).Set(material_spec.thin_walled)
+    openpbr.CreateOutput("out", Sdf.ValueTypeNames.Token)
+    material.CreateSurfaceOutput("mtlx").ConnectToSource(openpbr.ConnectableAPI(), "out")
+    return material
 
 
 @dataclass(frozen=True)

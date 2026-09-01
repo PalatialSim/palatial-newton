@@ -34,6 +34,7 @@ from .types import (
     GeoType,
     Heightfield,
     Mesh,
+    OpenPBRMaterial,
     TetMesh,
 )
 from .utils import compute_shape_radius
@@ -49,6 +50,7 @@ __all__ = [
     "GeoType",
     "Heightfield",
     "Mesh",
+    "OpenPBRMaterial",
     "ParticleFlags",
     "ShapeFlags",
     "TetMesh",

@@ -12,10 +12,11 @@ from ._src.viewer import (
     ViewerUSD,
     ViewerViser,
 )
-from .ovrtx import OVRTXConfig, ovrtx_available
+from .ovrtx import OVRTXConfig, OVRTXMaterial, ovrtx_available
 
 __all__ = [
     "OVRTXConfig",
+    "OVRTXMaterial",
     "ViewerBase",
     "ViewerFile",
     "ViewerGL",

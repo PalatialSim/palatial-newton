@@ -535,6 +535,8 @@ def parse_usd(
             mesh.opacity = material_props["opacity"]
         if material_props.get("ior") is not None:
             mesh.ior = material_props["ior"]
+        if material_props.get("visual_material") is not None:
+            mesh.visual_material = material_props["visual_material"]
         return mesh
 
     def _get_tetmesh_cached(prim: Usd.Prim) -> TetMesh:
@@ -552,7 +554,8 @@ def parse_usd(
     def _has_visual_material_properties(material_props: dict[str, Any]) -> bool:
         # Require PBR-like material cues to avoid promoting generic displayColor-only colliders.
         return any(
-            material_props.get(key) is not None for key in ("texture", "roughness", "metallic", "opacity", "ior")
+            material_props.get(key) is not None
+            for key in ("texture", "roughness", "metallic", "opacity", "ior", "visual_material")
         )
 
     def _is_effectively_visible(prim: Usd.Prim) -> bool:

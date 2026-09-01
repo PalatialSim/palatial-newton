@@ -5,6 +5,7 @@ import enum
 import os
 import warnings
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -98,6 +99,79 @@ class GeoType(enum.IntEnum):
         return self in {GeoType.MESH, GeoType.CONVEX_MESH, GeoType.HFIELD}
 
 
+def _validate_openpbr_color(name: str, color: tuple[float, float, float]) -> None:
+    if len(color) != 3 or any(not 0.0 <= channel <= 1.0 for channel in color):
+        raise ValueError(f"OpenPBR material {name} must contain three values between zero and one")
+
+
+@dataclass(frozen=True)
+class OpenPBRMaterial:
+    """Renderer-neutral OpenPBR surface values for a visual mesh.
+
+    The descriptor carries physical transmission, coat, and thin-film values
+    through USD import and Newton model construction. Renderers may consume
+    the full description or use :attr:`fallback_opacity` with the common base
+    color, roughness, metallicity, and IOR values.
+
+    ``thin_film_thickness`` follows OpenPBR and is expressed in micrometers.
+    ``preview_opacity`` may approximate transmission in renderers that do not
+    implement a transmissive BSDF.
+    """
+
+    color: tuple[float, float, float] = (0.8, 0.8, 0.8)
+    roughness: float = 0.3
+    metallic: float = 0.0
+    opacity: float = 1.0
+    ior: float = 1.5
+    preview_opacity: float | None = None
+    transmission: float = 0.0
+    transmission_color: tuple[float, float, float] | None = None
+    transmission_depth: float = 0.0
+    coat: float = 0.0
+    coat_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    coat_roughness: float = 0.0
+    coat_ior: float = 1.6
+    thin_film: float = 0.0
+    thin_film_thickness: float = 0.5
+    thin_film_ior: float = 1.4
+    thin_walled: bool = False
+
+    def __post_init__(self) -> None:
+        _validate_openpbr_color("color", self.color)
+        _validate_openpbr_color("coat_color", self.coat_color)
+        if self.transmission_color is not None:
+            _validate_openpbr_color("transmission_color", self.transmission_color)
+        for name, value in (
+            ("roughness", self.roughness),
+            ("metallic", self.metallic),
+            ("opacity", self.opacity),
+            ("transmission", self.transmission),
+            ("coat", self.coat),
+            ("coat_roughness", self.coat_roughness),
+            ("thin_film", self.thin_film),
+        ):
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f"OpenPBR material {name} must be between zero and one")
+        if self.preview_opacity is not None and not 0.0 <= self.preview_opacity <= 1.0:
+            raise ValueError("OpenPBR material preview_opacity must be between zero and one")
+        if self.ior <= 0.0 or self.coat_ior <= 0.0 or self.thin_film_ior <= 0.0:
+            raise ValueError("OpenPBR material indices of refraction must be positive")
+        if self.transmission_depth < 0.0:
+            raise ValueError("OpenPBR material transmission_depth must be non-negative")
+        if self.thin_film_thickness < 0.0:
+            raise ValueError("OpenPBR material thin_film_thickness must be non-negative")
+
+    @property
+    def fallback_opacity(self) -> float:
+        """Opacity used by portable, non-transmissive renderers."""
+        return self.opacity if self.preview_opacity is None else self.preview_opacity
+
+    @property
+    def transmitted_color(self) -> tuple[float, float, float]:
+        """OpenPBR transmission tint, defaulting to the material color."""
+        return self.color if self.transmission_color is None else self.transmission_color
+
+
 class Mesh:
     """
     Represents a triangle mesh for collision and simulation.
@@ -151,6 +225,7 @@ class Mesh:
         opacity: float | None = None,
         ior: float | None = None,
         *,
+        visual_material: OpenPBRMaterial | None = None,
         sdf: "SDF | None" = None,
     ):
         """
@@ -175,6 +250,9 @@ class Mesh:
             opacity: Optional mesh opacity in [0, 1]. Values below one allow
                 the renderer to show objects behind the surface.
             ior: Optional index of refraction for dielectric surfaces.
+            visual_material: Optional physical OpenPBR surface description.
+                Common scalar fields are used as portable fallbacks when they
+                were not supplied explicitly.
             sdf: Optional prebuilt SDF object owned by this mesh.
         """
         from .inertia import compute_inertia_mesh  # noqa: PLC0415
@@ -183,6 +261,14 @@ class Mesh:
         self._indices = np.array(indices, dtype=np.int32).flatten()
         self._normals = np.array(normals, dtype=np.float32).reshape(-1, 3) if normals is not None else None
         self._uvs = np.array(uvs, dtype=np.float32).reshape(-1, 2) if uvs is not None else None
+        if visual_material is not None and not isinstance(visual_material, OpenPBRMaterial):
+            raise TypeError("visual_material must be an OpenPBRMaterial")
+        if visual_material is not None:
+            color = visual_material.color if color is None else color
+            roughness = visual_material.roughness if roughness is None else roughness
+            metallic = visual_material.metallic if metallic is None else metallic
+            opacity = visual_material.fallback_opacity if opacity is None else opacity
+            ior = visual_material.ior if ior is None else ior
         self._color: Vec3 | None = None
         self.color = color
         # Store texture lazily: strings/paths are kept as-is, arrays are normalized
@@ -191,6 +277,7 @@ class Mesh:
         self._metallic = metallic
         self._opacity = opacity
         self._ior = ior
+        self._visual_material = visual_material
         self.is_solid = is_solid
         self.has_inertia = compute_inertia
         self.mesh = None
@@ -716,6 +803,7 @@ class Mesh:
             metallic=self._metallic,
             opacity=self._opacity,
             ior=self._ior,
+            visual_material=self._visual_material,
         )
         if not recompute_inertia:
             m.inertia = self.inertia
@@ -995,6 +1083,29 @@ class Mesh:
         self._ior = value
         self._cached_hash = None
 
+    @property
+    def visual_material(self) -> OpenPBRMaterial | None:
+        """Optional physical material retained across USD and viewer adapters."""
+        return self._visual_material
+
+    @visual_material.setter
+    def visual_material(self, value: OpenPBRMaterial | None):
+        if value is not None and not isinstance(value, OpenPBRMaterial):
+            raise TypeError("visual_material must be an OpenPBRMaterial")
+        if value is not None:
+            if self._color is None:
+                self._color = value.color
+            if self._roughness is None:
+                self._roughness = value.roughness
+            if self._metallic is None:
+                self._metallic = value.metallic
+            if self._opacity is None:
+                self._opacity = value.fallback_opacity
+            if self._ior is None:
+                self._ior = value.ior
+        self._visual_material = value
+        self._cached_hash = None
+
     # construct simulation ready buffers from points
     def finalize(self, device: Devicelike = None, requires_grad: bool = False) -> wp.uint64:
         """
@@ -1066,6 +1177,7 @@ class Mesh:
                     self._metallic,
                     self._opacity,
                     self._ior,
+                    self._visual_material,
                 )
             )
         return self._cached_hash

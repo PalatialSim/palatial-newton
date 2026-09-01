@@ -59,6 +59,8 @@ class TestAnaglyphAssetAuthoring(unittest.TestCase):
             red_shader = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphRed/PreviewSurface")
             green_shader = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphGreen/PreviewSurface")
             frame_shader = UsdShade.Shader.Get(result, "/World/Looks/material_plastic/PreviewSurface")
+            red_openpbr = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphRed/OpenPBR")
+            green_openpbr = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphGreen/OpenPBR")
             np.testing.assert_allclose(red_shader.GetInput("diffuseColor").Get(), (1.0, 0.01, 0.01), atol=1e-6)
             np.testing.assert_allclose(green_shader.GetInput("diffuseColor").Get(), (0.005, 0.9, 0.02), atol=1e-6)
             np.testing.assert_allclose(frame_shader.GetInput("diffuseColor").Get(), (0.004, 0.005, 0.006), atol=1e-6)
@@ -66,6 +68,20 @@ class TestAnaglyphAssetAuthoring(unittest.TestCase):
             self.assertAlmostEqual(green_shader.GetInput("roughness").Get(), 0.04, places=6)
             self.assertAlmostEqual(green_shader.GetInput("ior").Get(), 1.49, places=6)
             self.assertAlmostEqual(frame_shader.GetInput("roughness").Get(), 0.32, places=6)
+            self.assertEqual(red_openpbr.GetIdAttr().Get(), "ND_open_pbr_surface_surfaceshader")
+            self.assertAlmostEqual(red_openpbr.GetInput("transmission_weight").Get(), 1.0, places=6)
+            self.assertAlmostEqual(green_openpbr.GetInput("coat_weight").Get(), 0.16, places=6)
+            self.assertAlmostEqual(green_openpbr.GetInput("thin_film_weight").Get(), 0.14, places=6)
+            np.testing.assert_allclose(
+                red_openpbr.GetInput("transmission_color").Get(),
+                (1.0, 0.8218, 0.8218),
+                atol=1e-6,
+            )
+            np.testing.assert_allclose(
+                green_openpbr.GetInput("transmission_color").Get(),
+                (0.8209, 0.982, 0.8236),
+                atol=1e-6,
+            )
 
 
 if __name__ == "__main__":

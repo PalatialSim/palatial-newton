@@ -7,6 +7,10 @@
 - Add optional OVRTX/ovstage rendering through `--viewer ovrtx`, which records
   Newton USD and renders the final selected simulation state to PNG on an RTX
   Linux host
+- Add `OVRTXMaterial` dual-context MaterialX/OpenPBR and Preview Surface
+  authoring for native transmission, coating, thin-film interference, and
+  shared base-color textures in `ViewerOVRTX`, retaining the physical material
+  through USD import and Newton mesh/model construction
 - Make OVRTX a first-class backend for Palatial validation playback: the
   existing `--record-mp4` target now produces a live-rendered video, an
   animated USD sidecar, portable copied base-color textures, and optional

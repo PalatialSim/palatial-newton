@@ -18,6 +18,7 @@ newton.geometry
    BroadPhaseSAP
    HydroelasticSDF
    NarrowPhase
+   OpenPBRMaterial
 
 .. rubric:: Functions
 
