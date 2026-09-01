@@ -136,7 +136,7 @@ class ViewerOVRTX(ViewerUSD):
         self._pending_matrices: dict[str, np.ndarray] = {}
         self._mesh_materials: dict[
             str,
-            tuple[tuple[float, float, float], float, float, float, float, np.ndarray | str | None, bool],
+            tuple[tuple[float, float, float], bool, float, float, float, float, np.ndarray | str | None, bool],
         ] = {}
         self._latest_render_vars: dict[str, np.ndarray] = {}
         self._render_count = 0
@@ -256,6 +256,7 @@ class ViewerOVRTX(ViewerUSD):
             has_uvs = True
         self._mesh_materials[name] = (
             (0.8, 0.8, 0.8) if color is None else tuple(float(value) for value in color),
+            color is not None,
             self.config.default_material_roughness if roughness is None else float(roughness),
             0.0 if metallic is None else float(metallic),
             1.0 if opacity is None else float(opacity),
@@ -313,7 +314,7 @@ class ViewerOVRTX(ViewerUSD):
             mesh = self._meshes.get(name)
             if mesh is None:
                 continue
-            color, roughness, metallic, opacity, ior, texture, has_uvs = values
+            color, has_explicit_color, roughness, metallic, opacity, ior, texture, has_uvs = values
             material_path = material_scope.GetPath().AppendChild(f"Mesh_{index}")
             material = UsdShade.Material.Define(self.stage, material_path)
             shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("PreviewSurface"))
@@ -337,6 +338,8 @@ class ViewerOVRTX(ViewerUSD):
                 shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
                     texture_shader.ConnectableAPI(), "rgb"
                 )
+            elif has_explicit_color:
+                shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
             else:
                 reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("DisplayColor"))
                 reader.CreateIdAttr("UsdPrimvarReader_float3")

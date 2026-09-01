@@ -123,8 +123,8 @@ class TestPalatialOVRTXViewer(unittest.TestCase):
             shader = UsdShade.Shader(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/PreviewSurface"))
             self.assertAlmostEqual(shader.GetInput("opacity").Get(), 0.38, places=6)
             self.assertAlmostEqual(shader.GetInput("ior").Get(), 1.49, places=6)
-            display_color = UsdShade.Shader(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/DisplayColor"))
-            np.testing.assert_allclose(display_color.GetInput("fallback").Get(), (1.0, 0.0, 0.0), atol=1e-6)
+            np.testing.assert_allclose(shader.GetInput("diffuseColor").Get(), (1.0, 0.0, 0.0), atol=1e-6)
+            self.assertFalse(viewer.stage.GetPrimAtPath("/Materials/Mesh_0/DisplayColor"))
             viewer.close()
 
 
