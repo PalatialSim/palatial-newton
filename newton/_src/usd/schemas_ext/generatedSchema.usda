@@ -214,6 +214,14 @@ class "NewtonRodMaterialAPI" (
         doc = "Axial compression damping."
     )
 
+    float newton:rod:bendStiffness = 0.0 (
+        doc = "Isotropic bend/twist stiffness [N*m]."
+    )
+
+    float newton:rod:bendDamping = 0.0 (
+        doc = "Isotropic bend/twist damping."
+    )
+
     float newton:rod:bendYStiffness = 1000.0 (
         doc = "Bend stiffness around one transverse local axis [N*m]."
     )

@@ -843,7 +843,7 @@ python -m newton.examples --list
 python -m newton.examples basic_viewer --viewer usd --output-path my_output.usd
 
 # Render Newton live with OVRTX on an RTX Linux host and retain the USD stage
-uv sync --extra ovrtx
+uv sync --frozen --extra examples --extra ovrtx
 python -m newton.examples basic_shapes --viewer ovrtx --num-frames 120 \
     --output-path /workspace/basic_shapes.usd \
     --ovrtx-output-path /workspace/basic_shapes.mp4 --ovrtx-fps 100
@@ -872,6 +872,33 @@ such as `rgb depth normals semantic_segmentation`, and
 playback duration agree. Render scripts may define `compose_stage`,
 `on_stage_open`, `before_frame`,
 `after_frame`, `on_render_complete`, and `on_stage_close` hooks.
+
+### Palatial validation video with OVRTX
+
+The Palatial playback command treats OVRTX as a viewer, not as a separate
+post-processing mode. One Newton world advances one simulation timeline while
+one persistent OVRTX renderer records the selected frames:
+
+```bash
+uv run python -m newton.examples.palatial.example_palatial_load \
+    /workspace/asset.newton.usda \
+    --device cuda:0 --viewer ovrtx \
+    --steps 600 --mp4-fps 60 \
+    --record-mp4 /workspace/results/asset.mp4 \
+    --validation-report /workspace/results/simulation_report.json
+```
+
+That command produces the video, an editable animated USD stage at
+`asset.usd`, copied texture dependencies under `asset_textures/`, and the
+independent semantic validation report. The simulation rate remains the rate
+authored in the input USD; OVRTX derives `render_every` from that rate and
+`--mp4-fps`, so encoded video duration matches simulated time.
+
+For a RunPod pod, use an RTX GPU with graphics-capable NVIDIA drivers, expose
+`NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video`, install FFmpeg and
+the EGL/OpenGL/Vulkan runtime libraries, then install this checkout with the
+`examples` and `ovrtx` extras above. OVRTX is supported on Linux x86-64 and
+aarch64; it is not installed by this extra on macOS.
 
 ## Contributing and Development
 

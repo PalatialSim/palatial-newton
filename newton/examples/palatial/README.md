@@ -77,8 +77,9 @@ Good starting ranges for generated anisotropic cables:
 
 ## 1. `example_palatial_load` — generic settle / drop
 
-Works for both **cloth** and **rigid** bundles. Cloth-only knobs are ignored
-on rigid assets and vice versa.
+Works for **cloth**, **rigid**, and **rod** bundles. Cloth-only knobs are
+ignored on rigid/rod assets; joint-drive flags only apply to rigid
+articulations.
 
 ```bash
 /home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
@@ -112,8 +113,67 @@ preserves the complete animated USD stage plus copied base-color textures at
   --record-mp4 /tmp/jean.mp4 --mp4-fps 60 --steps 1000
 ```
 
+There is no Palatial-specific output-mode flag. `--viewer ovrtx` changes the
+viewer backend, while the existing `--record-mp4` and `--validation-report`
+contracts remain the artifact destinations. This is a single-scene path: one
+Newton model, one OVRTX renderer, and one retained timeline.
+
+For a complete render plus semantic report:
+
+```bash
+uv run python -m newton.examples.palatial.example_palatial_load \
+  /workspace/asset.newton.usda \
+  --device cuda:0 --viewer ovrtx \
+  --steps 600 --mp4-fps 60 \
+  --record-mp4 /workspace/results/asset.mp4 \
+  --validation-report /workspace/results/simulation_report.json
+```
+
+The output set is:
+
+- `asset.mp4`: encoded OVRTX frames.
+- `asset.usd`: the full animated USD stage, including camera, lights,
+  materials, render product, and simulation time samples.
+- `asset_textures/`: portable copies of referenced base-color textures.
+- `simulation_report.json`: `palatial.newton-validation.v1` physics telemetry,
+  evaluated separately from visual output.
+
 `--ovrtx-script render_scene.py` exposes the same stage composition and
 per-frame scripting hooks as the shared Newton OVRTX viewer.
+
+`--drop-height` is support-plane clearance, not a raw Z translation. For
+example, `--drop-height 0.2` places the asset's live collision lower bound
+0.2 m above the ground (or table top) while preserving relative transforms in
+an articulation. Rod playback uses a fixed 0.5 m clearance for consistent
+framing.
+
+Use `--validation-report` when a machine-readable result is required:
+
+```bash
+... example_palatial_load ~/new_jean.newton.usda \
+  --drop-height 0.2 --steps 1000 \
+  --record-mp4 /tmp/jean.mp4 \
+  --validation-report /tmp/simulation_report.json
+```
+
+The `palatial.newton-validation.v1` report checks initial and maximum
+support-plane penetration, finite transforms, centroid displacement, linear
+speed, and the fraction of trajectory samples whose centroid stays inside a
+size-derived displacement envelope. That envelope ratio is simulator-state
+telemetry; it is not rendered-pixel visibility or a texture-quality score.
+MP4 recording is independent, so callers should validate the semantic report
+and the video artifact separately.
+
+Rod example:
+
+```bash
+/home/achuthan_palatial/Documents/Research_work/test_venv/bin/python \
+  -m newton.examples.palatial.example_palatial_load \
+  ~/hdmi_rod.newton.usda \
+  --device cuda:0 --substeps 2 \
+  --zero-gravity \
+  --gui --steps 1000
+```
 
 ## 2. `example_palatial_articulated` — drive a rigid joint chain
 
@@ -298,6 +358,16 @@ Newton's `ViewerGL.set_camera(pos, pitch, yaw)` is degree-based, Z-up:
 * pitch=-90 → look straight down (twist top view)
 
 ## Requirements
+
+For an RTX Linux or RunPod environment using OVRTX:
+
+```bash
+uv sync --frozen --extra examples --extra ovrtx
+```
+
+The container needs FFmpeg plus EGL, OpenGL, and Vulkan runtime libraries and
+`NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video`. The OVRTX extra is
+platform-gated to Linux x86-64/aarch64.
 
 In `test_venv`:
 ```bash
