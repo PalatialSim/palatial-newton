@@ -146,6 +146,7 @@ def test_shapes_on_plane(test, device, solver_fn):
     builder.add_ground_plane()
 
     model = builder.finalize(device=device)
+    model.rigid_contact_max = 150
 
     # Create solver with stability parameters for Featherstone and SemiImplicit
     # For other solvers, use the default solver_fn
@@ -181,9 +182,6 @@ def test_shapes_on_plane(test, device, solver_fn):
     substeps = 30  # Increased from 10 for better contact stability
     sim_dt = 1.0 / 60.0
     if use_cuda_graph:
-        # ensure data is allocated and modules are loaded before graph capture
-        # in case of an earlier CUDA version
-        simulate(solver, model, state_0, state_1, control, collision_pipeline, contacts, sim_dt, substeps)
         with wp.ScopedCapture(device) as capture:
             simulate(solver, model, state_0, state_1, control, collision_pipeline, contacts, sim_dt, substeps)
         graph = capture.graph
@@ -849,6 +847,7 @@ solvers = {
     "mujoco_warp": lambda model: newton.solvers.SolverMuJoCo(model, use_mujoco_cpu=False, njmax=150),
     "xpbd": lambda model: newton.solvers.SolverXPBD(model, iterations=2),
     "semi_implicit": newton.solvers.SolverSemiImplicit,
+    "kamino": newton.solvers.SolverKamino,
 }
 
 

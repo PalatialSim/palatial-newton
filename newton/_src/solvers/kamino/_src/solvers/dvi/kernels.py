@@ -8,12 +8,19 @@ from __future__ import annotations
 import warp as wp
 
 from ...core.math import FLOAT32_EPS
-from ..padmm.math import project_to_coulomb_cone, project_to_coulomb_dual_cone
-from .projections import (
-    contact_diagonal_preconditioner as _contact_diagonal_preconditioner,
+from ..padmm.math import (
+    compute_box_complementarity_residual,
+    project_to_coulomb_cone,
+    project_to_coulomb_dual_cone,
 )
 from .projections import (
-    project_contact_diagonal_update as _project_contact_diagonal_update,
+    project_box_update as _project_box_update,
+)
+from .projections import (
+    project_contact_normal_update as _project_contact_normal_update,
+)
+from .projections import (
+    project_contact_tangent_update as _project_contact_tangent_update,
 )
 from .types import DVIConfigStruct, DVIStatus
 
@@ -22,6 +29,8 @@ wp.set_module_options({"enable_backward": False})
 float32 = wp.float32
 int32 = wp.int32
 vec3f = wp.vec3f
+
+_FUSED_INEQUALITY_BLOCK = -2
 
 
 @wp.func
@@ -83,6 +92,29 @@ def _reset_dvi_solver_data(
     v_i = problem_vio[wid] + tid
     solution_lambdas[v_i] = 0.0
     solution_v_plus[v_i] = 0.0
+
+
+@wp.kernel
+def _scale_dvi_tangential_warmstart(
+    model_info_total_cts_offset: wp.array[int32],
+    data_info_contact_cts_group_offset: wp.array[int32],
+    contact_model_num_contacts: wp.array[int32],
+    contact_wid: wp.array[int32],
+    contact_cid: wp.array[int32],
+    solver_config: wp.array[DVIConfigStruct],
+    solution_lambdas: wp.array[float32],
+):
+    """Decay copied tangential warmstarts while retaining normal warmstarts."""
+    cid = wp.tid()
+    if cid >= contact_model_num_contacts[0]:
+        return
+
+    wid = contact_wid[cid]
+    vio_k = model_info_total_cts_offset[wid] + data_info_contact_cts_group_offset[wid] + 3 * contact_cid[cid]
+    cfg = solver_config[wid]
+    scale = cfg.tangential_warmstart_scale
+    solution_lambdas[vio_k] *= scale
+    solution_lambdas[vio_k + 1] *= scale
 
 
 @wp.kernel
@@ -200,12 +232,17 @@ def _compute_dvi_status_residuals(
     problem_dim: wp.array[int32],
     problem_vio: wp.array[int32],
     problem_njc: wp.array[int32],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
+    problem_bcgo: wp.array[int32],
     problem_lcgo: wp.array[int32],
     problem_ccgo: wp.array[int32],
+    problem_bcio: wp.array[int32],
     problem_cio: wp.array[int32],
     problem_mu: wp.array[float32],
+    problem_bound_lower: wp.array[float32],
+    problem_bound_upper: wp.array[float32],
     solver_config: wp.array[DVIConfigStruct],
     state_v_aug: wp.array[float32],
     solution_lambdas: wp.array[float32],
@@ -217,10 +254,13 @@ def _compute_dvi_status_residuals(
     ncts = problem_dim[wid]
     vio = problem_vio[wid]
     njc = problem_njc[wid]
+    nbc = problem_nbc[wid]
     nl = problem_nl[wid]
     nc = problem_nc[wid]
+    bcgo = problem_bcgo[wid]
     lcgo = problem_lcgo[wid]
     ccgo = problem_ccgo[wid]
+    bcio = problem_bcio[wid]
     cio = problem_cio[wid]
     cfg = solver_config[wid]
 
@@ -239,6 +279,18 @@ def _compute_dvi_status_residuals(
     for jid in range(njc):
         v_j = state_v_aug[vio + jid]
         r_b = wp.max(r_b, wp.abs(v_j))
+
+    # Bounded-multiplier rows require lambda in the box `[lower, upper]` and directional
+    # complementarity with the face selected by the sign of v_aug. There is no dual
+    # condition, since v_aug is free to take either sign on a box row.
+    for bid in range(nbc):
+        bcio_v = vio + bcgo + bid
+        lambda_b = solution_lambdas[bcio_v]
+        v_b = state_v_aug[bcio_v]
+        lower = problem_bound_lower[bcio + bid]
+        upper = problem_bound_upper[bcio + bid]
+        r_p = wp.max(r_p, wp.abs(lambda_b - wp.clamp(lambda_b, lower, upper)))
+        r_c = wp.max(r_c, wp.abs(compute_box_complementarity_residual(lambda_b, v_b, lower, upper)))
 
     # Limits require lambda and v_aug in R+ with lambda * v_aug = 0.
     for lid in range(nl):
@@ -261,8 +313,8 @@ def _compute_dvi_status_residuals(
         r_d = wp.max(r_d, wp.max(wp.abs(v_c - v_proj)))
         r_c = wp.max(r_c, wp.abs(wp.dot(lambda_c, v_c)))
 
-    # Thus r_p and r_d are infinity-norm cone-projection distances, while r_c
-    # is the maximum absolute impulse-velocity inner product.
+    # Thus r_p and r_d are infinity-norm box- and cone-projection distances, while r_c
+    # is the maximum absolute impulse-velocity product.
     status.r_b = r_b
     status.r_p = r_p
     status.r_d = wp.max(r_d, r_b)
@@ -295,6 +347,7 @@ def _initialize_dvi_status(
 @wp.kernel
 def _set_dvi_direct_status_iterations(
     # Inputs:
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
     solver_config: wp.array[DVIConfigStruct],
@@ -304,7 +357,7 @@ def _set_dvi_direct_status_iterations(
     wid = wp.tid()
     cfg = solver_config[wid]
     status = solver_status[wid]
-    if problem_nl[wid] == int32(0) and problem_nc[wid] == int32(0):
+    if problem_nbc[wid] == int32(0) and problem_nl[wid] == int32(0) and problem_nc[wid] == int32(0):
         status.iterations = int32(1)
     else:
         status.iterations = cfg.max_alternating_iterations * cfg.inequality_sweeps_per_iteration
@@ -315,6 +368,7 @@ def _set_dvi_direct_status_iterations(
 def _set_dvi_bilateral_active_dim(
     # Inputs:
     problem_njc: wp.array[int32],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
     block_iteration: int32,
@@ -324,7 +378,7 @@ def _set_dvi_bilateral_active_dim(
 ):
     wid = wp.tid()
     active_dim = int32(0)
-    if problem_nl[wid] > int32(0) or problem_nc[wid] > int32(0):
+    if problem_nbc[wid] > int32(0) or problem_nl[wid] > int32(0) or problem_nc[wid] > int32(0):
         if block_iteration < int32(0):
             active_dim = problem_njc[wid]
         else:
@@ -348,26 +402,27 @@ def _compute_dvi_unilateral_velocities(
     problem_dim: wp.array[int32],
     problem_mio: wp.array[int32],
     problem_vio: wp.array[int32],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
-    problem_lcgo: wp.array[int32],
-    problem_ccgo: wp.array[int32],
+    problem_bcgo: wp.array[int32],
     problem_D: wp.array[float32],
     problem_v_f: wp.array[float32],
     solution_lambdas: wp.array[float32],
     state_v_aug: wp.array[float32],
 ):
-    """Evaluate every limit and contact row at the current dual iterate."""
+    """Evaluate every bounded, limit, and contact row at the current dual iterate."""
     wid, local_row = wp.tid()
+    nbc = problem_nbc[wid]
     nl = problem_nl[wid]
     nc = problem_nc[wid]
-    unilateral_rows = nl + int32(3) * nc
+    unilateral_rows = nbc + nl + int32(3) * nc
     if local_row >= unilateral_rows:
         return
     ncts = problem_dim[wid]
     mio = problem_mio[wid]
     vio = problem_vio[wid]
-    row = problem_lcgo[wid] + local_row
+    row = problem_bcgo[wid] + local_row
     state_v_aug[vio + row] = _compute_row_velocity(ncts, mio, vio, row, problem_D, problem_v_f, solution_lambdas)
 
 
@@ -376,13 +431,18 @@ def _solve_dvi_inequalities_colored_pgs(
     problem_dim: wp.array[int32],
     problem_mio: wp.array[int32],
     problem_vio: wp.array[int32],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
+    problem_bcgo: wp.array[int32],
     problem_lcgo: wp.array[int32],
     problem_ccgo: wp.array[int32],
+    problem_bcio: wp.array[int32],
     problem_cio: wp.array[int32],
     problem_uio: wp.array[int32],
     problem_mu: wp.array[float32],
+    problem_bound_lower: wp.array[float32],
+    problem_bound_upper: wp.array[float32],
     problem_D: wp.array[float32],
     block_iteration: int32,
     inequality_num_colors: wp.array[int32],
@@ -401,96 +461,135 @@ def _solve_dvi_inequalities_colored_pgs(
     if block_iteration >= int32(0) and block_iteration >= cfg.max_alternating_iterations:
         return
 
+    nbc = problem_nbc[wid]
     nl = problem_nl[wid]
     nc = problem_nc[wid]
-    nu = nl + nc
+    nu = nbc + nl + nc
     if nu == 0:
         return
     ncts = problem_dim[wid]
     mio = problem_mio[wid]
     vio = problem_vio[wid]
+    bcgo = problem_bcgo[wid]
     lcgo = problem_lcgo[wid]
     ccgo = problem_ccgo[wid]
+    bcio = problem_bcio[wid]
     cio = problem_cio[wid]
     uio = problem_uio[wid]
     schedule_offset = uio + wid
     contact_end = ccgo + int32(3) * nc
-    for _sweep in range(cfg.inequality_sweeps_per_iteration):
-        for color in range(inequality_num_colors[wid]):
-            color_start = inequality_color_starts[schedule_offset + color]
-            color_end = inequality_color_starts[schedule_offset + color + int32(1)]
-            color_slot = color_start + lane
-            while color_slot < color_end:
-                uid = inequality_ids_by_color[uio + color_slot]
-                delta_0 = float32(0.0)
-                delta_1 = float32(0.0)
-                delta_2 = float32(0.0)
-                column = lcgo + uid
-                column_count = int32(1)
-                if uid < nl:
-                    vec_idx = vio + column
-                    lambda_limit_old = solution_lambdas[vec_idx]
-                    diagonal = wp.abs(problem_D[mio + ncts * column + column])
-                    lambda_limit_new = lambda_limit_old
-                    if diagonal > FLOAT32_EPS:
-                        lambda_limit_new = wp.max(
-                            float32(0.0),
-                            lambda_limit_old - cfg.omega * state_v_aug[vec_idx] / (diagonal + cfg.regularization),
-                        )
-                    solution_lambdas[vec_idx] = lambda_limit_new
-                    delta_0 = lambda_limit_new - lambda_limit_old
-                else:
-                    cid = uid - nl
-                    column = ccgo + int32(3) * cid
-                    column_count = int32(3)
-                    vec_idx = vio + column
-                    mu = problem_mu[cio + cid]
-                    v_t0 = state_v_aug[vec_idx]
-                    v_t1 = state_v_aug[vec_idx + int32(1)]
-                    velocity = vec3f(
-                        v_t0,
-                        v_t1,
-                        state_v_aug[vec_idx + int32(2)] + mu * wp.sqrt(v_t0 * v_t0 + v_t1 * v_t1),
-                    )
-                    lambda_contact_old = vec3f(
-                        solution_lambdas[vec_idx],
-                        solution_lambdas[vec_idx + int32(1)],
-                        solution_lambdas[vec_idx + int32(2)],
-                    )
-                    contact_diagonal = vec3f(
-                        wp.abs(problem_D[mio + ncts * column + column]),
-                        wp.abs(problem_D[mio + ncts * (column + int32(1)) + column + int32(1)]),
-                        wp.abs(problem_D[mio + ncts * (column + int32(2)) + column + int32(2)]),
-                    )
-                    lambda_contact_new = _project_contact_diagonal_update(
-                        lambda_contact_old,
-                        velocity,
-                        _contact_diagonal_preconditioner(contact_diagonal),
-                        cfg.regularization,
-                        cfg.omega,
-                        mu,
-                    )
-                    contact_delta = lambda_contact_new - lambda_contact_old
-                    solution_lambdas[vec_idx] = lambda_contact_new.x
-                    solution_lambdas[vec_idx + int32(1)] = lambda_contact_new.y
-                    solution_lambdas[vec_idx + int32(2)] = lambda_contact_new.z
-                    delta_0 = contact_delta.x
-                    delta_1 = contact_delta.y
-                    delta_2 = contact_delta.z
+    sweep_count = cfg.inequality_sweeps_per_iteration
+    if block_iteration == int32(_FUSED_INEQUALITY_BLOCK):
+        sweep_count *= cfg.max_alternating_iterations
+    for _sweep in range(sweep_count):
+        phase_count = int32(2)
+        if block_iteration == int32(_FUSED_INEQUALITY_BLOCK) and _sweep < sweep_count / int32(2):
+            # Establish the support load before friction in inequality-only solves.
+            phase_count = int32(1)
+        for phase in range(phase_count):
+            # Symmetric tangent ordering reduces load bias in redundant sticking patches.
+            reverse_colors = phase == int32(1) and _sweep % int32(2) != int32(0)
+            num_colors = inequality_num_colors[wid]
+            for color_index in range(num_colors):
+                color = color_index
+                if reverse_colors:
+                    color = num_colors - int32(1) - color_index
+                color_start = inequality_color_starts[schedule_offset + color]
+                color_end = inequality_color_starts[schedule_offset + color + int32(1)]
+                color_slot = color_start + lane
+                while color_slot < color_end:
+                    uid = inequality_ids_by_color[uio + color_slot]
+                    delta_0 = float32(0.0)
+                    delta_1 = float32(0.0)
+                    column = bcgo + uid
+                    column_count = int32(1)
+                    active = int32(1)
+                    if uid < nbc:
+                        if phase == int32(1):
+                            active = int32(0)
+                        else:
+                            vec_idx = vio + column
+                            bio = bcio + uid
+                            lambda_bound_old = solution_lambdas[vec_idx]
+                            diagonal = wp.abs(problem_D[mio + ncts * column + column])
+                            lambda_bound_new = _project_box_update(
+                                lambda_bound_old,
+                                state_v_aug[vec_idx],
+                                diagonal,
+                                cfg.regularization,
+                                cfg.omega,
+                                problem_bound_lower[bio],
+                                problem_bound_upper[bio],
+                            )
+                            solution_lambdas[vec_idx] = lambda_bound_new
+                            delta_0 = lambda_bound_new - lambda_bound_old
+                    elif uid < nbc + nl:
+                        column = lcgo + (uid - nbc)
+                        if phase == int32(1):
+                            active = int32(0)
+                        else:
+                            vec_idx = vio + column
+                            lambda_limit_old = solution_lambdas[vec_idx]
+                            diagonal = wp.abs(problem_D[mio + ncts * column + column])
+                            lambda_limit_new = lambda_limit_old
+                            if diagonal > FLOAT32_EPS:
+                                lambda_limit_new = wp.max(
+                                    float32(0.0),
+                                    lambda_limit_old
+                                    - cfg.omega * state_v_aug[vec_idx] / (diagonal + cfg.regularization),
+                                )
+                            solution_lambdas[vec_idx] = lambda_limit_new
+                            delta_0 = lambda_limit_new - lambda_limit_old
+                    else:
+                        cid = uid - nbc - nl
+                        column = ccgo + int32(3) * cid
+                        if phase == int32(0):
+                            column += int32(2)
+                            vec_idx = vio + column
+                            lambda_n_old = solution_lambdas[vec_idx]
+                            diagonal_n = wp.abs(problem_D[mio + ncts * column + column])
+                            lambda_n_new = _project_contact_normal_update(
+                                lambda_n_old,
+                                state_v_aug[vec_idx],
+                                diagonal_n,
+                                cfg.regularization,
+                                cfg.omega,
+                            )
+                            solution_lambdas[vec_idx] = lambda_n_new
+                            delta_0 = lambda_n_new - lambda_n_old
+                        else:
+                            column_count = int32(2)
+                            vec_idx = vio + column
+                            lambda_t0_old = solution_lambdas[vec_idx]
+                            lambda_t1_old = solution_lambdas[vec_idx + int32(1)]
+                            diagonal_t0 = wp.abs(problem_D[mio + ncts * column + column])
+                            diagonal_t1 = wp.abs(problem_D[mio + ncts * (column + int32(1)) + column + int32(1)])
+                            lambda_t_old = wp.vec2f(lambda_t0_old, lambda_t1_old)
+                            lambda_t_new = _project_contact_tangent_update(
+                                lambda_t_old,
+                                wp.vec2f(state_v_aug[vec_idx], state_v_aug[vec_idx + int32(1)]),
+                                wp.vec2f(diagonal_t0, diagonal_t1),
+                                problem_D[mio + ncts * column + column + int32(1)],
+                                cfg.regularization,
+                                cfg.omega,
+                                problem_mu[cio + cid] * solution_lambdas[vec_idx + int32(2)],
+                            )
+                            solution_lambdas[vec_idx] = lambda_t_new.x
+                            solution_lambdas[vec_idx + int32(1)] = lambda_t_new.y
+                            delta_0 = lambda_t_new.x - lambda_t_old.x
+                            delta_1 = lambda_t_new.y - lambda_t_old.y
 
-                row = lcgo
-                while row < contact_end:
-                    row_mio = mio + ncts * row
-                    dv = problem_D[row_mio + column] * delta_0
-                    if column_count == int32(3):
-                        dv += (
-                            problem_D[row_mio + column + int32(1)] * delta_1
-                            + problem_D[row_mio + column + int32(2)] * delta_2
-                        )
-                    wp.atomic_add(state_v_aug, vio + row, dv)
-                    row += int32(1)
-                color_slot += threads_per_world
-            _sync_threads()
+                    if active != int32(0):
+                        row = bcgo
+                        while row < contact_end:
+                            row_mio = mio + ncts * row
+                            dv = problem_D[row_mio + column] * delta_0
+                            if column_count == int32(2):
+                                dv += problem_D[row_mio + column + int32(1)] * delta_1
+                            wp.atomic_add(state_v_aug, vio + row, dv)
+                            row += int32(1)
+                    color_slot += threads_per_world
+                _sync_threads()
 
 
 @wp.kernel

@@ -40,6 +40,9 @@ class DVIConfigStruct:
     inequality_sweeps_per_iteration: int32
     """Projected sweeps for unilateral inequalities in each direct-bilateral block."""
 
+    tangential_warmstart_scale: float32
+    """Scale applied to cached tangential reactions before each solve."""
+
     bilateral_solve_interval: int32
     """Block iteration period for repeated direct bilateral solves."""
 
@@ -53,11 +56,11 @@ class DVIStatus:
     iterations: int32
     """Projected sweeps; direct-bilateral solves report block/contact sweeps."""
     r_p: float32
-    """Primal cone-feasibility residual."""
+    """Maximum primal box- and cone-feasibility residual."""
     r_d: float32
     """Maximum dual cone-feasibility and bilateral velocity residual."""
     r_c: float32
-    """Maximum absolute impulse-velocity inner product."""
+    """Maximum absolute impulse-velocity product, directional on box rows."""
     r_b: float32
     """Bilateral constraint-space velocity residual."""
 
@@ -110,18 +113,18 @@ class DVIState:
         self.v_aug = wp.zeros(size.sum_of_max_total_cts, dtype=float32)
         self.s = wp.zeros(size.sum_of_max_total_cts, dtype=float32)
         self.scratch = wp.zeros(size.sum_of_max_total_cts, dtype=float32)
-        self.bilateral_rhs = wp.zeros(size.sum_of_num_joint_cts, dtype=float32)
-        self.bilateral_solution = wp.zeros(size.sum_of_num_joint_cts, dtype=float32)
-        self.bilateral_preconditioner = wp.zeros(size.sum_of_num_joint_cts, dtype=float32)
+        self.bilateral_rhs = wp.zeros(size.sum_of_num_bilateral_joint_cts, dtype=float32)
+        self.bilateral_solution = wp.zeros(size.sum_of_num_bilateral_joint_cts, dtype=float32)
+        self.bilateral_preconditioner = wp.zeros(size.sum_of_num_bilateral_joint_cts, dtype=float32)
         self.bilateral_active_dim = wp.zeros(size.num_worlds, dtype=int32)
         self.limit_indices = wp.full(max(1, size.sum_of_max_limits), -1, dtype=int32)
         self.contact_indices = wp.full(max(1, size.sum_of_max_contacts), -1, dtype=int32)
-        self.inequality_bodies = wp.full(max(1, size.sum_of_max_unilaterals), vec2i(-1, -1), dtype=vec2i)
+        self.inequality_bodies = wp.full(max(1, size.sum_of_max_inequalities), vec2i(-1, -1), dtype=vec2i)
         self.inequality_body_color_masks = wp.zeros(max(1, size.sum_of_num_bodies), dtype=uint64)
-        self.inequality_colors = wp.full(max(1, size.sum_of_max_unilaterals), -1, dtype=int32)
+        self.inequality_colors = wp.full(max(1, size.sum_of_max_inequalities), -1, dtype=int32)
         self.inequality_num_colors = wp.zeros(max(1, size.num_worlds), dtype=int32)
-        self.inequality_ids_by_color = wp.full(max(1, size.sum_of_max_unilaterals), -1, dtype=int32)
-        self.inequality_color_starts = wp.zeros(max(1, size.sum_of_max_unilaterals + size.num_worlds), dtype=int32)
+        self.inequality_ids_by_color = wp.full(max(1, size.sum_of_max_inequalities), -1, dtype=int32)
+        self.inequality_color_starts = wp.zeros(max(1, size.sum_of_max_inequalities + size.num_worlds), dtype=int32)
 
     def reset(self):
         """Reset scratch arrays to zero."""
@@ -180,5 +183,6 @@ def convert_config_to_struct(config: DVISolverConfig) -> DVIConfigStruct:
     config_struct.omega = config.omega
     config_struct.max_alternating_iterations = config.max_alternating_iterations
     config_struct.inequality_sweeps_per_iteration = config.inequality_sweeps_per_iteration
+    config_struct.tangential_warmstart_scale = config.tangential_warmstart_scale
     config_struct.bilateral_solve_interval = config.bilateral_solve_interval
     return config_struct

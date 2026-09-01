@@ -5,11 +5,13 @@
 
 from __future__ import annotations
 
+import math
 import operator
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import warp as wp
@@ -19,11 +21,13 @@ import warp.sparse as wps
 import newton
 
 from ...core.types import override
+from ...geometry.particle_surface import ParticleSurface
 from ...sim import ModelFlags, StateFlags
 from ...utils.deprecation import deprecate_nonkeyword_arguments
 from ..coupled.interface import CouplingInterface
 from ..solver import SolverBase
 from .implicit_mpm_model import ImplicitMPMModel
+from .particle_surface_colliders import extrapolate_surface_sdf_into_colliders
 from .rasterized_collisions import (
     Collider,
     build_rigidity_operator,
@@ -138,6 +142,19 @@ def _sparse_grid_rebuild_error(status: int) -> RuntimeError:
     return RuntimeError(f"Implicit MPM sparse grid rebuild failed with status {status}.")
 
 
+@wp.kernel(enable_backward=False)
+def _clear_sparse_grid_rebuild_status_masked(
+    world_mask: wp.array[wp.bool],
+    status: wp.array[wp.uint32],
+    accumulated_status: wp.array[wp.uint32],
+):
+    for world in range(world_mask.shape[0]):
+        if world_mask[world]:
+            status[0] = wp.uint32(0)
+            accumulated_status[0] = wp.uint32(0)
+            return
+
+
 def _validate_sparse_grid_node_capacity(name: str, value: int) -> int:
     """Validate one optional NanoVDB hierarchy capacity."""
     if isinstance(value, bool):
@@ -153,24 +170,34 @@ def _validate_sparse_grid_node_capacity(name: str, value: int) -> int:
     return capacity
 
 
-def _make_grid_basis_space(grid: fem.Geometry, basis_str: str, family: fem.Polynomial | None = None):
-    assert len(basis_str) >= 2
-
-    degree = int(basis_str[1])
-    discontinuous = degree == 0 or basis_str[-1] == "d"
-
-    if basis_str[0] == "B":
-        element_basis = fem.ElementBasis.BSPLINE
-    elif basis_str[0] == "Q":
-        element_basis = fem.ElementBasis.LAGRANGE
-    elif basis_str[0] == "S":
-        element_basis = fem.ElementBasis.SERENDIPITY
-    elif basis_str[0] == "P" and discontinuous:
-        element_basis = fem.ElementBasis.NONCONFORMING_POLYNOMIAL
-    else:
+def _parse_grid_basis_name(basis_str: str) -> tuple[str, int, bool]:
+    """Parse and validate Newton's compact grid-basis spelling."""
+    match = re.fullmatch(r"([BQSP])([0-9]+)(d?)", basis_str)
+    if match is None:
         raise ValueError(
-            f"Unsupported basis: {basis_str}. Expected format: Q<degree>[d], S<degree>, or P<degree>[d] for tri-polynomial, serendipity, or non-conforming polynomial respectively."
+            f"Unsupported basis: {basis_str}. Expected format: B<degree>[d], Q<degree>[d], "
+            "S<degree>[d], P0, or P<positive-degree>d."
         )
+
+    basis_type, degree_text, discontinuous_suffix = match.groups()
+    degree = int(degree_text)
+    discontinuous = degree == 0 or discontinuous_suffix == "d"
+    if basis_type == "P" and not discontinuous:
+        raise ValueError(f"Unsupported basis: {basis_str}. Non-conforming polynomial (P) bases must be discontinuous.")
+    return basis_type, degree, discontinuous
+
+
+def _make_grid_basis_space(grid: fem.Geometry, basis_str: str, family: fem.Polynomial | None = None):
+    basis_type, degree, discontinuous = _parse_grid_basis_name(basis_str)
+
+    if basis_type == "B":
+        element_basis = fem.ElementBasis.BSPLINE
+    elif basis_type == "Q":
+        element_basis = fem.ElementBasis.LAGRANGE
+    elif basis_type == "S":
+        element_basis = fem.ElementBasis.SERENDIPITY
+    elif basis_type == "P":
+        element_basis = fem.ElementBasis.NONCONFORMING_POLYNOMIAL
 
     return fem.make_polynomial_basis_space(
         grid, degree=degree, element_basis=element_basis, family=family, discontinuous=discontinuous
@@ -196,8 +223,11 @@ _RheologySolverName = Literal[
     "gauss-seidel-batched",
     "jacobi",
     "cg",
+    "conjugate-gradient",
     "cr",
+    "conjugate-residual",
     "gmres",
+    "generalized-minimal-residual",
 ]
 _MPMVelocityBasisName = Literal["Q1", "B2", "B3"]
 # Python typing cannot express the accepted ``"pic"`` / ``"picN"`` basis family.
@@ -703,6 +733,7 @@ class LastStepData:
         collider_body_q: wp.array[wp.transform] | None,
         body_world: wp.array[wp.int32] | None = None,
         world_mask: wp.array[wp.bool] | None = None,
+        world_count: int | None = None,
     ):
         had_previous = self.body_q_prev is not None and (
             collider_body_q is None or self.body_q_prev.shape == collider_body_q.shape
@@ -712,10 +743,12 @@ class LastStepData:
             if world_mask is None or body_world is None or not had_previous:
                 self.body_q_prev.assign(collider_body_q)
             else:
+                if world_count is None:
+                    raise ValueError("world_count is required with world_mask.")
                 wp.launch(
                     reset_mpm_collider_history,
                     dim=collider_body_q.shape[0],
-                    inputs=[body_world, world_mask, collider_body_q, self.body_q_prev],
+                    inputs=[body_world, world_mask, world_count, collider_body_q, self.body_q_prev],
                     device=collider_body_q.device,
                 )
 
@@ -757,8 +790,9 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
     capture resources internally. Run an uncaptured warm-up step for rheology
     modes that build an inner graph lazily, and keep model topology, solver
     configuration, captured buffers, and step arguments fixed across replays.
-    Keep :meth:`reset` outside capture and call :meth:`check_status` after
-    replay to report sparse-grid capacity failures.
+    Keep :meth:`reset` outside capture and call
+    :meth:`check_sparse_grid_rebuild_status` after replay to report
+    sparse-grid capacity failures.
 
     [1] https://doi.org/10.1145/2897824.2925877
 
@@ -798,9 +832,11 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         (B2, B3).  Accepted values: ``"auto"``, ``"gs"`` (or
         ``"gauss-seidel"``), ``"gs-soa"`` (or ``"gauss-seidel-soa"``),
         ``"gs-batched"`` (or ``"gauss-seidel-batched"``), ``"jacobi"``,
-        ``"cg"``, ``"cr"``, ``"gmres"``.  Pass an ordered sequence to
-        warmstart solvers left-to-right, e.g. ``("cr", "gs")`` or
-        ``("cg", "jacobi", "gs")``."""
+        ``"conjugate-gradient"`` (or ``"cg"``), ``"conjugate-residual"``
+        (or ``"cr"``), ``"generalized-minimal-residual"`` (or ``"gmres"``).
+        Pass an ordered sequence to warmstart solvers left-to-right, e.g.
+        ``("conjugate-residual", "gauss-seidel")`` or
+        ``("conjugate-gradient", "jacobi", "gauss-seidel")``."""
         warmstart_mode: Literal["none", "auto", "particles", "grid", "smoothed"] = "auto"
         """Warmstart mode to use for the rheology solver.
 
@@ -830,8 +866,8 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         A positive value reserves persistent sparse-grid capacity and bounds
         active subsets of dense and fixed grids.
         ``-1`` retains per-step sparse-grid allocation and uses exact active
-        counts elsewhere. Call :meth:`check_status` after graph replay to
-        detect sparse-grid overflow.
+        counts elsewhere. Call :meth:`check_sparse_grid_rebuild_status` after
+        graph replay to detect sparse-grid overflow.
         """
         max_leaf_node_count: int = -1
         """Maximum NanoVDB leaf-node count across all worlds.
@@ -905,6 +941,250 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
             Isolated multi-world MPM configuration and behavior may change
             without prior notice.
         """
+
+        @classmethod
+        def create_from_usd(cls, scene_prim: Any) -> SolverImplicitMPM.Config:
+            """Create a solver configuration from ``NewtonMPMSceneAPI``.
+
+            Only authored USD values override :class:`Config` defaults, so the
+            Python defaults remain the source of simulator-default values.
+            Authored ``-inf`` values on dimensional attributes using the USD
+            simulator-default convention retain those Python defaults. Length
+            values authored in stage units are converted to meters. Following
+            :meth:`ModelBuilder.add_usd`, unauthored stage unit metadata is
+            interpreted as one meter and one kilogram per stage unit.
+
+            Args:
+                scene_prim: A ``UsdPhysics.Scene`` prim with
+                    ``NewtonMPMSceneAPI`` applied, or its typed schema object.
+
+            Returns:
+                A validated MPM solver configuration.
+
+            Raises:
+                TypeError: If ``scene_prim`` is not a USD physics scene prim.
+                ValueError: If the API is absent or an authored value is invalid.
+            """
+            try:
+                from pxr import UsdGeom, UsdPhysics
+            except ImportError as error:
+                raise ImportError("Creating an MPM config from USD requires usd-core.") from error
+
+            from ...usd import utils as usd  # noqa: PLC0415
+
+            prim = scene_prim.GetPrim() if hasattr(scene_prim, "GetPrim") else scene_prim
+            if not prim or not prim.IsValid() or not prim.IsA(UsdPhysics.Scene):
+                raise TypeError("scene_prim must be a valid UsdPhysics.Scene prim.")
+            path = str(prim.GetPath())
+            if not usd.has_applied_api_schema(prim, "NewtonMPMSceneAPI"):
+                raise ValueError(f"{path}: NewtonMPMSceneAPI is not applied.")
+
+            config = cls()
+
+            def authored(name: str):
+                attr = prim.GetAttribute(name)
+                if not attr or not attr.HasAuthoredValue():
+                    return None
+                value = attr.Get()
+                if value is None:
+                    raise ValueError(f"{path}: authored attribute {name!r} has no value.")
+                return value
+
+            def finite_float(name: str, value: Any, *, minimum: float | None = None) -> float:
+                try:
+                    result = float(value)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{path}: {name} must be a finite number, got {value!r}.") from error
+                if not math.isfinite(result) or (minimum is not None and result < minimum):
+                    qualifier = f" greater than or equal to {minimum}" if minimum is not None else ""
+                    raise ValueError(f"{path}: {name} must be a finite number{qualifier}, got {value!r}.")
+                return result
+
+            def requests_simulator_default(name: str, value: Any) -> bool:
+                try:
+                    result = float(value)
+                except (TypeError, ValueError) as error:
+                    raise ValueError(f"{path}: {name} must be a number, got {value!r}.") from error
+                return result == float("-inf")
+
+            def integer(name: str, value: Any, *, allow_minus_one: bool = False) -> int:
+                if isinstance(value, (bool, np.bool_)):
+                    raise ValueError(f"{path}: {name} must be an integer, got {value!r}.")
+                try:
+                    result = operator.index(value)
+                except TypeError as error:
+                    raise ValueError(f"{path}: {name} must be an integer, got {value!r}.") from error
+                if result < 0 and not (allow_minus_one and result == -1):
+                    suffix = " or -1" if allow_minus_one else ""
+                    raise ValueError(f"{path}: {name} must be non-negative{suffix}, got {result}.")
+                return result
+
+            def token(name: str, value: Any, allowed: set[str]) -> str:
+                result = str(value)
+                if result not in allowed:
+                    raise ValueError(f"{path}: {name} must be one of {sorted(allowed)}, got {result!r}.")
+                return result
+
+            value = authored("newton:maxSolverIterations")
+            if value is not None:
+                value = integer("newton:maxSolverIterations", value, allow_minus_one=True)
+                if value == 0:
+                    raise ValueError(f"{path}: newton:maxSolverIterations must be positive or -1, got 0.")
+                if value != -1:
+                    config.max_iterations = value
+
+            value = authored("newton:mpm:tolerance")
+            if value is not None:
+                config.tolerance = finite_float("newton:mpm:tolerance", value, minimum=0.0)
+                if config.tolerance == 0.0:
+                    raise ValueError(f"{path}: newton:mpm:tolerance must be positive.")
+
+            value = authored("newton:mpm:rheologySolvers")
+            if value is not None:
+                solvers = tuple(str(item) for item in value)
+                solver_names = {
+                    "auto": "auto",
+                    "gauss-seidel": "gauss-seidel",
+                    "gauss-seidel-soa": "gauss-seidel-soa",
+                    "gauss-seidel-batched": "gauss-seidel-batched",
+                    "jacobi": "jacobi",
+                    "conjugate-gradient": "cg",
+                    "conjugate-residual": "cr",
+                    "generalized-minimal-residual": "gmres",
+                }
+                if not solvers or any(item not in solver_names for item in solvers):
+                    raise ValueError(
+                        f"{path}: newton:mpm:rheologySolvers must be a non-empty ordered array of supported tokens, "
+                        f"got {solvers!r}."
+                    )
+                config.solver = tuple(solver_names[item] for item in solvers)
+
+            token_fields = (
+                ("newton:mpm:gridType", "grid_type", {"sparse", "dense", "fixed"}),
+                ("newton:mpm:transferScheme", "transfer_scheme", {"apic", "pic"}),
+                ("newton:mpm:integrationScheme", "integration_scheme", {"pic", "gimp"}),
+            )
+            for usd_name, field_name, allowed in token_fields:
+                value = authored(usd_name)
+                if value is not None:
+                    setattr(config, field_name, token(usd_name, value, allowed))
+
+            stage = prim.GetStage()
+            linear_unit = (
+                float(UsdGeom.GetStageMetersPerUnit(stage)) if UsdGeom.StageHasAuthoredMetersPerUnit(stage) else 1.0
+            )
+            if not math.isfinite(linear_unit) or linear_unit <= 0.0:
+                raise ValueError(f"{path}: metersPerUnit must be finite and positive, got {linear_unit!r}.")
+            mass_unit = (
+                float(UsdPhysics.GetStageKilogramsPerUnit(stage))
+                if UsdPhysics.StageHasAuthoredKilogramsPerUnit(stage)
+                else 1.0
+            )
+            if not math.isfinite(mass_unit) or mass_unit <= 0.0:
+                raise ValueError(f"{path}: kilogramsPerUnit must be finite and positive, got {mass_unit!r}.")
+            value = authored("newton:mpm:voxelSize")
+            if value is not None and not requests_simulator_default("newton:mpm:voxelSize", value):
+                config.voxel_size = finite_float("newton:mpm:voxelSize", value, minimum=0.0) * linear_unit
+                if not math.isfinite(config.voxel_size) or config.voxel_size <= 0.0:
+                    raise ValueError(f"{path}: newton:mpm:voxelSize must convert to a finite positive SI distance.")
+
+            value = authored("newton:mpm:gridPadding")
+            if value is not None:
+                config.grid_padding = integer("newton:mpm:gridPadding", value)
+
+            value = authored("newton:mpm:maxActiveCellCount")
+            if value is not None:
+                try:
+                    config.max_active_cell_count = _validate_sparse_grid_node_capacity("max_active_cell_count", value)
+                except ValueError as error:
+                    raise ValueError(f"{path}: invalid newton:mpm:maxActiveCellCount: {error}") from error
+
+            value = authored("newton:mpm:criticalFraction")
+            if value is not None:
+                config.critical_fraction = finite_float("newton:mpm:criticalFraction", value, minimum=0.0)
+                if config.critical_fraction > 1.0:
+                    raise ValueError(f"{path}: newton:mpm:criticalFraction must not exceed 1.0.")
+            value = authored("newton:mpm:airDrag")
+            if value is not None and not requests_simulator_default("newton:mpm:airDrag", value):
+                authored_air_drag = finite_float("newton:mpm:airDrag", value, minimum=0.0)
+                config.air_drag = authored_air_drag * mass_unit
+                if not math.isfinite(config.air_drag) or (authored_air_drag != 0.0 and config.air_drag == 0.0):
+                    raise ValueError(f"{path}: newton:mpm:airDrag must convert to a finite, representable SI value.")
+
+            def read_basis(prefix: str, field_name: str, allowed_types: set[str]) -> None:
+                """Compose the schema's basis fields into Newton's compact basis name."""
+                type_name = f"newton:mpm:{prefix}BasisType"
+                order_name = f"newton:mpm:{prefix}BasisOrder"
+                discontinuous_name = f"newton:mpm:{prefix}DiscontinuousBasis"
+                attrs = (
+                    prim.GetAttribute(type_name),
+                    prim.GetAttribute(order_name),
+                    prim.GetAttribute(discontinuous_name),
+                )
+                if not any(attr and attr.HasAuthoredValue() for attr in attrs):
+                    return
+
+                basis_type = token(
+                    type_name,
+                    attrs[0].Get(),
+                    allowed_types,
+                )
+                order = integer(order_name, attrs[1].Get())
+                discontinuous = attrs[2].Get()
+                if not isinstance(discontinuous, (bool, np.bool_)):
+                    raise ValueError(f"{path}: {discontinuous_name} must be bool, got {discontinuous!r}.")
+
+                if basis_type == "particle":
+                    # The current runtime has no USD representation for its
+                    # optional picN capacity suffix. Plain "pic" is the stable
+                    # particle-basis spelling; order and continuity do not apply.
+                    basis = "pic"
+                else:
+                    if basis_type in ("bspline", "serendipity") and not 1 <= order <= 3:
+                        raise ValueError(
+                            f"{path}: {type_name}={basis_type!r} supports {order_name} values from 1 through 3, "
+                            f"got {order}."
+                        )
+                    prefix_by_type = {
+                        "linear": "P",
+                        "trilinear": "Q",
+                        "bspline": "B",
+                        "serendipity": "S",
+                    }
+                    basis = f"{prefix_by_type[basis_type]}{order}"
+                    # Degree-zero spaces are inherently discontinuous, so the
+                    # authored flag only changes positive-order basis names.
+                    if bool(discontinuous) and order > 0:
+                        basis += "d"
+                    _parse_grid_basis_name(basis)
+                setattr(config, field_name, basis)
+
+            read_basis(
+                "collider",
+                "collider_basis",
+                {"linear", "trilinear", "bspline", "serendipity", "particle"},
+            )
+            read_basis("strain", "strain_basis", {"linear", "trilinear", "particle"})
+
+            velocity_type_name = "newton:mpm:velocityBasisType"
+            velocity_order_name = "newton:mpm:velocityBasisOrder"
+            velocity_attrs = (
+                prim.GetAttribute(velocity_type_name),
+                prim.GetAttribute(velocity_order_name),
+            )
+            if any(attr and attr.HasAuthoredValue() for attr in velocity_attrs):
+                velocity_type = token(
+                    velocity_type_name,
+                    velocity_attrs[0].Get(),
+                    {"trilinear", "bspline"},
+                )
+                velocity_order = integer(velocity_order_name, velocity_attrs[1].Get())
+                if not 1 <= velocity_order <= 3:
+                    raise ValueError(f"{path}: {velocity_order_name} must be from 1 through 3, got {velocity_order}.")
+                velocity_prefix = "Q" if velocity_type == "trilinear" else "B"
+                config.velocity_basis = f"{velocity_prefix}{velocity_order}"
+
+            return config
 
     @classmethod
     def register_custom_attributes(cls, builder: newton.ModelBuilder) -> None:
@@ -1318,12 +1598,17 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         """Grid voxel size used by the solver."""
         return self._mpm_model.voxel_size
 
-    def _check_sparse_grid_rebuild_status(self) -> None:
+    def check_sparse_grid_rebuild_status(self) -> None:
         """Raise if a rebuildable sparse grid exceeded its reserved capacity.
 
-        The check synchronizes the solver device and is therefore intended for
-        initialization diagnostics or calls made after graph replay, not
-        from inside graph capture.
+        Rebuildable sparse-grid failures accumulate until a valid
+        :meth:`reset`. Call this method outside graph capture after replay; the
+        check synchronizes the solver device. It is a no-op when the solver has
+        no asynchronous sparse-grid status buffer.
+
+        Raises:
+            RuntimeError: If rebuild status is inspected during graph capture,
+                or if a rebuild reported a capacity or topology failure.
         """
         if self._grid_status is None:
             return
@@ -1336,26 +1621,12 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         if status != wp.Volume.REBUILD_SUCCESS:
             raise _sparse_grid_rebuild_error(status)
 
-    def check_status(self) -> None:
-        """Raise if a sparse-grid rebuild exceeded its reserved capacity.
-
-        Rebuildable sparse-grid failures accumulate until a valid
-        :meth:`reset`. Call this method outside graph capture after replay; the
-        check synchronizes the solver device. It is a no-op when the solver has
-        no asynchronous sparse-grid status buffer.
-
-        Raises:
-            RuntimeError: If rebuild status is inspected during graph capture,
-                or if a rebuild reported a capacity or topology failure.
-        """
-        self._check_sparse_grid_rebuild_status()
-
     def _clear_sparse_grid_rebuild_status(self) -> None:
         """Clear the latest and accumulated sparse-grid rebuild status.
 
         Call this outside graph capture after handling a reported rebuild
-        failure. A subsequent :meth:`check_status` then reports only failures
-        produced after this boundary.
+        failure. A subsequent :meth:`check_sparse_grid_rebuild_status` then
+        reports only failures produced after this boundary.
 
         Raises:
             RuntimeError: If called while the solver device is capturing a graph.
@@ -1385,7 +1656,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         if array.device != device:
             raise ValueError(f"state.{name} is on device {array.device}, expected {device}.")
 
-    def _validate_reset_inputs(self, state: newton.State, world_mask: wp.array | None) -> None:
+    def _validate_reset_inputs(self, state: newton.State) -> None:
         if state is None:
             raise ValueError("'state' argument is required.")
 
@@ -1444,18 +1715,6 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                 device=device,
             )
 
-        if world_mask is None:
-            return
-        if not isinstance(world_mask, wp.array):
-            raise TypeError("world_mask must be a Warp array with dtype wp.bool.")
-        expected_shape = (self._initial_world_count + 1,)
-        if world_mask.shape != expected_shape:
-            raise ValueError(f"world_mask has shape {world_mask.shape}, expected {expected_shape}.")
-        if world_mask.dtype != wp.bool:
-            raise TypeError(f"world_mask has dtype {world_mask.dtype}, expected {wp.bool}.")
-        if world_mask.device != device:
-            raise ValueError(f"world_mask is on device {world_mask.device}, expected {device}.")
-
     def _reset_grid_warmstart_partition(self, name, field, scratch_field) -> fem.SpacePartition:
         scratch_partition = scratch_field.space_partition
         if field.space.topology == scratch_partition.space_topology:
@@ -1481,7 +1740,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         return partition
 
     def _validate_reset_warmstart_fields(
-        self, world_mask: wp.array | None
+        self, world_mask: wp.array[wp.bool] | None
     ) -> tuple[fem.SpacePartition | None, fem.SpacePartition | None]:
         reset_partitions = []
         for name, field, scratch_field in (
@@ -1512,7 +1771,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
 
     def _clear_reset_warmstarts(
         self,
-        world_mask: wp.array | None,
+        world_mask: wp.array[wp.bool] | None,
         reset_partitions: tuple[fem.SpacePartition | None, fem.SpacePartition | None],
     ) -> None:
         for field, partition in zip(
@@ -1528,14 +1787,20 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                 wp.launch(
                     reset_mpm_point_warmstart,
                     dim=self._initial_particle_count,
-                    inputs=[self.model.particle_world, world_mask, field.dof_values],
+                    inputs=[self.model.particle_world, world_mask, self._initial_world_count, field.dof_values],
                     device=self.model.device,
                 )
             elif partition is not None and partition.node_count() > 0:
                 wp.launch(
                     reset_mpm_grid_warmstart,
                     dim=partition.node_count(),
-                    inputs=[world_mask, partition.env_offsets, partition.space_node_indices(), field.dof_values],
+                    inputs=[
+                        world_mask,
+                        self._initial_world_count,
+                        partition.env_offsets,
+                        partition.space_node_indices(),
+                        field.dof_values,
+                    ],
                     device=self.model.device,
                 )
 
@@ -1543,7 +1808,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
     def reset(
         self,
         state: newton.State,
-        world_mask: wp.array | None = None,
+        world_mask: wp.array[wp.bool] | None = None,
         flags: StateFlags | int | None = None,
     ) -> None:
         """Reset implicit MPM history for all or selected worlds.
@@ -1557,16 +1822,21 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         :attr:`Config.separate_worlds` or a full reset. A full reset clears
         every warm-start field. Sparse-grid rebuild status is always cleared at
         a valid reset boundary, and the previous-collider-pose cache is
-        refreshed from ``state``. The final mask entry selects global
-        particle-backed history and collider poses whose world index is ``-1``.
+        refreshed from ``state``. When present, the final mask entry selects
+        global particle-backed history and collider poses whose world index is
+        ``-1``.
 
         Args:
             state: Simulation state whose MPM history is modified in place.
-            world_mask: Optional boolean mask of shape
-                ``(model.world_count + 1,)`` selecting worlds to reset. Entries
-                before the last select local worlds by index, and the last
+            world_mask: Optional one-dimensional Warp boolean mask on the
+                model device with shape ``(model.world_count + 1,)``. The final
                 entry selects global objects whose world index is ``-1``. If
                 ``None``, reset all worlds and global objects.
+
+                .. deprecated:: 1.5
+                    Passing a mask with shape ``(world_count,)`` is deprecated.
+                    Use shape ``(world_count + 1,)`` with a final ``False`` entry
+                    to select local worlds only.
 
                 .. experimental::
 
@@ -1574,14 +1844,24 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
             flags: Optional state bitmask. If ``None``, reset all particle
                 history.
         """
-        self._validate_reset_inputs(state, world_mask)
+        self._validate_reset_inputs(state)
+        world_mask = self._normalize_reset_world_mask(world_mask)
+
         reset_partitions = self._validate_reset_warmstart_fields(world_mask)
         state_flags = int(StateFlags.ALL if flags is None else flags)
         reset_particle_history = bool(state_flags & int(StateFlags.PARTICLE))
 
         # Clearing first ensures a capture-time rejection cannot leave state
         # partially reset.
-        self._clear_sparse_grid_rebuild_status()
+        if world_mask is None:
+            self._clear_sparse_grid_rebuild_status()
+        elif self._grid_status is not None:
+            wp.launch(
+                _clear_sparse_grid_rebuild_status_masked,
+                dim=1,
+                inputs=[world_mask, self._grid_status, self._grid_accumulated_status],
+                device=self.model.device,
+            )
 
         with wp.ScopedDevice(self.model.device):
             self._clear_reset_warmstarts(world_mask, reset_partitions)
@@ -1593,7 +1873,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                     state.mpm.particle_transform.fill_(identity)
                     state.mpm.particle_qd_grad.zero_()
                     state.mpm.particle_stress.zero_()
-                    state.mpm.particle_Jp.fill_(1.0)
+                    state.mpm.particle_Jp.assign(self.model.mpm.particle_Jp)
                 else:
                     wp.launch(
                         reset_mpm_particle_history,
@@ -1601,6 +1881,8 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                         inputs=[
                             self.model.particle_world,
                             world_mask,
+                            self._initial_world_count,
+                            self.model.mpm.particle_Jp,
                             state.mpm.particle_elastic_strain,
                             state.mpm.particle_transform,
                             state.mpm.particle_qd_grad,
@@ -1614,6 +1896,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                 state.body_q,
                 body_world=self.model.body_world,
                 world_mask=world_mask,
+                world_count=self._initial_world_count,
             )
 
     @override
@@ -1993,7 +2276,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
             device=state.mpm.particle_qd_grad.device,
         )
 
-    def sample_render_grains(self, state: newton.State, grains_per_particle: int) -> wp.array:
+    def sample_render_grains(self, state: newton.State, grains_per_particle: int) -> wp.array2d[wp.vec3]:
         """Generate per-particle point samples used for high-resolution rendering.
 
         Args:
@@ -2011,7 +2294,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
         self,
         state_prev: newton.State,
         state: newton.State,
-        grains: wp.array,
+        grains: wp.array2d[wp.vec3],
         dt: float,
     ) -> None:
         """Advect grain samples with the grid velocity and keep them inside the deformed particle.
@@ -2033,6 +2316,109 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                 particle_environment=self._particle_environment,
                 temporary_store=self.temporary_store,
             )
+
+    def create_particle_surface(
+        self,
+        voxel_size: float | None = None,
+        *,
+        max_grid_cells: int | None = None,
+        **kwargs,
+    ) -> ParticleSurface:
+        """Create a reusable particle surface extraction context.
+
+        Args:
+            voxel_size: Voxel size for the density grid [m].
+                Defaults to ``0.45 * solver_voxel_size``.
+            max_grid_cells: Maximum active sparse-grid cell count across all
+                worlds. When set, extraction uses graph-capturable preallocated
+                buffers. When ``None``, it uses tight sparse allocations.
+            **kwargs: Forwarded to :class:`newton.geometry.ParticleSurface`.
+
+        Returns:
+            A :class:`newton.geometry.ParticleSurface` context for use with
+            :meth:`extract_particle_surface`.
+        """
+        if voxel_size is None:
+            voxel_size = self._mpm_model.voxel_size * 0.45
+        world_count = max(self.model.world_count, 1)
+        if "world_count" in kwargs and kwargs["world_count"] != world_count:
+            raise ValueError(f"world_count must match the model world count ({world_count})")
+        kwargs["world_count"] = world_count
+        return ParticleSurface(
+            voxel_size=voxel_size,
+            max_grid_cells=max_grid_cells,
+            device=self.model.device,
+            **kwargs,
+        )
+
+    def extract_particle_surface(
+        self,
+        state: newton.State,
+        surface: ParticleSurface,
+        *,
+        compute_normals: bool = True,
+        extrapolate_into_colliders: bool = False,
+        collider_extrapolation_depth: float | None = None,
+        collider_extrapolation_onset: float = 0.0,
+        collider_extrapolation_redistance_iterations: int = 1,
+        particle_flags: wp.array[wp.int32] | None = None,
+    ) -> ParticleSurface.ExtractionMesh:
+        """Extract a triangle mesh from the current particle state.
+
+        Args:
+            state: Current simulation state.
+            surface: Reusable extraction context from
+                :meth:`create_particle_surface`.
+            compute_normals: Whether to compute per-vertex normals.
+            extrapolate_into_colliders: Mirror-extrapolate the particle SDF
+                into collider interiors before meshing.  Requires
+                a surface created with ``field_mode="sdf"``.
+            collider_extrapolation_depth: Maximum distance [m] to extrapolate
+                into colliders. Defaults to the smaller of
+                four surface voxels and the allocated topology halo.
+            collider_extrapolation_onset: Signed collider distance [m] where
+                extrapolation starts.  ``0`` starts at the collider surface.
+            collider_extrapolation_redistance_iterations: Number of
+                redistancing iterations to apply after collider extrapolation.
+                Set to 0 to disable redistancing.
+            particle_flags: Optional per-particle flags selecting the active
+                particles to surface.  Defaults to the model particle flags.
+
+        Returns:
+            Mesh buffers and device-resident logical counts.
+        """
+        if particle_flags is None:
+            particle_flags = self._mpm_model.particle_flags
+        if extrapolate_into_colliders and surface.field_mode != "sdf":
+            raise ValueError("Collider extrapolation requires ParticleSurface(field_mode='sdf')")
+
+        if not extrapolate_into_colliders:
+            return surface.extract(
+                state.particle_q,
+                radii=self._mpm_model.particle_radius,
+                compute_normals=compute_normals,
+                particle_flags=particle_flags,
+                particle_world=self.model.particle_world if surface.world_count > 1 else None,
+            )
+
+        sparse_field = surface.update_field(
+            state.particle_q,
+            radii=self._mpm_model.particle_radius,
+            particle_flags=particle_flags,
+            particle_world=self.model.particle_world if surface.world_count > 1 else None,
+        )
+        if sparse_field is None:
+            return surface.resurface(compute_normals=compute_normals)
+
+        return extrapolate_surface_sdf_into_colliders(
+            surface,
+            self._mpm_model.collider,
+            state.body_q,
+            max_depth=collider_extrapolation_depth,
+            onset=collider_extrapolation_onset,
+            redistance_iterations=collider_extrapolation_redistance_iterations,
+            compute_normals=compute_normals,
+        )
 
     def _allocate_grid(
         self,
@@ -2093,7 +2479,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                             status=self._grid_status,
                             **capacity_kwargs,
                         )
-                        self._check_sparse_grid_rebuild_status()
+                        self.check_sparse_grid_rebuild_status()
                     else:
                         cell_ijks = [
                             voxel_coordinates(positions[begin:end], voxel_size, padding_voxels=padding_voxels)
@@ -2144,7 +2530,7 @@ class SolverImplicitMPM(SolverBase, CouplingInterface):
                         max_upper_node_count=self.max_upper_node_count,
                     )
                     if self._sparse_rebuildable:
-                        self._check_sparse_grid_rebuild_status()
+                        self.check_sparse_grid_rebuild_status()
                         grid = fem.Nanogrid(volume, temporary_store=temporary_store, rebuildable=True)
                     else:
                         grid = fem.Nanogrid(volume, temporary_store=temporary_store)

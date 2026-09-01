@@ -36,6 +36,7 @@ from .....math import safe_div
 from .....sim.contacts import Contacts, contact_surface_point, contact_surface_separation
 from .....sim.model import Model
 from .....sim.state import State
+from ..core.bodies import is_immovable_for_kamino
 from ..core.materials import MaterialMixMode, make_get_mixed_material_pair_property
 from ..core.model import ModelKamino
 from ..core.types import (
@@ -74,13 +75,6 @@ wp.set_module_options({"enable_backward": False, "default_grid_stride": False})
 # Constants
 ###
 
-DEFAULT_MODEL_MAX_CONTACTS: int = 1000
-"""
-The global default for maximum number of contacts per model.
-Used when allocating contact data without a specified capacity.
-Set to `1000`.
-"""
-
 DEFAULT_WORLD_MAX_CONTACTS: int = 128
 """
 The global default for maximum number of contacts per world.
@@ -110,6 +104,12 @@ Applied as a floor to each per-geometry gap value during pipeline
 initialization so that every geometry has at least this detection
 threshold.
 Set to `1e-5`.
+"""
+
+DEFAULT_CULL_SPECULATIVE_CONTACTS: bool = True
+"""
+The global default for culling speculative contacts (with positive
+margin-shifted distance) during Newton->Kamino conversion.
 """
 
 
@@ -238,6 +238,9 @@ class ContactsKaminoData:
     Shape of ``(num_worlds,)``.
     """
 
+    _contact_overflow_warning_emitted: wp.array[wp.int32] | None = None
+    """Internal flag to track contact-buffer overflow warning messages."""
+
     wid: wp.array[wp.int32] | None = None
     """
     The world index of each active contact.
@@ -355,6 +358,8 @@ class ContactsKaminoData:
         """
         self.model_active_contacts.zero_()
         self.world_active_contacts.zero_()
+        if self._contact_overflow_warning_emitted is not None:
+            self._contact_overflow_warning_emitted.zero_()
         if self.remap is not None:
             self.remap.fill_(-1)
 
@@ -402,6 +407,87 @@ def make_contact_frame_xnorm(n: wp.vec3f) -> wp.mat33f:
     o = wp.normalize(wp.cross(n, e))
     t = wp.normalize(wp.cross(o, n))
     return wp.mat33f(n.x, t.x, o.x, n.y, t.y, o.y, n.z, t.z, o.z)
+
+
+@wp.func
+def _print_world_contact_capacity_warning():
+    wp.printf("Warning: Kamino per-world contact capacity exceeded. Increase the per-world contact capacity.\n")
+
+
+@wp.func
+def _print_model_contact_capacity_warning():
+    wp.printf("Warning: Kamino model contact capacity exceeded. Increase the model contact capacity.\n")
+
+
+@wp.func
+def reserve_contact_capacity(
+    model_max_contacts: wp.int32,
+    world_max_contacts: wp.int32,
+    wid: wp.int32,
+    num_contacts: wp.int32,
+    contact_model_num: wp.array[wp.int32],
+    contact_world_num: wp.array[wp.int32],
+    contact_overflow_warning_emitted: wp.array[wp.int32],
+) -> wp.vec3i:
+    """Reserve contact capacity atomically in the per-world and model counters.
+
+    Args:
+        model_max_contacts: Contact capacity of the model buffer.
+        world_max_contacts: Contact capacity of world ``wid``.
+        wid: World index of the contacts to reserve.
+        num_contacts: Number of contacts requested.
+        contact_model_num: Model-level active contact counter, shape ``(1,)``.
+        contact_world_num: Per-world active contact counters, shape ``(num_worlds,)``.
+        contact_overflow_warning_emitted: One-time overflow warning flag, shape ``(1,)``.
+
+    Returns:
+        ``(num_reserved, world_contact_index, model_index)``. ``num_reserved`` is ``0`` when no
+        capacity was reserved, in which case both indices are ``-1``. It can be smaller than
+        ``num_contacts``; callers requesting more than one contact must write only
+        ``num_reserved`` contacts starting at ``world_contact_index`` and ``model_index``.
+    """
+    # Note: the world counter must be incremented first to ensure that once
+    # a thread increments the global counter, it won't decrease it again after
+    # because its world is saturated (leading to potential non-unique
+    # mcid in other threads working on other worlds)
+    # The decrease to the world counter if the model is saturated is not
+    # problematic because the model is saturated for all threads in all worlds anyway.
+    wcio = wp.atomic_add(contact_world_num, wid, num_contacts)
+    if wcio >= world_max_contacts:
+        wp.atomic_sub(contact_world_num, wid, num_contacts)
+        if wp.atomic_exch(contact_overflow_warning_emitted, 0, 1) == 0:
+            _print_world_contact_capacity_warning()
+        return wp.vec3i(0, -1, -1)
+
+    # Handle case where this thread saturated the world and only partial contacts can be written
+    max_num_contacts = wp.min(world_max_contacts - wcio, num_contacts)
+    if max_num_contacts < num_contacts:
+        # Keep the world counter equal to the number of contacts retained.
+        wp.atomic_sub(contact_world_num, wid, num_contacts - max_num_contacts)
+        if wp.atomic_exch(contact_overflow_warning_emitted, 0, 1) == 0:
+            _print_world_contact_capacity_warning()
+
+    # Reserve model capacity only after the world reservation has been capped.
+    mcio = wp.atomic_add(contact_model_num, 0, max_num_contacts)
+    if mcio >= model_max_contacts:
+        wp.atomic_sub(contact_model_num, 0, max_num_contacts)
+        # Model saturation applies to every world, so this rollback is safe.
+        wp.atomic_sub(contact_world_num, wid, max_num_contacts)
+        if wp.atomic_exch(contact_overflow_warning_emitted, 0, 1) == 0:
+            _print_model_contact_capacity_warning()
+        return wp.vec3i(0, -1, -1)
+
+    # Handle case where this thread saturated the model and only partial contacts can be written
+    max_num_contacts_prev = max_num_contacts
+    max_num_contacts = wp.min(model_max_contacts - mcio, max_num_contacts_prev)
+    if max_num_contacts < max_num_contacts_prev:
+        # Release capacity for contacts that cannot fit in the model buffer.
+        wp.atomic_sub(contact_model_num, 0, max_num_contacts_prev - max_num_contacts)
+        wp.atomic_sub(contact_world_num, wid, max_num_contacts_prev - max_num_contacts)
+        if wp.atomic_exch(contact_overflow_warning_emitted, 0, 1) == 0:
+            _print_model_contact_capacity_warning()
+
+    return wp.vec3i(max_num_contacts, wcio, mcio)
 
 
 ###
@@ -805,6 +891,7 @@ class ContactsKamino:
                 model_active_contacts=wp.zeros(shape=1, dtype=wp.int32),
                 world_max_contacts=to_warp_int32_array(world_max_contacts),
                 world_active_contacts=wp.zeros(shape=len(world_max_contacts), dtype=wp.int32),
+                _contact_overflow_warning_emitted=wp.zeros(shape=1, dtype=wp.int32),
                 wid=wp.full(value=-1, shape=(model_max_contacts,), dtype=wp.int32),
                 cid=wp.full(value=-1, shape=(model_max_contacts,), dtype=wp.int32),
                 gid_AB=wp.full(value=wp.vec2i(-1, -1), shape=(model_max_contacts,), dtype=wp.vec2i),
@@ -856,6 +943,7 @@ class ContactsKamino:
 def make_convert_contacts_newton_to_kamino(
     friction_mix_mode: MaterialMixMode = MaterialMixMode.AVERAGE,
     restitution_mix_mode: MaterialMixMode = MaterialMixMode.MIN,
+    cull_speculative: bool = DEFAULT_CULL_SPECULATIVE_CONTACTS,
 ):
     """
     Generates a kernel to convert Newton contacts to the Kamino format.
@@ -863,6 +951,8 @@ def make_convert_contacts_newton_to_kamino(
     Args:
         friction_mix_mode: The mixing mode to use for friction.
         restitution_mix_mode: The mixing mode to use for restitution.
+        cull_speculative: If ``True``, skip speculative contacts, i.e., contacts
+            with positive margin-shifted distance.
 
     Returns:
         A kernel function that converts Newton contacts to the Kamino format.
@@ -874,6 +964,7 @@ def make_convert_contacts_newton_to_kamino(
         num_worlds: wp.int32,
         kamino_model_max_contacts: wp.array[wp.int32],
         kamino_world_max_contacts: wp.array[wp.int32],
+        contact_overflow_warning_emitted: wp.array[wp.int32],
         newton_count: wp.array[wp.int32],
         newton_shape0: wp.array[wp.int32],
         newton_shape1: wp.array[wp.int32],
@@ -891,6 +982,9 @@ def make_convert_contacts_newton_to_kamino(
         shape_mu: wp.array[wp.float32],
         shape_restitution: wp.array[wp.float32],
         body_q: wp.array[wp.transformf],
+        body_inv_mass: wp.array[wp.float32],
+        body_inv_inertia: wp.array[wp.mat33f],
+        body_flags: wp.array[wp.int32],
         # Outputs:
         kamino_model_active: wp.array[wp.int32],
         kamino_world_active: wp.array[wp.int32],
@@ -950,6 +1044,8 @@ def make_convert_contacts_newton_to_kamino(
         wid = wid_0
         if wid_0 < 0:
             wid = wid_1
+        if wid < 0 and num_worlds == 1:
+            wid = 0
         if wid < 0 or wid >= num_worlds:
             return
 
@@ -984,6 +1080,12 @@ def make_convert_contacts_newton_to_kamino(
         # and the per-shape surface thicknesses stored in rigid_contact_margin*.
         distance = contact_surface_separation(p0_world, p1_world, normal, margin_0, margin_1)
 
+        # Cull speculative contacts whose margin-shifted surfaces have not yet
+        # made contact (positive gap distance).
+        if wp.static(cull_speculative):
+            if distance > 0.0:
+                return
+
         # Ensure static body is always Kamino A, dynamic body is Kamino B
         if bid_1 < 0:
             # shape1 is world-static → make it Kamino A, shape0 becomes Kamino B.
@@ -1009,6 +1111,16 @@ def make_convert_contacts_newton_to_kamino(
             margin_A = margin_0
             margin_B = margin_1
 
+        # Skip contacts between two bodies that Kamino treats as immovable
+        # (both masks are zero, so the Delassus row would be structurally zero).
+        # The bid_A == -1 case (world-static A) is intentionally kept: the other
+        # endpoint is exercised against an infinite-mass anchor.
+        if bid_A >= 0 and bid_B >= 0:
+            if is_immovable_for_kamino(
+                body_inv_mass[bid_A], body_inv_inertia[bid_A], body_flags[bid_A]
+            ) and is_immovable_for_kamino(body_inv_mass[bid_B], body_inv_inertia[bid_B], body_flags[bid_B]):
+                return
+
         # Retrieve the material properties for this contact
         # TODO: Integrate use of material manager to retrieve material properties
         mu_0 = shape_mu[sid_0]
@@ -1022,16 +1134,19 @@ def make_convert_contacts_newton_to_kamino(
         gapfunc = wp.vec4f(normal[0], normal[1], normal[2], distance)
         q_frame = wp.quat_from_matrix(make_contact_frame_znorm(normal))
 
-        # Safely increment the active contact counters (see notes in _write_contact_unified_kamino in unified.py)
-        wcid = wp.atomic_add(kamino_world_active, wid, 1)
-        if wcid >= world_max_contacts:
-            wp.atomic_sub(kamino_world_active, wid, 1)
+        reservation = reserve_contact_capacity(
+            model_max_contacts,
+            world_max_contacts,
+            wid,
+            1,
+            kamino_model_active,
+            kamino_world_active,
+            contact_overflow_warning_emitted,
+        )
+        if reservation[0] == 0:
             return
-        mcid = wp.atomic_add(kamino_model_active, 0, 1)
-        if mcid >= model_max_contacts:
-            wp.atomic_sub(kamino_model_active, 0, 1)
-            wp.atomic_sub(kamino_world_active, wid, 1)
-            return
+        wcid = reservation[1]
+        mcid = reservation[2]
 
         # Store the contact data in the Kamino format if the contact is valid
         kamino_wid[mcid] = wid
@@ -1287,6 +1402,7 @@ def convert_contacts_newton_to_kamino(
     convert_forces: bool = False,
     friction_mix_mode: Literal["average", "multiply", "max", "min"] = "average",
     restitution_mix_mode: Literal["average", "multiply", "max", "min"] = "min",
+    cull_speculative_contacts: bool = DEFAULT_CULL_SPECULATIVE_CONTACTS,
 ):
     """
     Converts Newton's :class:`Contacts` to Kamino's :class:`ContactsKamino` format.
@@ -1328,6 +1444,9 @@ def convert_contacts_newton_to_kamino(
             The mixing mode to use for contact friction. Defaults to `"average"`.
         restitution_mix_mode:
             The mixing mode to use for contact restitution. Defaults to `"min"`.
+        cull_speculative_contacts:
+            If ``True`` (the default), drop speculative contacts (contacts with
+            positive margin-shifted distance).
     """
     # Skip conversion if there are no contacts to convert or no capacity to store them.
     if contacts_out.model_max_contacts_host == 0 or contacts_in.rigid_contact_max == 0:
@@ -1373,6 +1492,7 @@ def convert_contacts_newton_to_kamino(
     _convert_contacts_newton_to_kamino = make_convert_contacts_newton_to_kamino(
         friction_mix_mode=MaterialMixMode.from_string(friction_mix_mode),
         restitution_mix_mode=MaterialMixMode.from_string(restitution_mix_mode),
+        cull_speculative=cull_speculative_contacts,
     )
 
     # Launch the conversion kernel to convert Newton contacts to Kamino's format.
@@ -1383,6 +1503,7 @@ def convert_contacts_newton_to_kamino(
             wp.int32(model.world_count),
             contacts_out.model_max_contacts,
             contacts_out.world_max_contacts,
+            contacts_out._data._contact_overflow_warning_emitted,
             contacts_in.rigid_contact_count,
             contacts_in.rigid_contact_shape0,
             contacts_in.rigid_contact_shape1,
@@ -1400,6 +1521,9 @@ def convert_contacts_newton_to_kamino(
             model.shape_material_mu,
             model.shape_material_restitution,
             state.body_q,
+            model.body_inv_mass,
+            model.body_inv_inertia,
+            model.body_flags,
         ],
         outputs=[
             contacts_out.model_active_contacts,
@@ -1568,6 +1692,12 @@ def convert_contacts_kamino_to_newton(
                 "`ContactsKamino.remap` is required when `clear_output=False`; "
                 "construct `ContactsKamino` with `remappable=True`."
             )
+
+        # Speculative-contact culling (and capacity truncation) can leave active
+        # Newton contacts without a matching Kamino contact, so the kernel below
+        # never writes their wrench. Zero the rigid force region first so those
+        # slots report zero instead of stale prior-frame data.
+        contacts_out_force[: contacts_out.rigid_contact_max].zero_()
 
         # Launch the kernel to fill in solver-specific
         # contact attributes for already populated contacts.

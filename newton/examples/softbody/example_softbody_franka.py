@@ -27,6 +27,8 @@ import newton.utils
 from newton import ModelBuilder, eval_fk
 from newton.solvers import SolverFeatherstone, SolverVBD
 
+DUCK_OPACITY = 0.55
+
 
 @wp.kernel
 def set_gripper_q(joint_q: wp.array2d[float], finger_pos: wp.array[float], idx0: int, idx1: int):
@@ -108,6 +110,7 @@ class Example:
             k_lambda=1.0e6,
             k_damp=1e0,
             particle_radius=self.particle_radius,
+            opacity=DUCK_OPACITY,
         )
 
         self.scene.color()
@@ -162,8 +165,10 @@ class Example:
         self.viewer.set_camera(wp.vec3(-0.6, 0.6, 1.24), -42.0, -58.0)
 
         # gravity arrays for swapping during simulation
-        self.gravity_zero = wp.zeros(1, dtype=wp.vec3)
-        self.gravity_earth = wp.array(wp.vec3(0.0, 0.0, -9.81), dtype=wp.vec3)
+        self.gravity_zero = wp.zeros(self.model.gravity.shape[0], dtype=wp.vec3, device=self.model.device)
+        self.gravity_earth = wp.full(
+            self.model.gravity.shape[0], wp.vec3(0.0, 0.0, -9.81), dtype=wp.vec3, device=self.model.device
+        )
 
         # evaluate FK for initial state
         eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)

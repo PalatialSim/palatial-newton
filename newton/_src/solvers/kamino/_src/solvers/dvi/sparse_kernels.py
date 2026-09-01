@@ -9,12 +9,15 @@ import warp as wp
 
 from ...core.math import FLOAT32_EPS
 from ...core.types import vec6f
-from .kernels import _sync_threads
+from .kernels import _FUSED_INEQUALITY_BLOCK, _sync_threads
 from .projections import (
-    contact_diagonal_preconditioner as _contact_diagonal_preconditioner,
+    project_box_update as _project_box_update,
 )
 from .projections import (
-    project_contact_diagonal_update as _project_contact_diagonal_update,
+    project_contact_normal_update as _project_contact_normal_update,
+)
+from .projections import (
+    project_contact_tangent_update as _project_contact_tangent_update,
 )
 from .types import DVIConfigStruct
 
@@ -134,6 +137,36 @@ def _sparse_delassus_gemv_rows(
 
 
 @wp.kernel
+def _map_bounded_constraints(
+    joint_wid: wp.array[int32],
+    joint_bid_B: wp.array[int32],
+    joint_bid_F: wp.array[int32],
+    joint_bounded_cts_offset: wp.array[int32],
+    problem_bcio: wp.array[int32],
+    problem_uio: wp.array[int32],
+    # Outputs:
+    inequality_bodies: wp.array[wp.vec2i],
+):
+    """Map every joint's bounded-multiplier rows into the unified inequality topology.
+
+    Friction-row topology is static, but ``inequality_bodies`` is reset every
+    step alongside the dynamic limit/contact mappings, so this must be relaunched
+    every step too rather than only once at solver finalization.
+    """
+    jid = wp.tid()
+    start = joint_bounded_cts_offset[jid]
+    end = joint_bounded_cts_offset[jid + 1]
+    if end <= start:
+        return
+    wid = joint_wid[jid]
+    bcio = problem_bcio[wid]
+    uio = problem_uio[wid]
+    pair = wp.vec2i(joint_bid_B[jid], joint_bid_F[jid])
+    for row in range(start, end):
+        inequality_bodies[uio + (row - bcio)] = pair
+
+
+@wp.kernel
 def _map_active_limits(
     limits_model_active: wp.array[int32],
     limits_wid: wp.array[int32],
@@ -141,6 +174,7 @@ def _map_active_limits(
     limits_bids: wp.array[wp.vec2i],
     problem_lio: wp.array[int32],
     problem_uio: wp.array[int32],
+    problem_nbc: wp.array[int32],
     limit_indices: wp.array[int32],
     inequality_bodies: wp.array[wp.vec2i],
 ):
@@ -150,7 +184,7 @@ def _map_active_limits(
         wid = limits_wid[limit_id]
         lid = limits_lid[limit_id]
         limit_indices[problem_lio[wid] + lid] = limit_id
-        inequality_bodies[problem_uio[wid] + lid] = limits_bids[limit_id]
+        inequality_bodies[problem_uio[wid] + problem_nbc[wid] + lid] = limits_bids[limit_id]
 
 
 @wp.kernel
@@ -159,6 +193,7 @@ def _map_active_contacts(
     contacts_wid: wp.array[int32],
     contacts_cid: wp.array[int32],
     contacts_bid_AB: wp.array[wp.vec2i],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_cio: wp.array[int32],
     problem_uio: wp.array[int32],
@@ -171,17 +206,7 @@ def _map_active_contacts(
         wid = contacts_wid[contact_id]
         cid = contacts_cid[contact_id]
         contact_indices[problem_cio[wid] + cid] = contact_id
-        inequality_bodies[problem_uio[wid] + problem_nl[wid] + cid] = contacts_bid_AB[contact_id]
-
-
-@wp.func
-def _inequalities_share_dynamic_body(a: wp.vec2i, b: wp.vec2i) -> bool:
-    shares_body = bool(False)
-    if a[0] >= int32(0) and (a[0] == b[0] or a[0] == b[1]):
-        shares_body = bool(True)
-    if a[1] >= int32(0) and (a[1] == b[0] or a[1] == b[1]):
-        shares_body = bool(True)
-    return shares_body
+        inequality_bodies[problem_uio[wid] + problem_nbc[wid] + problem_nl[wid] + cid] = contacts_bid_AB[contact_id]
 
 
 @wp.func_native("""
@@ -201,6 +226,7 @@ def _lowest_set_color(mask: wp.int64) -> wp.int32:
 
 @wp.kernel
 def _color_mapped_dvi_inequalities(
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
     problem_uio: wp.array[int32],
@@ -214,11 +240,11 @@ def _color_mapped_dvi_inequalities(
     """Greedily color one world per thread using per-body 64-bit masks.
 
     This favors the many-small-world workload. Unusually high-degree graphs
-    that exhaust 64 colors use a slower pairwise fallback without a color cap.
-    The same pass emits compact color ranges shared by dense and sparse PGS.
+    that exhaust 64 colors assign fresh colors without a color cap. The same
+    pass emits compact color ranges shared by dense and sparse PGS.
     """
     wid = wp.tid()
-    nu = problem_nl[wid] + problem_nc[wid]
+    nu = problem_nbc[wid] + problem_nl[wid] + problem_nc[wid]
     uio = problem_uio[wid]
     num_colors = int32(0)
     for uid in range(nu):
@@ -231,21 +257,9 @@ def _color_mapped_dvi_inequalities(
 
         color = _lowest_set_color(wp.int64(forbidden) ^ wp.int64(-1))
         if color < int32(0):
-            # All lower colors conflict, so only overflow colors need scanning.
-            color = int32(64)
-            found = int32(0)
-            while found == int32(0) and color < nu:
-                conflict = int32(0)
-                for previous_uid in range(uid):
-                    if inequality_colors[uio + previous_uid] == color:
-                        previous_pair = inequality_bodies[uio + previous_uid]
-                        if _inequalities_share_dynamic_body(pair, previous_pair):
-                            conflict = int32(1)
-                            break
-                if conflict == int32(0):
-                    found = int32(1)
-                else:
-                    color += int32(1)
+            # A fresh color is always conflict-free and avoids a superlinear
+            # search in dense manifolds that share a body.
+            color = num_colors
         inequality_colors[uio + uid] = color
         num_colors = wp.max(num_colors, color + int32(1))
         if color < int32(64):
@@ -286,19 +300,25 @@ def _solve_dvi_sparse_inequalities_pgs(
     jacobian_nzb_values: wp.array[vec6f],
     bsm_row_start: wp.array[int32],
     bsm_col_start: wp.array[int32],
+    bounded_nzb_offsets: wp.array[wp.vec2i],
     limit_nzb_offsets: wp.array[int32],
     contact_nzb_offsets: wp.array[int32],
     limit_indices: wp.array[int32],
     contact_indices: wp.array[int32],
+    problem_nbc: wp.array[int32],
     problem_nl: wp.array[int32],
     problem_nc: wp.array[int32],
+    problem_bcio: wp.array[int32],
     problem_lio: wp.array[int32],
     problem_cio: wp.array[int32],
     problem_uio: wp.array[int32],
+    problem_bcgo: wp.array[int32],
     problem_lcgo: wp.array[int32],
     problem_ccgo: wp.array[int32],
     problem_vio: wp.array[int32],
     problem_mu: wp.array[float32],
+    problem_bound_lower: wp.array[float32],
+    problem_bound_upper: wp.array[float32],
     problem_P: wp.array[float32],
     problem_v_f: wp.array[float32],
     problem_diag: wp.array[float32],
@@ -319,139 +339,234 @@ def _solve_dvi_sparse_inequalities_pgs(
     cfg = solver_config[wid]
     if block_iteration >= int32(0) and block_iteration >= cfg.max_alternating_iterations:
         return
+    nbc = problem_nbc[wid]
     nl = problem_nl[wid]
     nc = problem_nc[wid]
-    nu = nl + nc
+    nu = nbc + nl + nc
     if nu == 0:
         return
+    bcio = problem_bcio[wid]
     lio = problem_lio[wid]
     cio = problem_cio[wid]
     uio = problem_uio[wid]
     schedule_offset = uio + wid
+    bcgo = problem_bcgo[wid]
     lcgo = problem_lcgo[wid]
     ccgo = problem_ccgo[wid]
     vio = problem_vio[wid]
     row_start = bsm_row_start[wid]
     col_start = bsm_col_start[wid]
     matrix_end = bsm_nzb_start[wid] + bsm_num_nzb[wid]
-    for _sweep in range(cfg.inequality_sweeps_per_iteration):
-        for color in range(inequality_num_colors[wid]):
-            color_start = inequality_color_starts[schedule_offset + color]
-            color_end = inequality_color_starts[schedule_offset + color + int32(1)]
-            color_slot = color_start + lane
-            while color_slot < color_end:
-                uid = inequality_ids_by_color[uio + color_slot]
-                # An inequality without mapped topology has no Jacobian offsets
-                # to read, so it is skipped rather than dereferenced.
-                mapped_id = int32(-1)
-                if uid < nl:
-                    mapped_id = limit_indices[lio + uid]
-                else:
-                    mapped_id = contact_indices[cio + uid - nl]
-                if mapped_id >= int32(0):
-                    if uid < nl:
-                        limit_id = mapped_id
-                        row = lcgo + uid
-                        vec_idx = vio + row
-                        nzb_offset = limit_nzb_offsets[limit_id]
-                        limit_value = eta[row_start + row] * solution_lambdas[vec_idx]
-                        for k in range(2):
-                            nzb_idx = nzb_offset + k
-                            if nzb_idx < matrix_end and bsm_nzb_coords[nzb_idx, 0] == row:
-                                block = bsm_nzb_values[nzb_idx]
-                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
+    sweep_count = cfg.inequality_sweeps_per_iteration
+    if block_iteration == int32(_FUSED_INEQUALITY_BLOCK):
+        sweep_count *= cfg.max_alternating_iterations
+    for _sweep in range(sweep_count):
+        phase_count = int32(2)
+        if block_iteration == int32(_FUSED_INEQUALITY_BLOCK) and _sweep < sweep_count / int32(2):
+            # Match the dense path's inequality-only normal-load warmup.
+            phase_count = int32(1)
+        for phase in range(phase_count):
+            # Symmetric tangent ordering reduces load bias in redundant sticking patches.
+            reverse_colors = phase == int32(1) and _sweep % int32(2) != int32(0)
+            num_colors = inequality_num_colors[wid]
+            for color_index in range(num_colors):
+                color = color_index
+                if reverse_colors:
+                    color = num_colors - int32(1) - color_index
+                color_start = inequality_color_starts[schedule_offset + color]
+                color_end = inequality_color_starts[schedule_offset + color + int32(1)]
+                color_slot = color_start + lane
+                while color_slot < color_end:
+                    uid = inequality_ids_by_color[uio + color_slot]
+                    if uid < nbc:
+                        # Bounded-row topology is static, so unlike limits/contacts it
+                        # always has valid Jacobian offsets and needs no active-set lookup.
+                        if phase == int32(0):
+                            bid = bcio + uid
+                            row = bcgo + uid
+                            vec_idx = vio + row
+                            offsets = bounded_nzb_offsets[bid]
+                            bound_value = eta[row_start + row] * solution_lambdas[vec_idx]
+                            nzb_idx_f = offsets[0]
+                            if nzb_idx_f >= int32(0) and nzb_idx_f < matrix_end and bsm_nzb_coords[nzb_idx_f, 0] == row:
+                                block = bsm_nzb_values[nzb_idx_f]
+                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx_f, 1]
                                 for j in range(6):
-                                    limit_value += block[j] * body_space[x_idx_base + j]
-                        limit_value += problem_v_f[vec_idx]
-                        P_i = problem_P[vec_idx]
-                        diagonal_raw = wp.abs(problem_diag[vec_idx]) * P_i * P_i
-                        lambda_limit_old = solution_lambdas[vec_idx]
-                        lambda_limit_new = lambda_limit_old
-                        if diagonal_raw > FLOAT32_EPS:
-                            lambda_limit_new = wp.max(
-                                float32(0.0),
-                                lambda_limit_old
-                                - cfg.omega * limit_value / (diagonal_raw + cfg.regularization + FLOAT32_EPS),
+                                    bound_value += block[j] * body_space[x_idx_base + j]
+                            else:
+                                nzb_idx_f = int32(-1)
+                            nzb_idx_b = offsets[1]
+                            if nzb_idx_b >= int32(0) and nzb_idx_b < matrix_end and bsm_nzb_coords[nzb_idx_b, 0] == row:
+                                block = bsm_nzb_values[nzb_idx_b]
+                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx_b, 1]
+                                for j in range(6):
+                                    bound_value += block[j] * body_space[x_idx_base + j]
+                            else:
+                                nzb_idx_b = int32(-1)
+                            bound_value += problem_v_f[vec_idx]
+                            P_bound = problem_P[vec_idx]
+                            diagonal_raw = wp.abs(problem_diag[vec_idx]) * P_bound * P_bound
+                            lambda_bound_old = solution_lambdas[vec_idx]
+                            lambda_bound_new = _project_box_update(
+                                lambda_bound_old,
+                                bound_value,
+                                diagonal_raw,
+                                cfg.regularization,
+                                cfg.omega,
+                                problem_bound_lower[bid],
+                                problem_bound_upper[bid],
                             )
-                        limit_delta_body = P_i * (lambda_limit_new - lambda_limit_old)
-                        solution_lambdas[vec_idx] = lambda_limit_new
-                        for k in range(2):
-                            nzb_idx = nzb_offset + k
-                            if nzb_idx < matrix_end and bsm_nzb_coords[nzb_idx, 0] == row:
-                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
-                                jacobian_row = jacobian_nzb_values[nzb_idx]
+                            bound_delta_body = P_bound * (lambda_bound_new - lambda_bound_old)
+                            solution_lambdas[vec_idx] = lambda_bound_new
+                            if nzb_idx_f >= int32(0):
+                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx_f, 1]
+                                jacobian_row = jacobian_nzb_values[nzb_idx_f]
                                 for j in range(6):
-                                    body_space[x_idx_base + j] += jacobian_row[j] * limit_delta_body
+                                    body_space[x_idx_base + j] += jacobian_row[j] * bound_delta_body
+                            if nzb_idx_b >= int32(0):
+                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx_b, 1]
+                                jacobian_row = jacobian_nzb_values[nzb_idx_b]
+                                for j in range(6):
+                                    body_space[x_idx_base + j] += jacobian_row[j] * bound_delta_body
+                        color_slot += threads_per_world
+                        continue
+                    # An inequality without mapped topology has no Jacobian offsets
+                    # to read, so it is skipped rather than dereferenced.
+                    mapped_id = int32(-1)
+                    if uid < nbc + nl:
+                        mapped_id = limit_indices[lio + (uid - nbc)]
                     else:
-                        cid = uid - nl
-                        row = ccgo + int32(3) * cid
-                        vec_idx = vio + row
-                        contact_id = mapped_id
-                        nzb_offset = contact_nzb_offsets[contact_id]
-                        contact_value = vec3f(0.0)
-                        for component in range(3):
-                            contact_value[component] = (
-                                eta[row_start + row + component] * solution_lambdas[vec_idx + component]
-                            )
-                        block_count = int32(3)
-                        second_body_offset = nzb_offset + int32(3)
-                        if second_body_offset < matrix_end and bsm_nzb_coords[second_body_offset, 0] == row:
-                            block_count = int32(6)
-                        for local_block in range(block_count):
-                            nzb_idx = nzb_offset + local_block
-                            component = local_block % int32(3)
-                            block = bsm_nzb_values[nzb_idx]
-                            x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
-                            for j in range(6):
-                                contact_value[component] += block[j] * body_space[x_idx_base + j]
-                        contact_value += vec3f(problem_v_f[vec_idx], problem_v_f[vec_idx + 1], problem_v_f[vec_idx + 2])
-                        mu = problem_mu[cio + cid]
-                        contact_value.z += mu * wp.sqrt(
-                            contact_value.x * contact_value.x + contact_value.y * contact_value.y
-                        )
-                        lambda_contact_old = vec3f(
-                            solution_lambdas[vec_idx],
-                            solution_lambdas[vec_idx + 1],
-                            solution_lambdas[vec_idx + 2],
-                        )
-                        contact_diagonal = vec3f(
-                            wp.abs(problem_diag[vec_idx]) * problem_P[vec_idx] * problem_P[vec_idx],
-                            wp.abs(problem_diag[vec_idx + 1]) * problem_P[vec_idx + 1] * problem_P[vec_idx + 1],
-                            wp.abs(problem_diag[vec_idx + 2]) * problem_P[vec_idx + 2] * problem_P[vec_idx + 2],
-                        )
-                        lambda_contact_new = _project_contact_diagonal_update(
-                            lambda_contact_old,
-                            contact_value,
-                            _contact_diagonal_preconditioner(contact_diagonal),
-                            cfg.regularization,
-                            cfg.omega,
-                            mu,
-                        )
-                        contact_delta = lambda_contact_new - lambda_contact_old
-                        contact_delta_body = vec3f(
-                            problem_P[vec_idx] * contact_delta.x,
-                            problem_P[vec_idx + 1] * contact_delta.y,
-                            problem_P[vec_idx + 2] * contact_delta.z,
-                        )
-                        solution_lambdas[vec_idx] = lambda_contact_new.x
-                        solution_lambdas[vec_idx + 1] = lambda_contact_new.y
-                        solution_lambdas[vec_idx + 2] = lambda_contact_new.z
-                        body_group = int32(0)
-                        while body_group < block_count:
-                            nzb_idx = nzb_offset + body_group
-                            x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
-                            row_0 = jacobian_nzb_values[nzb_idx]
-                            row_1 = jacobian_nzb_values[nzb_idx + 1]
-                            row_2 = jacobian_nzb_values[nzb_idx + 2]
-                            for j in range(6):
-                                body_space[x_idx_base + j] += (
-                                    row_0[j] * contact_delta_body.x
-                                    + row_1[j] * contact_delta_body.y
-                                    + row_2[j] * contact_delta_body.z
+                        mapped_id = contact_indices[cio + uid - nbc - nl]
+                    if mapped_id >= int32(0):
+                        if uid < nbc + nl:
+                            if phase == int32(0):
+                                limit_id = mapped_id
+                                row = lcgo + (uid - nbc)
+                                vec_idx = vio + row
+                                nzb_offset = limit_nzb_offsets[limit_id]
+                                limit_value = eta[row_start + row] * solution_lambdas[vec_idx]
+                                for k in range(2):
+                                    nzb_idx = nzb_offset + k
+                                    if nzb_idx < matrix_end and bsm_nzb_coords[nzb_idx, 0] == row:
+                                        block = bsm_nzb_values[nzb_idx]
+                                        x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
+                                        for j in range(6):
+                                            limit_value += block[j] * body_space[x_idx_base + j]
+                                limit_value += problem_v_f[vec_idx]
+                                P_i = problem_P[vec_idx]
+                                diagonal_raw = wp.abs(problem_diag[vec_idx]) * P_i * P_i
+                                lambda_limit_old = solution_lambdas[vec_idx]
+                                lambda_limit_new = lambda_limit_old
+                                if diagonal_raw > FLOAT32_EPS:
+                                    lambda_limit_new = wp.max(
+                                        float32(0.0),
+                                        lambda_limit_old
+                                        - cfg.omega * limit_value / (diagonal_raw + cfg.regularization + FLOAT32_EPS),
+                                    )
+                                limit_delta_body = P_i * (lambda_limit_new - lambda_limit_old)
+                                solution_lambdas[vec_idx] = lambda_limit_new
+                                for k in range(2):
+                                    nzb_idx = nzb_offset + k
+                                    if nzb_idx < matrix_end and bsm_nzb_coords[nzb_idx, 0] == row:
+                                        x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
+                                        jacobian_row = jacobian_nzb_values[nzb_idx]
+                                        for j in range(6):
+                                            body_space[x_idx_base + j] += jacobian_row[j] * limit_delta_body
+                        else:
+                            cid = uid - nbc - nl
+                            row = ccgo + int32(3) * cid
+                            vec_idx = vio + row
+                            contact_id = mapped_id
+                            nzb_offset = contact_nzb_offsets[contact_id]
+                            block_count = int32(3)
+                            second_body_offset = nzb_offset + int32(3)
+                            if second_body_offset < matrix_end and bsm_nzb_coords[second_body_offset, 0] == row:
+                                block_count = int32(6)
+
+                            contact_value = vec3f(0.0)
+                            for component in range(3):
+                                if (phase == int32(0) and component == int32(2)) or (
+                                    phase == int32(1) and component < int32(2)
+                                ):
+                                    contact_value[component] = (
+                                        eta[row_start + row + component] * solution_lambdas[vec_idx + component]
+                                    )
+                            for local_block in range(block_count):
+                                component = local_block % int32(3)
+                                if (phase == int32(0) and component == int32(2)) or (
+                                    phase == int32(1) and component < int32(2)
+                                ):
+                                    nzb_idx = nzb_offset + local_block
+                                    block = bsm_nzb_values[nzb_idx]
+                                    x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
+                                    for j in range(6):
+                                        contact_value[component] += block[j] * body_space[x_idx_base + j]
+
+                            contact_delta_body = vec3f(0.0)
+                            if phase == int32(0):
+                                contact_value.z += problem_v_f[vec_idx + int32(2)]
+                                lambda_n_old = solution_lambdas[vec_idx + int32(2)]
+                                P_n = problem_P[vec_idx + int32(2)]
+                                diagonal_n = wp.abs(problem_diag[vec_idx + int32(2)]) * P_n * P_n
+                                lambda_n_new = _project_contact_normal_update(
+                                    lambda_n_old,
+                                    contact_value.z,
+                                    diagonal_n,
+                                    cfg.regularization,
+                                    cfg.omega,
                                 )
-                            body_group += int32(3)
-                color_slot += threads_per_world
-            _sync_threads()
+                                solution_lambdas[vec_idx + int32(2)] = lambda_n_new
+                                contact_delta_body.z = P_n * (lambda_n_new - lambda_n_old)
+                            else:
+                                contact_value.x += problem_v_f[vec_idx]
+                                contact_value.y += problem_v_f[vec_idx + int32(1)]
+                                lambda_t0_old = solution_lambdas[vec_idx]
+                                lambda_t1_old = solution_lambdas[vec_idx + int32(1)]
+                                P_t0 = problem_P[vec_idx]
+                                P_t1 = problem_P[vec_idx + int32(1)]
+                                diagonal_t0 = wp.abs(problem_diag[vec_idx]) * P_t0 * P_t0
+                                diagonal_t1 = wp.abs(problem_diag[vec_idx + int32(1)]) * P_t1 * P_t1
+                                lambda_t_old = wp.vec2f(lambda_t0_old, lambda_t1_old)
+                                off_diagonal = float32(0.0)
+                                body_group = int32(0)
+                                while body_group < block_count:
+                                    nzb_idx = nzb_offset + body_group
+                                    mass_weighted_t0 = bsm_nzb_values[nzb_idx]
+                                    jacobian_t1 = jacobian_nzb_values[nzb_idx + int32(1)]
+                                    for j in range(6):
+                                        off_diagonal += mass_weighted_t0[j] * jacobian_t1[j]
+                                    body_group += int32(3)
+                                off_diagonal *= P_t1
+                                lambda_t_new = _project_contact_tangent_update(
+                                    lambda_t_old,
+                                    wp.vec2f(contact_value.x, contact_value.y),
+                                    wp.vec2f(diagonal_t0, diagonal_t1),
+                                    off_diagonal,
+                                    cfg.regularization,
+                                    cfg.omega,
+                                    problem_mu[cio + cid] * solution_lambdas[vec_idx + int32(2)],
+                                )
+                                solution_lambdas[vec_idx] = lambda_t_new.x
+                                solution_lambdas[vec_idx + int32(1)] = lambda_t_new.y
+                                contact_delta_body.x = P_t0 * (lambda_t_new.x - lambda_t_old.x)
+                                contact_delta_body.y = P_t1 * (lambda_t_new.y - lambda_t_old.y)
+
+                            body_group = int32(0)
+                            while body_group < block_count:
+                                nzb_idx = nzb_offset + body_group
+                                x_idx_base = col_start + bsm_nzb_coords[nzb_idx, 1]
+                                row_0 = jacobian_nzb_values[nzb_idx]
+                                row_1 = jacobian_nzb_values[nzb_idx + 1]
+                                row_2 = jacobian_nzb_values[nzb_idx + 2]
+                                for j in range(6):
+                                    body_space[x_idx_base + j] += (
+                                        row_0[j] * contact_delta_body.x
+                                        + row_1[j] * contact_delta_body.y
+                                        + row_2[j] * contact_delta_body.z
+                                    )
+                                body_group += int32(3)
+                    color_slot += threads_per_world
+                _sync_threads()
 
 
 @wp.kernel
