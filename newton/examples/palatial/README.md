@@ -101,6 +101,20 @@ Recording works headless (no `--gui`) or alongside `--gui`.
   --record-mp4 /tmp/jean.mp4 --mp4-fps 60 --steps 1000
 ```
 
+Select the first-class OVRTX backend on an RTX Linux host with the same video
+target. It keeps one live renderer for the run, writes `/tmp/jean.mp4`, and
+preserves the complete animated USD stage plus copied base-color textures at
+`/tmp/jean.usd` and `/tmp/jean_textures/`:
+
+```bash
+... example_palatial_load ~/new_jean.newton.usda \
+  --device cuda:0 --viewer ovrtx \
+  --record-mp4 /tmp/jean.mp4 --mp4-fps 60 --steps 1000
+```
+
+`--ovrtx-script render_scene.py` exposes the same stage composition and
+per-frame scripting hooks as the shared Newton OVRTX viewer.
+
 ## 2. `example_palatial_articulated` — drive a rigid joint chain
 
 Default solver is MuJoCo (needs `mujoco` + `mujoco_warp`). Drives one

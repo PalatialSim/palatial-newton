@@ -7,6 +7,10 @@
 - Add optional OVRTX/ovstage rendering through `--viewer ovrtx`, which records
   Newton USD and renders the final selected simulation state to PNG on an RTX
   Linux host
+- Make OVRTX a first-class backend for Palatial validation playback: the
+  existing `--record-mp4` target now produces a live-rendered video, an
+  animated USD sidecar, portable copied base-color textures, and optional
+  render-script lifecycle hooks when paired with `--viewer ovrtx`
 - Add Newton rod/cable USD schema support with palatial cable loading, including
   `NewtonRodAPI`, `NewtonRodMaterialAPI`, anisotropic `add_rod()` dispatch, and
   VBD anisotropic cable joint slots

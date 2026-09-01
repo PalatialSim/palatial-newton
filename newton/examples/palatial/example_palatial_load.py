@@ -21,36 +21,44 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 # IMPORTANT: import newton stack BEFORE any pxr.Usd usage in the same process.
-import warp as wp  # noqa: F401
-import newton
+import warp as wp
 
+import newton
 from newton.palatial import load
 
 
 class Example:
-    def __init__(self, viewer, usd_path: str, substeps: int | None = None,
-                 drop_height: float = 0.0, device: str | None = None,
-                 cloth_particle_radius: float = 0.008,
-                 soft_contact_ke: float = 100.0,
-                 soft_contact_kd: float = 2e-3,
-                 soft_contact_mu: float = 1.0,
-                 soft_contact_max: int = 1_000_000,
-                 cloth_body_contact_margin: float = 0.01,
-                 bending_ke: float = 1e-4,
-                 bending_kd: float = 1e-3,
-                 vbd_particle_edge_contact_buffer_size: int = 64,
-                 vbd_particle_collision_detection_interval: int = -1,
-                 vbd_rigid_contact_k_start: float | None = None,
-                 joint_q_overrides: dict[int, float] | None = None,
-                 joint_target_overrides: dict[int, float] | None = None,
-                 joint_target_ke: float | None = None,
-                 joint_target_kd: float | None = None,
-                 list_joints: bool = False,
-                 rotate_x_deg: float = 0.0,
-                 rotate_y_deg: float = 0.0,
-                 rotate_z_deg: float = 0.0):
+    def __init__(
+        self,
+        viewer,
+        usd_path: str,
+        substeps: int | None = None,
+        drop_height: float = 0.0,
+        device: str | None = None,
+        cloth_particle_radius: float = 0.008,
+        soft_contact_ke: float = 100.0,
+        soft_contact_kd: float = 2e-3,
+        soft_contact_mu: float = 1.0,
+        soft_contact_max: int = 1_000_000,
+        cloth_body_contact_margin: float = 0.01,
+        bending_ke: float = 1e-4,
+        bending_kd: float = 1e-3,
+        vbd_particle_edge_contact_buffer_size: int = 64,
+        vbd_particle_collision_detection_interval: int = -1,
+        vbd_rigid_contact_k_start: float | None = None,
+        joint_q_overrides: dict[int, float] | None = None,
+        joint_target_overrides: dict[int, float] | None = None,
+        joint_target_ke: float | None = None,
+        joint_target_kd: float | None = None,
+        list_joints: bool = False,
+        rotate_x_deg: float = 0.0,
+        rotate_y_deg: float = 0.0,
+        rotate_z_deg: float = 0.0,
+        viewer_factory=None,
+    ):
         self.viewer = viewer
 
         # One call: parse USDA, build model, build solver with baked params.
@@ -67,27 +75,34 @@ class Example:
         # regardless of which axis the user rotates around.
         if rotate_x_deg or rotate_y_deg or rotate_z_deg:
             import math as _math
+
             import numpy as _np
 
             def _axis_quat(axis, deg):
                 a = _math.radians(deg) * 0.5
                 s, c = _math.sin(a), _math.cos(a)
-                return _np.array([
-                    s if axis == 0 else 0.0,
-                    s if axis == 1 else 0.0,
-                    s if axis == 2 else 0.0,
-                    c,
-                ], dtype=_np.float32)
+                return _np.array(
+                    [
+                        s if axis == 0 else 0.0,
+                        s if axis == 1 else 0.0,
+                        s if axis == 2 else 0.0,
+                        c,
+                    ],
+                    dtype=_np.float32,
+                )
 
             def _qmul(a, b):
                 ax, ay, az, aw = a
                 bx, by, bz, bw = b
-                return _np.array([
-                    aw*bx + ax*bw + ay*bz - az*by,
-                    aw*by - ax*bz + ay*bw + az*bx,
-                    aw*bz + ax*by - ay*bx + az*bw,
-                    aw*bw - ax*bx - ay*by - az*bz,
-                ], dtype=_np.float32)
+                return _np.array(
+                    [
+                        aw * bx + ax * bw + ay * bz - az * by,
+                        aw * by - ax * bz + ay * bw + az * bx,
+                        aw * bz + ax * by - ay * bx + az * bw,
+                        aw * bw - ax * bx - ay * by - az * bz,
+                    ],
+                    dtype=_np.float32,
+                )
 
             def _qrot_vec(q, v):
                 # rotate vec3 v by quat (qx,qy,qz,qw)
@@ -97,9 +112,12 @@ class Example:
                 return v + qw * t + _np.cross([qx, qy, qz], t)
 
             qrot = _np.array([0.0, 0.0, 0.0, 1.0], dtype=_np.float32)
-            if rotate_x_deg: qrot = _qmul(_axis_quat(0, rotate_x_deg), qrot)
-            if rotate_y_deg: qrot = _qmul(_axis_quat(1, rotate_y_deg), qrot)
-            if rotate_z_deg: qrot = _qmul(_axis_quat(2, rotate_z_deg), qrot)
+            if rotate_x_deg:
+                qrot = _qmul(_axis_quat(0, rotate_x_deg), qrot)
+            if rotate_y_deg:
+                qrot = _qmul(_axis_quat(1, rotate_y_deg), qrot)
+            if rotate_z_deg:
+                qrot = _qmul(_axis_quat(2, rotate_z_deg), qrot)
 
             n_p = int(self.model.particle_count)
             n_b = int(self.model.body_count)
@@ -125,12 +143,12 @@ class Example:
                     if int(t) == free:
                         s = int(jq_start[i])
                         # Rotate translation around origin too.
-                        p = _np.array([jq[s], jq[s+1], jq[s+2]], dtype=_np.float32)
+                        p = _np.array([jq[s], jq[s + 1], jq[s + 2]], dtype=_np.float32)
                         p = _qrot_vec(qrot, p)
-                        jq[s], jq[s+1], jq[s+2] = p
-                        cur = jq[s+3:s+7]
+                        jq[s], jq[s + 1], jq[s + 2] = p
+                        cur = jq[s + 3 : s + 7]
                         nq = _qmul(qrot, cur)
-                        jq[s+3:s+7] = nq
+                        jq[s + 3 : s + 7] = nq
                         n_rot += 1
                 if n_rot:
                     self.state_0.joint_q.assign(jq)
@@ -157,6 +175,7 @@ class Example:
         # For cloth, lift particle_q directly (one row per particle).
         if drop_height:
             import numpy as _np
+
             n_bodies = int(self.model.body_count)
             n_joints = int(self.model.joint_count)
             n_particles = int(self.model.particle_count)
@@ -177,8 +196,7 @@ class Example:
                     if n_lifted_free:
                         self.state_0.joint_q.assign(jq)
                         # Re-derive body_q from the new joint_q via forward kinematics.
-                        newton.eval_fk(self.model, self.state_0.joint_q,
-                                       self.state_0.joint_qd, self.state_0)
+                        newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
 
                 # 2. Otherwise (no free joints, plain rigid): lift body_q directly.
                 elif n_bodies > 0:
@@ -200,6 +218,10 @@ class Example:
         # Frame timing comes from newton:timeStepsPerSecond in the USDA.
         self.fps = bundle.fps
         self.frame_dt = 1.0 / float(self.fps)
+        if self.viewer is None:
+            if viewer_factory is None:
+                raise ValueError("viewer or viewer_factory is required")
+            self.viewer = viewer_factory(self.fps)
 
         # Substeps: caller override > USDA newton:solver:substeps > default 1.
         if substeps is not None:
@@ -217,11 +239,10 @@ class Example:
             self.model.soft_contact_mu = soft_contact_mu
             self.model.soft_contact_max = soft_contact_max
             import numpy as _np
+
             n_particles = int(self.model.particle_count)
             if n_particles > 0:
-                self.model.particle_radius.assign(
-                    _np.full(n_particles, self.cloth_particle_radius, dtype=_np.float32)
-                )
+                self.model.particle_radius.assign(_np.full(n_particles, self.cloth_particle_radius, dtype=_np.float32))
             self.model.cloth_body_contact_margin = cloth_body_contact_margin
             self.model.bending_ke = bending_ke
             self.model.bending_kd = bending_kd
@@ -231,13 +252,13 @@ class Example:
                 self.solver.particle_edge_contact_buffer_size = vbd_particle_edge_contact_buffer_size
                 self.solver.particle_collision_detection_interval = vbd_particle_collision_detection_interval
                 self.solver.rigid_contact_k_start = (
-                    soft_contact_ke if vbd_rigid_contact_k_start is None
-                    else vbd_rigid_contact_k_start
+                    soft_contact_ke if vbd_rigid_contact_k_start is None else vbd_rigid_contact_k_start
                 )
 
         # Diagnostic: confirm gravity + per-particle mass non-zero.
         try:
             import numpy as _np
+
             n_p = int(self.model.particle_count)
             grav = getattr(self.model, "gravity", None)
             if n_p > 0:
@@ -248,7 +269,7 @@ class Example:
                     f"  diag: gravity={grav}  particles={n_p}  "
                     f"pinned(inv_mass==0)={n_pinned}  "
                     f"inv_mass[min,mean,max]=[{inv_m.min():.3e},{inv_m.mean():.3e},{inv_m.max():.3e}]  "
-                    f"z[min,mean,max]=[{pq0[:,2].min():.3f},{pq0[:,2].mean():.3f},{pq0[:,2].max():.3f}]"
+                    f"z[min,mean,max]=[{pq0[:, 2].min():.3f},{pq0[:, 2].mean():.3f},{pq0[:, 2].max():.3f}]"
                 )
             else:
                 n_b = int(self.model.body_count)
@@ -263,10 +284,7 @@ class Example:
                         m_stat = f"mass[min,mean,max]=[{m.min():.3f},{m.mean():.3f},{m.max():.3f}]kg"
                     else:
                         m_stat = "mass=N/A (all pinned)"
-                    print(
-                        f"  diag: gravity={grav}  bodies={n_b}  "
-                        f"static(inv_mass==0)={n_pinned}  {m_stat}"
-                    )
+                    print(f"  diag: gravity={grav}  bodies={n_b}  static(inv_mass==0)={n_pinned}  {m_stat}")
                     # Per-body breakdown (small rigid sets are usually tiny).
                     if n_b <= 16:
                         for i in range(n_b):
@@ -278,8 +296,7 @@ class Example:
         # ---- Sync body_q with joint_q via FK so MuJoCo/XPBD don't snap on first step ----
         if int(self.model.joint_count) > 0:
             try:
-                newton.eval_fk(self.model, self.state_0.joint_q,
-                               self.state_0.joint_qd, self.state_0)
+                newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
                 jq = self.state_0.joint_q.numpy()
                 print(f"  init joint_q={jq.tolist()}")
             except Exception as _e:
@@ -290,12 +307,17 @@ class Example:
         self.joint_target_overrides: dict[int, float] = dict(joint_target_overrides or {})
         if n_joints > 0:
             import numpy as _np
+
             jtypes = self.model.joint_type.numpy()
             jq_start = self.model.joint_q_start.numpy()
             jqd_start = self.model.joint_qd_start.numpy()
             type_names = {
-                0: "PRISMATIC", 1: "REVOLUTE", 2: "BALL",
-                3: "FIXED", 4: "FREE", 5: "DISTANCE",
+                0: "PRISMATIC",
+                1: "REVOLUTE",
+                2: "BALL",
+                3: "FIXED",
+                4: "FREE",
+                5: "DISTANCE",
                 6: "D6",
             }
             if list_joints:
@@ -313,8 +335,7 @@ class Example:
                     else:
                         print(f"  warn: joint index {i} out of range (n_joints={n_joints})")
                 self.state_0.joint_q.assign(jq)
-                newton.eval_fk(self.model, self.state_0.joint_q,
-                               self.state_0.joint_qd, self.state_0)
+                newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
 
             # Optional PD gain bump. MuJoCo bakes ke/kd at solver init, so
             # rebuild the solver if we touch them.
@@ -379,10 +400,14 @@ class Example:
             if self._frame_idx < 5 or self._frame_idx % 30 == 0:
                 if int(self.model.particle_count) > 0:
                     z = self.state_0.particle_q.numpy()[:, 2]
-                    print(f"  step#{self._frame_idx} t={self.sim_time:.3f}s  z[min,mean,max]=[{z.min():.3f},{z.mean():.3f},{z.max():.3f}]")
+                    print(
+                        f"  step#{self._frame_idx} t={self.sim_time:.3f}s  z[min,mean,max]=[{z.min():.3f},{z.mean():.3f},{z.max():.3f}]"
+                    )
                 elif int(self.model.body_count) > 0:
                     z = self.state_0.body_q.numpy()[:, 2]
-                    print(f"  step#{self._frame_idx} t={self.sim_time:.3f}s  body_z[min,max]=[{z.min():.3f},{z.max():.3f}]")
+                    print(
+                        f"  step#{self._frame_idx} t={self.sim_time:.3f}s  body_z[min,max]=[{z.min():.3f},{z.max():.3f}]"
+                    )
         except Exception:
             pass
 
@@ -393,29 +418,38 @@ class Example:
         self.viewer.end_frame()
 
 
-def main(argv=None) -> int:
+def create_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="example_load_converted")
     p.add_argument("usd", help="Path to a converted *.newton.usda")
-    p.add_argument("--steps", type=int, default=600,
-                   help="Frames to simulate when not in GUI mode")
-    p.add_argument("--substeps", type=int, default=None,
-                   help="Override newton:solver:substeps from the USDA")
-    p.add_argument("--gui", action="store_true",
-                   help="Open ViewerGL and run until the window is closed")
-    p.add_argument("--drop-height", type=float, default=0.0,
-                   help="Lift rigid bodies by this many meters in z before sim "
-                        "(ignored for cloth — cloth drop height is baked into the USDA)")
-    p.add_argument("--device", default=None,
-                   help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
+    p.add_argument("--steps", type=int, default=600, help="Frames to simulate when not in GUI mode")
+    p.add_argument("--substeps", type=int, default=None, help="Override newton:solver:substeps from the USDA")
+    p.add_argument("--gui", action="store_true", help="Open ViewerGL and run until the window is closed")
+    p.add_argument(
+        "--viewer",
+        choices=("gl", "ovrtx"),
+        default="gl",
+        help="Rendering backend. OVRTX records through the same --record-mp4 path.",
+    )
+    p.add_argument(
+        "--drop-height",
+        type=float,
+        default=0.0,
+        help="Lift rigid bodies by this many meters in z before sim "
+        "(ignored for cloth — cloth drop height is baked into the USDA)",
+    )
+    p.add_argument("--device", default=None, help="Warp device, e.g. 'cuda:0' or 'cpu' (default: GPU if available)")
 
     # Optional physics JSON: overrides --cloth-particle-radius from
     # solver.vbd_particle_self_contact_radius and --bending-ke from
     # cloth.bend_stiffness when present.
-    p.add_argument("--physics-json", default=None,
-                   help="Path to a physics JSON. If given, "
-                        "solver.vbd_particle_self_contact_radius overrides "
-                        "--cloth-particle-radius and cloth.bend_stiffness "
-                        "overrides --bending-ke.")
+    p.add_argument(
+        "--physics-json",
+        default=None,
+        help="Path to a physics JSON. If given, "
+        "solver.vbd_particle_self_contact_radius overrides "
+        "--cloth-particle-radius and cloth.bend_stiffness "
+        "overrides --bending-ke.",
+    )
 
     # Cloth tuning (only applied when bundle.body_type == "cloth").
     p.add_argument("--cloth-particle-radius", type=float, default=0.008)
@@ -430,41 +464,117 @@ def main(argv=None) -> int:
     # VBD-only knobs (ignored for other solvers).
     p.add_argument("--vbd-particle-edge-contact-buffer-size", type=int, default=64)
     p.add_argument("--vbd-particle-collision-detection-interval", type=int, default=-1)
-    p.add_argument("--vbd-rigid-contact-k-start", type=float, default=None,
-                   help="Defaults to --soft-contact-ke when omitted")
+    p.add_argument(
+        "--vbd-rigid-contact-k-start", type=float, default=None, help="Defaults to --soft-contact-ke when omitted"
+    )
 
     # Joint inspection / driving (rigid articulated assets).
-    p.add_argument("--list-joints", action="store_true",
-                   help="Print joint table on load (index, type, q_start, qd_start)")
-    p.add_argument("--joint-q", default=None,
-                   help='Initial joint positions, e.g. "1=0.78,2=-0.3" (radians for revolute, meters for prismatic). Index is joint number, sets first DOF.')
-    p.add_argument("--joint-target", default=None,
-                   help='Constant PD targets, same syntax as --joint-q. Held every step.')
-    p.add_argument("--joint-target-ke", type=float, default=None,
-                   help="Override model.joint_target_ke for ALL DOFs (PD position gain)")
-    p.add_argument("--joint-target-kd", type=float, default=None,
-                   help="Override model.joint_target_kd for ALL DOFs (PD velocity gain)")
+    p.add_argument(
+        "--list-joints", action="store_true", help="Print joint table on load (index, type, q_start, qd_start)"
+    )
+    p.add_argument(
+        "--joint-q",
+        default=None,
+        help='Initial joint positions, e.g. "1=0.78,2=-0.3" (radians for revolute, meters for prismatic). Index is joint number, sets first DOF.',
+    )
+    p.add_argument(
+        "--joint-target", default=None, help="Constant PD targets, same syntax as --joint-q. Held every step."
+    )
+    p.add_argument(
+        "--joint-target-ke",
+        type=float,
+        default=None,
+        help="Override model.joint_target_ke for ALL DOFs (PD position gain)",
+    )
+    p.add_argument(
+        "--joint-target-kd",
+        type=float,
+        default=None,
+        help="Override model.joint_target_kd for ALL DOFs (PD velocity gain)",
+    )
     p.add_argument("--rotate-x", type=float, default=0.0, help="Rotate asset around X (degrees)")
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
 
-    # mp4 recording (front-facing camera).
-    p.add_argument("--record-mp4", default=None,
-                   help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
-                        "and pipes frames to ffmpeg with a front-facing camera.")
-    p.add_argument("--mp4-fps", type=int, default=60,
-                   help="Output mp4 framerate (default 60)")
-    p.add_argument("--top-view", action="store_true",
-                   help="Place camera straight above the asset looking down")
-    p.add_argument("--no-auto-camera", action="store_true",
-                   help="Skip the front-view auto-framer so the viewer keeps its default "
-                        "camera (useful when rotating the asset and you want the view "
-                        "to stay constant).")
-    args = p.parse_args(argv)
+    # Video recording (front-facing camera).
+    p.add_argument(
+        "--record-mp4",
+        default=None,
+        help="Output mp4 path. ViewerGL pipes frames to ffmpeg; OVRTX "
+        "renders the same simulation timeline directly and writes a USD sidecar.",
+    )
+    p.add_argument("--mp4-fps", type=int, default=60, help="Output mp4 framerate (default 60)")
+    p.add_argument("--top-view", action="store_true", help="Place camera straight above the asset looking down")
+    p.add_argument(
+        "--no-auto-camera",
+        action="store_true",
+        help="Skip the front-view auto-framer so the viewer keeps its default "
+        "camera (useful when rotating the asset and you want the view "
+        "to stay constant).",
+    )
+    p.add_argument("--ovrtx-width", type=int, default=1280)
+    p.add_argument("--ovrtx-height", type=int, default=720)
+    p.add_argument(
+        "--ovrtx-render-mode", choices=("Minimal", "RealTimePathTracing", "PathTracing"), default="RealTimePathTracing"
+    )
+    p.add_argument("--ovrtx-warmup-frames", type=int, default=40)
+    p.add_argument("--ovrtx-samples-per-frame", type=int, default=1)
+    p.add_argument(
+        "--ovrtx-script", default=None, help="Optional OVRTX lifecycle script for stage composition and per-frame hooks"
+    )
+    return p
+
+
+def _create_viewer(args, fps: int):
+    from newton import viewer as v
+
+    if args.viewer == "ovrtx":
+        if not args.record_mp4:
+            raise ValueError("--viewer ovrtx requires --record-mp4")
+        if args.gui:
+            raise ValueError("--viewer ovrtx is headless; omit --gui")
+        if args.mp4_fps <= 0:
+            raise ValueError("--mp4-fps must be positive")
+
+        video_path = Path(args.record_mp4).expanduser().resolve()
+        video_path.parent.mkdir(parents=True, exist_ok=True)
+        stage_path = video_path.with_suffix(".usd")
+        render_every = max(1, int(round(float(fps) / float(args.mp4_fps))))
+        config = v.OVRTXConfig(
+            width=args.ovrtx_width,
+            height=args.ovrtx_height,
+            render_mode=args.ovrtx_render_mode,
+            render_every=render_every,
+            warmup_frames=args.ovrtx_warmup_frames,
+            samples_per_frame=args.ovrtx_samples_per_frame,
+            script_path=args.ovrtx_script,
+        )
+        print(
+            f"  OVRTX timeline: stage={stage_path}  sim_fps={fps}  "
+            f"video_fps={float(fps) / render_every:g}  render_every={render_every}"
+        )
+        return v.ViewerOVRTX(
+            output_path=str(stage_path),
+            render_output_path=str(video_path),
+            config=config,
+            fps=fps,
+            num_frames=args.steps,
+        )
+
+    if args.record_mp4:
+        return v.ViewerGL(headless=not args.gui)
+    if args.gui:
+        return v.ViewerGL(headless=False)
+    return v.ViewerNull()
+
+
+def main(argv=None) -> int:
+    args = create_parser().parse_args(argv)
 
     # Apply physics-json overrides for cloth-particle-radius and bending-ke.
     if args.physics_json:
         import json
+
         with open(args.physics_json) as _f:
             _phys = json.load(_f)
         _r = _phys.get("solver", {}).get("vbd_particle_self_contact_radius")
@@ -498,37 +608,44 @@ def main(argv=None) -> int:
             out[int(k)] = float(v)
         return out
 
-    from newton import viewer as v
-    if args.record_mp4:
-        viewer = v.ViewerGL(headless=not args.gui)
-    elif args.gui:
-        viewer = v.ViewerGL(headless=False)
-    else:
-        viewer = v.ViewerNull()
+    # OVRTX needs the authored simulation FPS to preserve wall-clock video
+    # duration. The bundle reveals it during Example construction, so defer
+    # only that viewer; GL and null viewers retain their existing lifecycle.
+    def viewer_factory(fps):
+        return _create_viewer(args, fps)
 
-    ex = Example(viewer, args.usd, substeps=args.substeps,
-                 drop_height=args.drop_height, device=args.device,
-                 cloth_particle_radius=args.cloth_particle_radius,
-                 soft_contact_ke=args.soft_contact_ke,
-                 soft_contact_kd=args.soft_contact_kd,
-                 soft_contact_mu=args.soft_contact_mu,
-                 soft_contact_max=args.soft_contact_max,
-                 cloth_body_contact_margin=args.cloth_body_contact_margin,
-                 bending_ke=args.bending_ke,
-                 bending_kd=args.bending_kd,
-                 vbd_particle_edge_contact_buffer_size=args.vbd_particle_edge_contact_buffer_size,
-                 vbd_particle_collision_detection_interval=args.vbd_particle_collision_detection_interval,
-                 vbd_rigid_contact_k_start=args.vbd_rigid_contact_k_start,
-                 joint_q_overrides=_parse_joint_kv(args.joint_q),
-                 joint_target_overrides=_parse_joint_kv(args.joint_target),
-                 joint_target_ke=args.joint_target_ke,
-                 joint_target_kd=args.joint_target_kd,
-                 list_joints=args.list_joints,
-                 rotate_x_deg=args.rotate_x,
-                 rotate_y_deg=args.rotate_y,
-                 rotate_z_deg=args.rotate_z)
+    viewer = None if args.viewer == "ovrtx" else viewer_factory(args.mp4_fps)
 
-    # ---- Top-down camera (ViewerGL only) ----
+    ex = Example(
+        viewer,
+        args.usd,
+        substeps=args.substeps,
+        drop_height=args.drop_height,
+        device=args.device,
+        cloth_particle_radius=args.cloth_particle_radius,
+        soft_contact_ke=args.soft_contact_ke,
+        soft_contact_kd=args.soft_contact_kd,
+        soft_contact_mu=args.soft_contact_mu,
+        soft_contact_max=args.soft_contact_max,
+        cloth_body_contact_margin=args.cloth_body_contact_margin,
+        bending_ke=args.bending_ke,
+        bending_kd=args.bending_kd,
+        vbd_particle_edge_contact_buffer_size=args.vbd_particle_edge_contact_buffer_size,
+        vbd_particle_collision_detection_interval=args.vbd_particle_collision_detection_interval,
+        vbd_rigid_contact_k_start=args.vbd_rigid_contact_k_start,
+        joint_q_overrides=_parse_joint_kv(args.joint_q),
+        joint_target_overrides=_parse_joint_kv(args.joint_target),
+        joint_target_ke=args.joint_target_ke,
+        joint_target_kd=args.joint_target_kd,
+        list_joints=args.list_joints,
+        rotate_x_deg=args.rotate_x,
+        rotate_y_deg=args.rotate_y,
+        rotate_z_deg=args.rotate_z,
+        viewer_factory=viewer_factory,
+    )
+    viewer = ex.viewer
+
+    # ---- Top-down camera ----
     if args.top_view and hasattr(ex.viewer, "set_camera"):
         n_p = int(ex.model.particle_count)
         if n_p > 0:
@@ -544,9 +661,8 @@ def main(argv=None) -> int:
         ex.viewer.set_camera(wp.vec3(cx, cy, height), -90.0, 0.0)
         print(f"  top-view camera: pos=({cx:.3f},{cy:.3f},{height:.3f})")
 
-    # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
+    # ---- Front-facing camera for video recording ----
     elif args.record_mp4 and not args.no_auto_camera and hasattr(ex.viewer, "set_camera"):
-        import numpy as _np
         n_p = int(ex.model.particle_count)
         if n_p > 0:
             pq = ex.state_0.particle_q.numpy()
@@ -565,8 +681,10 @@ def main(argv=None) -> int:
 
     # ---- mp4 recorder (ffmpeg subprocess) ----
     ffmpeg_proc = None
-    if args.record_mp4:
-        import subprocess, shutil
+    if args.record_mp4 and args.viewer == "gl":
+        import shutil
+        import subprocess
+
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
         ex.render()
@@ -576,12 +694,28 @@ def main(argv=None) -> int:
         enc_w = w - (w % 2)
         enc_h = h - (h % 2)
         cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "rgb24",
-            "-s", f"{enc_w}x{enc_h}", "-r", str(args.mp4_fps),
-            "-i", "-",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-crf", "20", "-preset", "fast",
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{enc_w}x{enc_h}",
+            "-r",
+            str(args.mp4_fps),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "20",
+            "-preset",
+            "fast",
             args.record_mp4,
         ]
         ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -591,16 +725,20 @@ def main(argv=None) -> int:
     # Decimation so 1s sim == 1s video: write an mp4 frame every physics_per_video
     # physics steps. --steps still counts physics steps (unchanged semantics).
     # With sim_fps=240 and --mp4-fps=60 → 1 mp4 frame per 4 sim steps.
-    physics_per_video = (
-        max(1, int(round(float(ex.fps) / float(args.mp4_fps))))
-        if ffmpeg_proc is not None
-        else 1
-    )
+    physics_per_video = max(1, int(round(float(ex.fps) / float(args.mp4_fps)))) if ffmpeg_proc is not None else 1
     if ffmpeg_proc is not None:
-        print(f"  physics/video decimation: 1 mp4 frame per {physics_per_video} sim step(s) "
-              f"(sim_fps={ex.fps}, mp4_fps={args.mp4_fps})")
+        print(
+            f"  physics/video decimation: 1 mp4 frame per {physics_per_video} sim step(s) "
+            f"(sim_fps={ex.fps}, mp4_fps={args.mp4_fps})"
+        )
 
-    i = 1 if ffmpeg_proc is not None else 0
+    # Both recording backends include the initial state. OVRTX owns its encoder
+    # and stage persistence, while GL continues through the pipe above.
+    if args.record_mp4 and args.viewer == "ovrtx":
+        ex.render()
+        print(f"  recording mp4: {args.record_mp4}  size={args.ovrtx_width}x{args.ovrtx_height}  backend=ovrtx")
+
+    i = 1 if args.record_mp4 else 0
     use_step_count = bool(args.record_mp4) or not args.gui
     try:
         while True:

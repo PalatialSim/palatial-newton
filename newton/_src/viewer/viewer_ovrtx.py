@@ -134,7 +134,10 @@ class ViewerOVRTX(ViewerUSD):
         self._camera_binding: Any = None
         self._instance_paths: dict[str, list[str]] = {}
         self._pending_matrices: dict[str, np.ndarray] = {}
-        self._mesh_materials: dict[str, tuple[tuple[float, float, float], float, float]] = {}
+        self._mesh_materials: dict[
+            str,
+            tuple[tuple[float, float, float], float, float, np.ndarray | str | None, bool],
+        ] = {}
         self._latest_render_vars: dict[str, np.ndarray] = {}
         self._render_count = 0
         self._video_process: subprocess.Popen | None = None
@@ -225,12 +228,58 @@ class ViewerOVRTX(ViewerUSD):
             roughness,
             metallic,
         )
+        mesh = self._meshes.get(name)
+        has_uvs = False
+        if mesh is not None and uvs is not None:
+            uv_values = uvs.numpy().astype(np.float32)
+            point_count = len(points)
+            index_count = len(indices)
+            if len(uv_values) == point_count:
+                interpolation = UsdGeom.Tokens.vertex
+            elif len(uv_values) == index_count:
+                interpolation = UsdGeom.Tokens.faceVarying
+            else:
+                raise ValueError(
+                    f"Mesh {name!r} has {len(uv_values)} UVs; expected {point_count} vertex "
+                    f"or {index_count} face-varying values"
+                )
+            primvar = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar(
+                "st",
+                Sdf.ValueTypeNames.TexCoord2fArray,
+                interpolation,
+            )
+            primvar.Set(uv_values)
+            has_uvs = True
         self._mesh_materials[name] = (
             (0.8, 0.8, 0.8) if color is None else tuple(float(value) for value in color),
             self.config.default_material_roughness if roughness is None else float(roughness),
             0.0 if metallic is None else float(metallic),
+            texture,
+            has_uvs,
         )
         return result
+
+    def _stage_texture_asset(self, texture: np.ndarray | str, index: int) -> Sdf.AssetPath:
+        """Copy a mesh texture beside the USD recording and return its relative asset path."""
+        output = Path(self.output_path)
+        texture_dir = output.parent / f"{output.stem}_textures"
+        texture_dir.mkdir(parents=True, exist_ok=True)
+
+        if isinstance(texture, np.ndarray):
+            target = texture_dir / f"mesh_{index:03d}.png"
+            pixels = texture
+            if np.issubdtype(pixels.dtype, np.floating):
+                pixels = (np.clip(pixels, 0.0, 1.0) * 255.0).astype(np.uint8)
+            _save_image(target, pixels)
+        else:
+            source = Path(texture).expanduser()
+            if not source.is_file():
+                return Sdf.AssetPath(str(texture))
+            target = texture_dir / f"mesh_{index:03d}_{source.name}"
+            if source.resolve() != target.resolve():
+                shutil.copy2(source, target)
+
+        return Sdf.AssetPath(target.relative_to(output.parent).as_posix())
 
     def _author_render_stage(self) -> None:
         """Author camera, lights, materials, AOVs, and render product into USD."""
@@ -258,18 +307,39 @@ class ViewerOVRTX(ViewerUSD):
             mesh = self._meshes.get(name)
             if mesh is None:
                 continue
-            color, roughness, metallic = values
+            color, roughness, metallic, texture, has_uvs = values
             material_path = material_scope.GetPath().AppendChild(f"Mesh_{index}")
             material = UsdShade.Material.Define(self.stage, material_path)
             shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("PreviewSurface"))
             shader.CreateIdAttr("UsdPreviewSurface")
-            reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("DisplayColor"))
-            reader.CreateIdAttr("UsdPrimvarReader_float3")
-            reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("displayColor")
-            reader.CreateInput("fallback", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
-            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
-                reader.ConnectableAPI(), "result"
-            )
+            if texture is not None and has_uvs:
+                st_reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("TexCoordReader"))
+                st_reader.CreateIdAttr("UsdPrimvarReader_float2")
+                st_reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("st")
+                st_reader.CreateOutput("result", Sdf.ValueTypeNames.Float2)
+
+                texture_shader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("BaseColorTexture"))
+                texture_shader.CreateIdAttr("UsdUVTexture")
+                texture_shader.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(
+                    self._stage_texture_asset(texture, index)
+                )
+                texture_shader.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("sRGB")
+                texture_shader.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(
+                    st_reader.ConnectableAPI(), "result"
+                )
+                texture_shader.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
+                shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
+                    texture_shader.ConnectableAPI(), "rgb"
+                )
+            else:
+                reader = UsdShade.Shader.Define(self.stage, material_path.AppendChild("DisplayColor"))
+                reader.CreateIdAttr("UsdPrimvarReader_float3")
+                reader.CreateInput("varname", Sdf.ValueTypeNames.Token).Set("displayColor")
+                reader.CreateInput("fallback", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*color))
+                reader.CreateOutput("result", Sdf.ValueTypeNames.Float3)
+                shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(
+                    reader.ConnectableAPI(), "result"
+                )
             shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(roughness)
             shader.CreateInput("metallic", Sdf.ValueTypeNames.Float).Set(metallic)
             material.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
