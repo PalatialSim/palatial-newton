@@ -74,12 +74,12 @@ class TestAnaglyphAssetAuthoring(unittest.TestCase):
             self.assertAlmostEqual(green_openpbr.GetInput("thin_film_weight").Get(), 0.14, places=6)
             np.testing.assert_allclose(
                 red_openpbr.GetInput("transmission_color").Get(),
-                (1.0, 0.8218, 0.8218),
+                (1.0, 0.7426, 0.7426),
                 atol=1e-6,
             )
             np.testing.assert_allclose(
                 green_openpbr.GetInput("transmission_color").Get(),
-                (0.8209, 0.982, 0.8236),
+                (0.7413, 0.974, 0.7452),
                 atol=1e-6,
             )
 

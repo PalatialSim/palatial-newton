@@ -877,8 +877,11 @@ such as `rgb depth normals semantic_segmentation`, and
 `--ovrtx-render-every N` to decouple simulation and render cadence. Set
 `--ovrtx-fps` to the simulation frame rate so USD time samples and encoded
 playback duration agree. Render scripts may define `compose_stage`,
-`on_stage_open`, `before_frame`,
-`after_frame`, `on_render_complete`, and `on_stage_close` hooks.
+`on_stage_open`, `before_frame`, `after_frame`, `on_render_complete`, and
+`on_stage_close` hooks. `context.bind_attribute()` creates a persistent OVStage
+binding for efficient per-frame scene edits;
+`newton/examples/palatial/turntable_ovrtx.py` is a complete looping camera-orbit
+example.
 
 ### Palatial validation video with OVRTX
 

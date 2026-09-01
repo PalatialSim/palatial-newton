@@ -20,9 +20,9 @@ from ...ovrtx import (
     VIDEO_SUFFIXES,
     OVRTXConfig,
     OVRTXStage,
-    _camera_orientation,
     _save_image,
     author_material,
+    camera_matrix,
 )
 from ..core.types import override
 from ..geometry.types import Mesh, OpenPBRMaterial
@@ -413,9 +413,7 @@ class ViewerOVRTX(ViewerUSD):
         product.CreateOrderedVarsRel().SetTargets(render_var_paths)
 
     def _camera_matrix(self) -> np.ndarray:
-        qw, qx, qy, qz = _camera_orientation(self._camera_position, self._camera_target)
-        xform = np.asarray([[*self._camera_position, qx, qy, qz, qw]], dtype=np.float64)
-        return _transforms_to_matrices(xform, np.ones((1, 3), dtype=np.float64))
+        return camera_matrix(self._camera_position, self._camera_target)[np.newaxis, ...]
 
     @override
     def log_instances(

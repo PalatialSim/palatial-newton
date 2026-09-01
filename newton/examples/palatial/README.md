@@ -139,7 +139,17 @@ The output set is:
   evaluated separately from visual output.
 
 `--ovrtx-script render_scene.py` exposes the same stage composition and
-per-frame scripting hooks as the shared Newton OVRTX viewer.
+per-frame scripting hooks as the shared Newton OVRTX viewer. Scripts can bind
+populated attributes once with `context.bind_attribute()` and write them every
+frame. A ready-to-run looping hero orbit is included:
+
+```bash
+uv run python -m newton.examples.palatial.example_palatial_load \
+  /workspace/asset.newton.usda \
+  --device cuda:0 --viewer ovrtx --steps 960 --mp4-fps 30 \
+  --record-mp4 /workspace/results/asset_turntable.mp4 \
+  --ovrtx-script newton/examples/palatial/turntable_ovrtx.py
+```
 
 OVRTX also preserves mesh `opacity` and index of refraction (`ior`) alongside
 base color, texture, roughness, and metallic values. An explicit

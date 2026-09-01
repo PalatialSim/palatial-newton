@@ -282,6 +282,26 @@ class OVRTXScriptContext:
         yield ordinal
         self._backend._publish(ordinal)
 
+    def bind_attribute(
+        self,
+        prim_paths: Sequence[str],
+        attribute_name: str,
+        *,
+        is_array: bool = False,
+        semantic: Any = None,
+    ) -> OVRTXAttributeBinding:
+        """Bind a populated attribute for efficient per-frame script writes.
+
+        The script owns the returned binding and should close it from its
+        ``on_stage_close`` hook.
+        """
+        return self._backend.bind_attribute(
+            prim_paths,
+            attribute_name,
+            is_array=is_array,
+            semantic=semantic,
+        )
+
 
 class OVRTXAttributeBinding:
     """Persistent OVStage query used for low-overhead live attribute writes."""
@@ -814,6 +834,27 @@ def _camera_orientation(
     cos_z, sin_z = math.cos(half_z), math.sin(half_z)
     cos_x, sin_x = math.cos(half_x), math.sin(half_x)
     return (cos_z * cos_x, cos_z * sin_x, sin_z * sin_x, sin_z * cos_x)
+
+
+def camera_matrix(
+    position: tuple[float, float, float],
+    target: tuple[float, float, float],
+) -> np.ndarray:
+    """Return an OVStage row-major camera transform looking at ``target``."""
+    qw, qx, qy, qz = _camera_orientation(position, target)
+    matrix = np.zeros((4, 4), dtype=np.float64)
+    matrix[0, 0] = 1.0 - 2.0 * (qy * qy + qz * qz)
+    matrix[0, 1] = 2.0 * (qx * qy + qz * qw)
+    matrix[0, 2] = 2.0 * (qx * qz - qy * qw)
+    matrix[1, 0] = 2.0 * (qx * qy - qz * qw)
+    matrix[1, 1] = 1.0 - 2.0 * (qx * qx + qz * qz)
+    matrix[1, 2] = 2.0 * (qy * qz + qx * qw)
+    matrix[2, 0] = 2.0 * (qx * qz + qy * qw)
+    matrix[2, 1] = 2.0 * (qy * qz - qx * qw)
+    matrix[2, 2] = 1.0 - 2.0 * (qx * qx + qy * qy)
+    matrix[3, :3] = position
+    matrix[3, 3] = 1.0
+    return matrix
 
 
 def _compose_render_stage(

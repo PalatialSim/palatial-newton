@@ -81,6 +81,25 @@ class TestOVRTXRendering(unittest.TestCase):
         self.assertEqual(newton_ovrtx.RENDER_VARS["normals"], "NormalSD")
         self.assertEqual(newton_ovrtx.RENDER_VARS["semantic_segmentation"], "SemanticSegmentation")
 
+    def test_script_context_exposes_persistent_attribute_bindings(self):
+        backend = MagicMock()
+        binding = backend.bind_attribute.return_value
+        context = newton_ovrtx.OVRTXScriptContext(backend)
+
+        result = context.bind_attribute(
+            ["/NewtonCamera"],
+            "omni:xform",
+            semantic="matrix",
+        )
+
+        self.assertIs(result, binding)
+        backend.bind_attribute.assert_called_once_with(
+            ["/NewtonCamera"],
+            "omni:xform",
+            is_array=False,
+            semantic="matrix",
+        )
+
     @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
     def test_live_transform_matrix_matches_usd_xform_ops(self):
         stage = Usd.Stage.CreateInMemory()
@@ -93,6 +112,16 @@ class TestOVRTXRendering(unittest.TestCase):
 
         expected = np.asarray(UsdGeom.Xformable(prim).GetLocalTransformation(0.0), dtype=np.float64)
         np.testing.assert_allclose(_transforms_to_matrices(xform, scales)[0], expected, atol=1e-6)
+
+    def test_camera_matrix_matches_live_viewer_transform_layout(self):
+        position = (0.1, 0.4, 0.08)
+        target = (0.0, 0.0, 0.02)
+        qw, qx, qy, qz = newton_ovrtx._camera_orientation(position, target)
+        xform = np.asarray([[*position, qx, qy, qz, qw]], dtype=np.float64)
+
+        expected = _transforms_to_matrices(xform, np.ones((1, 3), dtype=np.float64))[0]
+
+        np.testing.assert_allclose(newton_ovrtx.camera_matrix(position, target), expected, atol=1e-9)
 
     @unittest.skipIf(Sdf is None, "USD Python bindings are not installed")
     def test_composed_render_stage_is_valid_usda(self):

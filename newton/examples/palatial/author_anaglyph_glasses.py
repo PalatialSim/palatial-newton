@@ -113,7 +113,7 @@ def _copy_mesh_component(
 
 def _light_transmission_color(color: tuple[float, float, float]) -> tuple[float, float, float]:
     """Keep the filter identity while allowing most visible light through."""
-    return tuple(0.82 + 0.18 * channel for channel in color)
+    return tuple(0.74 + 0.26 * channel for channel in color)
 
 
 def _lens_material(
