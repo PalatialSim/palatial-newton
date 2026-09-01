@@ -914,7 +914,7 @@ uv run python -m newton.examples.palatial.example_palatial_load \
     --validation-report /workspace/results/glasses_anaglyph_validation.json
 ```
 
-The defaults approximate the photographed glasses: `opacity=0.06`, low lens
+The defaults approximate the photographed glasses: `opacity=0.03`, low lens
 roughness, a matte-black frame, and green rather than saturated cyan. For a
 different physical filter, calibrate `--red-color R G B`,
 `--green-color R G B`, `--opacity`, and `--frame-roughness`; these remain
