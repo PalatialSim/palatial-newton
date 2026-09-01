@@ -897,8 +897,8 @@ authored in the input USD; OVRTX derives `render_every` from that rate and
 `--mp4-fps`, so encoded video duration matches simulated time.
 
 For anaglyph glasses whose two lenses arrive as one untextured mesh, first
-split the connected lens components and author portable red/cyan transparent
-materials, then use an explicit front camera:
+split the connected lens components and author portable, subtly tinted red and
+green transparent materials, then use an explicit front camera:
 
 ```bash
 uv run python -m newton.examples.palatial.author_anaglyph_glasses \
@@ -913,6 +913,12 @@ uv run python -m newton.examples.palatial.example_palatial_load \
     --record-mp4 /workspace/results/glasses_anaglyph.mp4 \
     --validation-report /workspace/results/glasses_anaglyph_validation.json
 ```
+
+The defaults approximate the photographed glasses: `opacity=0.14`, low lens
+roughness, a matte-black frame, and green rather than saturated cyan. For a
+different physical filter, calibrate `--red-color R G B`,
+`--green-color R G B`, `--opacity`, and `--frame-roughness`; these remain
+ordinary USD material inputs in the retained stage.
 
 For a RunPod pod, use an RTX GPU with graphics-capable NVIDIA drivers, expose
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video`, install FFmpeg and

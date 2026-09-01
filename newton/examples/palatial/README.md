@@ -145,24 +145,28 @@ OVRTX also preserves mesh `opacity` and index of refraction (`ior`) alongside
 base color, texture, roughness, and metallic values. These are authored as
 portable `UsdPreviewSurface` inputs in the retained recording.
 
-### Red/cyan transparent glasses
+### Subtle red/green transparent glasses
 
 The supplied glasses asset has texture image files beside it, but its USD does
 not connect those files to either material. Both lenses also arrive as one
 combined mesh. Create a corrected, portable asset by splitting the two
-connected lens components and binding red/cyan transparent materials:
+connected lens components and binding subtly tinted red/green transparent
+materials:
 
 ```bash
 uv run python -m newton.examples.palatial.author_anaglyph_glasses \
   /workspace/glasses/glasses.usd \
   /workspace/glasses/glasses_anaglyph.usd \
-  --opacity 0.38 --roughness 0.08 --ior 1.49
+  --opacity 0.14 --roughness 0.04 --ior 1.49
 ```
 
 The author preserves collision and rigid-body schemas, makes the frame an
 opaque `UsdPreviewSurface`, removes the unresolved `OmniSurface.mdl`
 dependency, hides the old combined lens visual, and binds red to the negative-X
-lens and cyan to the positive-X lens. Render the result head-on with the same
+lens and green to the positive-X lens. The defaults use a matte-black frame and
+subtle lens transmission based on the physical reference. Use `--red-color R G B`,
+`--green-color R G B`, `--frame-color R G B`, and `--frame-roughness` to
+calibrate a different physical filter. Render the result head-on with the same
 Palatial playback command:
 
 ```bash

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-"""Author red/cyan transparent lenses on a two-lens USD glasses asset.
+"""Author subtle red/green transparent lenses on a two-lens USD glasses asset.
 
 The input asset may keep both lenses in one mesh. This utility finds the two
 connected mesh components, writes each as an independent visual mesh, binds
@@ -24,6 +24,9 @@ except ImportError as error:  # pragma: no cover - exercised by the CLI error pa
 
 
 DEFAULT_LENS_MESH = "/World/part_3/part_3_NewtonVisual"
+DEFAULT_RED_COLOR = (0.75, 0.04, 0.03)
+DEFAULT_GREEN_COLOR = (0.02, 0.58, 0.08)
+DEFAULT_FRAME_COLOR = (0.004, 0.005, 0.006)
 
 
 def _face_components(face_indices: np.ndarray, point_count: int) -> list[np.ndarray]:
@@ -118,16 +121,21 @@ def _author_preview_material(
     return material
 
 
-def _repair_source_materials(stage: Usd.Stage) -> None:
+def _repair_source_materials(
+    stage: Usd.Stage,
+    *,
+    frame_color: tuple[float, float, float],
+    frame_roughness: float,
+) -> None:
     """Replace non-portable MDL material state inherited from the source asset."""
     plastic_path = Sdf.Path("/World/Looks/material_plastic")
     stage.RemovePrim(plastic_path)
     _author_preview_material(
         stage,
         plastic_path,
-        (0.015, 0.018, 0.025),
+        frame_color,
         opacity=1.0,
-        roughness=0.16,
+        roughness=frame_roughness,
         ior=1.5,
     )
 
@@ -150,11 +158,15 @@ def author_anaglyph_glasses(
     output_path: str | Path,
     *,
     lens_mesh_path: str = DEFAULT_LENS_MESH,
-    opacity: float = 0.38,
-    roughness: float = 0.08,
+    opacity: float = 0.14,
+    roughness: float = 0.04,
     ior: float = 1.49,
+    red_color: tuple[float, float, float] = DEFAULT_RED_COLOR,
+    green_color: tuple[float, float, float] = DEFAULT_GREEN_COLOR,
+    frame_color: tuple[float, float, float] = DEFAULT_FRAME_COLOR,
+    frame_roughness: float = 0.32,
 ) -> Path:
-    """Create a Newton-ready copy with opaque frame and red/cyan lenses."""
+    """Create a Newton-ready copy with a matte frame and subtle red/green lenses."""
     source_path = Path(source_path).expanduser().resolve()
     output_path = Path(output_path).expanduser().resolve()
     if not source_path.is_file():
@@ -165,8 +177,13 @@ def author_anaglyph_glasses(
         raise ValueError("Lens opacity must be between zero and one")
     if not 0.0 <= roughness <= 1.0:
         raise ValueError("Lens roughness must be between zero and one")
+    if not 0.0 <= frame_roughness <= 1.0:
+        raise ValueError("Frame roughness must be between zero and one")
     if ior <= 1.0:
         raise ValueError("Lens index of refraction must be greater than one")
+    for name, color in (("Red lens", red_color), ("Green lens", green_color), ("Frame", frame_color)):
+        if len(color) != 3 or any(channel < 0.0 or channel > 1.0 for channel in color):
+            raise ValueError(f"{name} color must contain three values between zero and one")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_path, output_path)
@@ -187,22 +204,22 @@ def author_anaglyph_glasses(
         raise ValueError(f"Expected exactly two disconnected lens components, found {len(components)}")
     components.sort(key=lambda faces: float(points[indices[faces].reshape(-1), 0].mean()))
 
-    _repair_source_materials(stage)
+    _repair_source_materials(stage, frame_color=frame_color, frame_roughness=frame_roughness)
 
     looks_path = Sdf.Path("/World/Looks")
     UsdGeom.Scope.Define(stage, looks_path)
     red = _author_preview_material(
         stage,
         looks_path.AppendChild("AnaglyphRed"),
-        (1.0, 0.005, 0.005),
+        red_color,
         opacity=opacity,
         roughness=roughness,
         ior=ior,
     )
-    cyan = _author_preview_material(
+    green = _author_preview_material(
         stage,
-        looks_path.AppendChild("AnaglyphCyan"),
-        (0.005, 0.9, 1.0),
+        looks_path.AppendChild("AnaglyphGreen"),
+        green_color,
         opacity=opacity,
         roughness=roughness,
         ior=ior,
@@ -210,14 +227,14 @@ def author_anaglyph_glasses(
 
     parent_path = source.GetPath().GetParentPath()
     red_mesh = _copy_mesh_component(stage, source, parent_path.AppendChild("AnaglyphLensRed"), components[0])
-    cyan_mesh = _copy_mesh_component(stage, source, parent_path.AppendChild("AnaglyphLensCyan"), components[1])
+    green_mesh = _copy_mesh_component(stage, source, parent_path.AppendChild("AnaglyphLensGreen"), components[1])
     UsdShade.MaterialBindingAPI.Apply(red_mesh.GetPrim()).Bind(red)
-    UsdShade.MaterialBindingAPI.Apply(cyan_mesh.GetPrim()).Bind(cyan)
+    UsdShade.MaterialBindingAPI.Apply(green_mesh.GetPrim()).Bind(green)
     red_mesh.GetPrim().CreateAttribute("palatial:renderRole", Sdf.ValueTypeNames.Token, custom=True).Set(
         "anaglyph-red-lens"
     )
-    cyan_mesh.GetPrim().CreateAttribute("palatial:renderRole", Sdf.ValueTypeNames.Token, custom=True).Set(
-        "anaglyph-cyan-lens"
+    green_mesh.GetPrim().CreateAttribute("palatial:renderRole", Sdf.ValueTypeNames.Token, custom=True).Set(
+        "anaglyph-green-lens"
     )
     UsdGeom.Imageable(source.GetPrim()).MakeInvisible()
     stage.GetRootLayer().Save()
@@ -229,9 +246,13 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("source", help="Source glasses USD")
     parser.add_argument("output", help="Corrected output USD")
     parser.add_argument("--lens-mesh", default=DEFAULT_LENS_MESH)
-    parser.add_argument("--opacity", type=float, default=0.38)
-    parser.add_argument("--roughness", type=float, default=0.08)
+    parser.add_argument("--opacity", type=float, default=0.14)
+    parser.add_argument("--roughness", type=float, default=0.04)
     parser.add_argument("--ior", type=float, default=1.49)
+    parser.add_argument("--red-color", type=float, nargs=3, default=DEFAULT_RED_COLOR, metavar=("R", "G", "B"))
+    parser.add_argument("--green-color", type=float, nargs=3, default=DEFAULT_GREEN_COLOR, metavar=("R", "G", "B"))
+    parser.add_argument("--frame-color", type=float, nargs=3, default=DEFAULT_FRAME_COLOR, metavar=("R", "G", "B"))
+    parser.add_argument("--frame-roughness", type=float, default=0.32)
     return parser
 
 
@@ -244,6 +265,10 @@ def main(argv: list[str] | None = None) -> int:
         opacity=args.opacity,
         roughness=args.roughness,
         ior=args.ior,
+        red_color=tuple(args.red_color),
+        green_color=tuple(args.green_color),
+        frame_color=tuple(args.frame_color),
+        frame_roughness=args.frame_roughness,
     )
     print(f"Anaglyph glasses USD saved in: {output}")
     return 0

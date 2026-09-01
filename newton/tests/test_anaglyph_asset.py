@@ -19,7 +19,7 @@ except ImportError:
 
 @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
 class TestAnaglyphAssetAuthoring(unittest.TestCase):
-    def test_splits_two_lenses_and_binds_transparent_red_cyan_materials(self):
+    def test_splits_two_lenses_and_binds_subtle_red_green_materials(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             source_path = root / "source.usda"
@@ -46,22 +46,26 @@ class TestAnaglyphAssetAuthoring(unittest.TestCase):
 
             result = Usd.Stage.Open(str(output_path))
             red_mesh = UsdGeom.Mesh.Get(result, "/World/part_3/AnaglyphLensRed")
-            cyan_mesh = UsdGeom.Mesh.Get(result, "/World/part_3/AnaglyphLensCyan")
+            green_mesh = UsdGeom.Mesh.Get(result, "/World/part_3/AnaglyphLensGreen")
             self.assertTrue(red_mesh)
-            self.assertTrue(cyan_mesh)
+            self.assertTrue(green_mesh)
             self.assertEqual(len(red_mesh.GetFaceVertexCountsAttr().Get()), 1)
-            self.assertEqual(len(cyan_mesh.GetFaceVertexCountsAttr().Get()), 1)
+            self.assertEqual(len(green_mesh.GetFaceVertexCountsAttr().Get()), 1)
             self.assertEqual(
                 UsdGeom.Imageable.Get(result, "/World/part_3/part_3_NewtonVisual").ComputeVisibility(),
                 UsdGeom.Tokens.invisible,
             )
 
             red_shader = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphRed/PreviewSurface")
-            cyan_shader = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphCyan/PreviewSurface")
-            np.testing.assert_allclose(red_shader.GetInput("diffuseColor").Get(), (1.0, 0.005, 0.005), atol=1e-6)
-            np.testing.assert_allclose(cyan_shader.GetInput("diffuseColor").Get(), (0.005, 0.9, 1.0), atol=1e-6)
-            self.assertAlmostEqual(red_shader.GetInput("opacity").Get(), 0.38, places=6)
-            self.assertAlmostEqual(cyan_shader.GetInput("ior").Get(), 1.49, places=6)
+            green_shader = UsdShade.Shader.Get(result, "/World/Looks/AnaglyphGreen/PreviewSurface")
+            frame_shader = UsdShade.Shader.Get(result, "/World/Looks/material_plastic/PreviewSurface")
+            np.testing.assert_allclose(red_shader.GetInput("diffuseColor").Get(), (0.75, 0.04, 0.03), atol=1e-6)
+            np.testing.assert_allclose(green_shader.GetInput("diffuseColor").Get(), (0.02, 0.58, 0.08), atol=1e-6)
+            np.testing.assert_allclose(frame_shader.GetInput("diffuseColor").Get(), (0.004, 0.005, 0.006), atol=1e-6)
+            self.assertAlmostEqual(red_shader.GetInput("opacity").Get(), 0.14, places=6)
+            self.assertAlmostEqual(green_shader.GetInput("roughness").Get(), 0.04, places=6)
+            self.assertAlmostEqual(green_shader.GetInput("ior").Get(), 1.49, places=6)
+            self.assertAlmostEqual(frame_shader.GetInput("roughness").Get(), 0.32, places=6)
 
 
 if __name__ == "__main__":
