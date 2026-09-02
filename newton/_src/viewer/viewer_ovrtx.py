@@ -8,6 +8,7 @@ from __future__ import annotations
 import math
 import shutil
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,8 @@ class ViewerOVRTX(ViewerUSD):
         render_mode: str | None = None,
         warmup_frames: int | None = None,
         samples_per_frame: int | None = None,
+        keep_system_alive: bool | None = None,
+        datastore_cache: str | Path | None = None,
         frame_step: int | None = None,
         script_path: str | None = None,
         video_codec: str | None = None,
@@ -112,6 +115,7 @@ class ViewerOVRTX(ViewerUSD):
         fps: int = 60,
         up_axis: str = "Z",
         num_frames: int | None = 100,
+        stage_sublayers: Sequence[str | Path] | None = None,
     ):
         if config is None:
             defaults = OVRTXConfig()
@@ -122,6 +126,8 @@ class ViewerOVRTX(ViewerUSD):
                 render_every=defaults.render_every if frame_step is None else frame_step,
                 warmup_frames=defaults.warmup_frames if warmup_frames is None else warmup_frames,
                 samples_per_frame=defaults.samples_per_frame if samples_per_frame is None else samples_per_frame,
+                keep_system_alive=defaults.keep_system_alive if keep_system_alive is None else keep_system_alive,
+                datastore_cache=None if datastore_cache is None else str(datastore_cache),
                 script_path=script_path,
                 video_codec=defaults.video_codec if video_codec is None else video_codec,
                 video_crf=defaults.video_crf if video_crf is None else video_crf,
@@ -135,6 +141,8 @@ class ViewerOVRTX(ViewerUSD):
                 render_mode,
                 warmup_frames,
                 samples_per_frame,
+                keep_system_alive,
+                datastore_cache,
                 frame_step,
                 script_path,
                 video_codec,
@@ -160,7 +168,13 @@ class ViewerOVRTX(ViewerUSD):
         self._render_count = 0
         self._video_process: subprocess.Popen | None = None
         self._closed = False
-        super().__init__(output_path=output_path, fps=fps, up_axis=up_axis, num_frames=num_frames)
+        super().__init__(
+            output_path=output_path,
+            fps=fps,
+            up_axis=up_axis,
+            num_frames=num_frames,
+            stage_sublayers=stage_sublayers,
+        )
 
     @override
     def set_model(self, model, max_worlds=None):
@@ -204,6 +218,8 @@ class ViewerOVRTX(ViewerUSD):
             script_path=self.config.script_path,
             app_id=self.config.app_id,
             render_vars=self.config.render_vars,
+            keep_system_alive=self.config.keep_system_alive,
+            datastore_cache=self.config.datastore_cache,
         )
         try:
             self._session.open()
@@ -541,6 +557,8 @@ class ViewerOVRTX(ViewerUSD):
             samples_per_frame=self.config.samples_per_frame,
             fps=self.fps,
             render_vars=("rgb",),
+            keep_system_alive=self.config.keep_system_alive,
+            datastore_cache=self.config.datastore_cache,
         ) as session:
             frame = session.render_frame(self._frame_index, steps=warmup_frames)
         _save_image(output, frame.pixels)

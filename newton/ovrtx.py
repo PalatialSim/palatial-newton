@@ -189,6 +189,8 @@ class OVRTXConfig:
     video_preset: str = "medium"
     render_product_path: str = "/Render/Newton"
     app_id: str = "newton.ovrtx"
+    keep_system_alive: bool = True
+    datastore_cache: str | None = None
     on_frame: Callable[[int, dict[str, np.ndarray]], None] | None = None
 
     def __post_init__(self) -> None:
@@ -403,6 +405,8 @@ class OVRTXStage:
         script_path: str | Path | None = None,
         app_id: str = "newton.ovrtx",
         render_vars: Sequence[str] = ("rgb",),
+        keep_system_alive: bool = True,
+        datastore_cache: str | Path | None = None,
     ):
         self.source_path = Path(source_path).expanduser().resolve()
         if not self.source_path.is_file():
@@ -433,6 +437,10 @@ class OVRTXStage:
         self.script_path = Path(script_path).expanduser().resolve() if script_path is not None else None
         self.app_id = app_id
         self.render_vars = tuple(render_vars)
+        self.keep_system_alive = keep_system_alive
+        self.datastore_cache = (
+            str(Path(datastore_cache).expanduser().resolve()) if datastore_cache is not None else None
+        )
         unknown = set(self.render_vars) - RENDER_VARS.keys()
         if unknown:
             raise ValueError(f"Unknown OVRTX render vars {sorted(unknown)}; choose from {sorted(RENDER_VARS)}")
@@ -508,7 +516,11 @@ class OVRTXStage:
         if not isinstance(stage_text, str):
             raise TypeError("OVRTX render script compose_stage() must return a USDA string or None")
 
-        self._renderer = ovrtx.Renderer()
+        renderer_config = ovrtx.RendererConfig(
+            keep_system_alive=self.keep_system_alive,
+            datastore_cache=self.datastore_cache,
+        )
+        self._renderer = ovrtx.Renderer(renderer_config)
         self._stage = ovstage.Stage(self.app_id)
         try:
             self._renderer.attach_ovstage(self._stage)
@@ -964,6 +976,8 @@ def render_usd(
     video_preset: str = "medium",
     app_id: str = "newton.ovrtx",
     render_vars: Sequence[str] = ("rgb",),
+    keep_system_alive: bool = True,
+    datastore_cache: str | Path | None = None,
 ) -> Path:
     """Render a full USD stage to an image, video, or frame directory.
 
@@ -992,6 +1006,8 @@ def render_usd(
         script_path=script_path,
         app_id=app_id,
         render_vars=render_vars,
+        keep_system_alive=keep_system_alive,
+        datastore_cache=datastore_cache,
     ) as stage:
         return stage.render(
             output_path,

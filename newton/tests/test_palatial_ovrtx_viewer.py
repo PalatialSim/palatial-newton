@@ -19,12 +19,36 @@ from newton.examples.palatial.example_palatial_load import _create_viewer, creat
 from newton.ovrtx import OVRTXMaterial
 
 try:
-    from pxr import UsdGeom, UsdShade
+    from pxr import Sdf, Usd, UsdGeom, UsdShade
 except ImportError:
-    UsdGeom = UsdShade = None
+    Sdf = Usd = UsdGeom = UsdShade = None
 
 
 class TestPalatialOVRTXViewer(unittest.TestCase):
+    @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
+    def test_ovrtx_composes_static_sublayers_after_clearing_reused_output(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            static_path = root / "static.usda"
+            static_stage = Usd.Stage.CreateNew(str(static_path))
+            UsdGeom.Cube.Define(static_stage, "/Static/Pole")
+            static_stage.GetRootLayer().Save()
+
+            output = root / "recording.usda"
+            stale_layer = Sdf.Layer.CreateNew(str(output))
+            stale_layer.subLayerPaths = [str(static_path)]
+            stale_layer.Save()
+
+            viewer = ViewerOVRTX(
+                str(output),
+                stage_sublayers=[str(static_path)],
+                num_frames=1,
+            )
+            self.addCleanup(viewer.close)
+
+            self.assertEqual(viewer.stage.GetRootLayer().subLayerPaths, [str(static_path)])
+            self.assertTrue(viewer.stage.GetPrimAtPath("/Static/Pole").IsValid())
+
     def test_palatial_cli_routes_recording_to_ovrtx_at_simulation_rate(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             video = Path(temp_dir) / "validation.mp4"

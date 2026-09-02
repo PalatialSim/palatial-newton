@@ -77,6 +77,7 @@ class TestOVRTXRendering(unittest.TestCase):
         config = newton_ovrtx.OVRTXConfig(render_vars=("rgb", "depth", "normals", "semantic_segmentation"))
 
         self.assertFalse(hasattr(config, "output"))
+        self.assertTrue(config.keep_system_alive)
         self.assertEqual(newton_ovrtx.RENDER_VARS["depth"], "DepthSD")
         self.assertEqual(newton_ovrtx.RENDER_VARS["normals"], "NormalSD")
         self.assertEqual(newton_ovrtx.RENDER_VARS["semantic_segmentation"], "SemanticSegmentation")
@@ -155,6 +156,31 @@ class TestOVRTXRendering(unittest.TestCase):
     def test_render_usd_requires_existing_source(self):
         with self.assertRaisesRegex(FileNotFoundError, "does not exist"):
             newton_ovrtx.render_usd("/definitely/not/a/newton-recording.usd", "out.png")
+
+    def test_stage_configures_headless_renderer_lifetime_and_persistent_cache(self):
+        _, _, renderer, _, fake_ovrtx, fake_ovstage = _fake_runtime()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "scene.usd"
+            source.touch()
+            cache = Path(temp_dir) / "cache"
+            with patch.dict("sys.modules", {"ovrtx": fake_ovrtx, "ovstage": fake_ovstage}):
+                backend = newton_ovrtx.OVRTXStage(
+                    source,
+                    width=2,
+                    height=2,
+                    keep_system_alive=True,
+                    datastore_cache=cache,
+                )
+                backend.open()
+                backend.close()
+
+        fake_ovrtx.RendererConfig.assert_called_once_with(
+            keep_system_alive=True,
+            datastore_cache=str(cache.resolve()),
+        )
+        fake_ovrtx.Renderer.assert_called_once_with(fake_ovrtx.RendererConfig.return_value)
+        renderer.detach_ovstage.assert_called_once()
 
     @patch("newton.ovrtx.np.from_dlpack")
     @patch("newton.ovrtx._save_image")

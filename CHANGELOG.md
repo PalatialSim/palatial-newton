@@ -119,6 +119,9 @@
 
 ### Fixed
 
+- Preserve explicitly configured USD sublayers when `ViewerUSD` or
+  `ViewerOVRTX` clears a reused output layer, and configure OVRTX's persistent
+  datastore cache and headless renderer lifetime through public options
 - Fix `remesh_convex_hull` raising `QhullError` on degenerate (coincident, collinear, or coplanar) point clouds; it now returns a zero-volume fallback mesh with a `UserWarning`, raises `ValueError` on empty input, and retries Qhull with `QJ` joggle as a last resort on the 3D path
 - Collapse fixed Palatial rigid parts into compound bodies while preserving movable articulations, preventing redundant self-contacts from overwhelming validation.
 - Fix Palatial rigid drop validation measuring visual-only render bounds as collision penetration instead of collision-enabled shape bounds.

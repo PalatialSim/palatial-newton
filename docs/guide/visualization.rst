@@ -309,6 +309,8 @@ Constructor parameters:
 - ``up_axis``: USD up axis, ``"Y"`` or ``"Z"`` (default: ``"Z"``)
 - ``num_frames``: Maximum number of frames to record, or ``None`` for unlimited (default: ``100``)
 - ``scaling``: Uniform scaling applied to the scene root (default: ``1.0``)
+- ``stage_sublayers``: Optional USD layers composed after the viewer creates or
+  clears its output layer
 
 .. code-block:: python
 

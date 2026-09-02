@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -80,6 +81,7 @@ class ViewerUSD(ViewerBase):
         up_axis: str = "Z",
         num_frames: int | None = 100,
         scaling: float = 1.0,
+        stage_sublayers: Sequence[str | os.PathLike[str]] | None = None,
     ):
         """
         Initialize the USD viewer backend for Newton physics simulations.
@@ -90,6 +92,9 @@ class ViewerUSD(ViewerBase):
             up_axis: USD up axis, either 'Y' or 'Z'. Default is 'Z'.
             num_frames: Maximum number of frames to record. Default is 100. If None, recording is unlimited.
             scaling: Uniform scaling applied to the scene root. Default is 1.0.
+            stage_sublayers: Optional USD layers to compose after clearing or
+                creating the output layer. Paths are authored in the supplied
+                order and may be absolute or relative to the output layer.
 
         Raises:
             ImportError: If the usd-core package is not installed.
@@ -103,6 +108,7 @@ class ViewerUSD(ViewerBase):
         self.fps = fps
         self.up_axis = up_axis
         self.num_frames = num_frames
+        self.stage_sublayers = tuple(os.fspath(path) for path in (stage_sublayers or ()))
 
         # Create USD stage. If this output path is already registered in the
         # current process, reuse and clear the existing layer instead of
@@ -113,6 +119,7 @@ class ViewerUSD(ViewerBase):
             self.stage = Usd.Stage.Open(existing_layer)
         else:
             self.stage = Usd.Stage.CreateNew(self.output_path)
+        self.stage.GetRootLayer().subLayerPaths = list(self.stage_sublayers)
         self.stage.SetTimeCodesPerSecond(fps)  # number of timeCodes per second for data storage
         self.stage.SetFramesPerSecond(fps)  # display frame rate (timeline FPS in DCC tools)
         self.stage.SetStartTimeCode(0)
