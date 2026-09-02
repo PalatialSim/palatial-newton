@@ -177,7 +177,7 @@ class TestOVRTXRendering(unittest.TestCase):
 
         fake_ovrtx.RendererConfig.assert_called_once_with(
             keep_system_alive=True,
-            datastore_cache=str(cache.resolve()),
+            datastore_cache=f"local://{cache.resolve()}",
         )
         fake_ovrtx.Renderer.assert_called_once_with(fake_ovrtx.RendererConfig.return_value)
         renderer.detach_ovstage.assert_called_once()

@@ -51,6 +51,19 @@ RENDER_VARS = {
 }
 
 
+def _normalize_datastore_cache(datastore_cache: str | Path | None) -> str | None:
+    """Return the URI syntax required by OVRTX's datastore cache config."""
+    if datastore_cache is None:
+        return None
+    value = str(datastore_cache)
+    supported_prefixes = ("local://", "grpcdns://", "grpcdns_notls://")
+    if value.startswith(supported_prefixes):
+        return value
+    if "://" in value:
+        raise ValueError("OVRTX datastore_cache must use local://, grpcdns://, or grpcdns_notls://")
+    return f"local://{Path(value).expanduser().resolve()}"
+
+
 @dataclass(frozen=True)
 class OVRTXMaterial(OpenPBRMaterial):
     """One dual-context visual material for OVRTX and portable USD viewers.
@@ -438,9 +451,7 @@ class OVRTXStage:
         self.app_id = app_id
         self.render_vars = tuple(render_vars)
         self.keep_system_alive = keep_system_alive
-        self.datastore_cache = (
-            str(Path(datastore_cache).expanduser().resolve()) if datastore_cache is not None else None
-        )
+        self.datastore_cache = _normalize_datastore_cache(datastore_cache)
         unknown = set(self.render_vars) - RENDER_VARS.keys()
         if unknown:
             raise ValueError(f"Unknown OVRTX render vars {sorted(unknown)}; choose from {sorted(RENDER_VARS)}")
