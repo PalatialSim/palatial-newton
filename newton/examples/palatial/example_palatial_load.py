@@ -37,6 +37,7 @@ import warp as wp
 
 import newton
 from newton.examples.palatial.validation import (
+    CollisionSupportSampler,
     NewtonValidationTracker,
     clearance_translation,
     compute_world_shape_points,
@@ -152,6 +153,32 @@ def _live_validation_point_radii(model, point_count: int) -> np.ndarray:
     return radii
 
 
+def _build_collision_support_sampler(model) -> CollisionSupportSampler | None:
+    """Build one cached rigid-collision sampler shared by every solver."""
+    if int(model.body_count) <= 0:
+        return None
+    scales = model.shape_scale.numpy()
+    local_vertices: list[np.ndarray | None] = []
+    for index, source in enumerate(model.shape_source):
+        vertices = getattr(source, "vertices", None)
+        if vertices is None:
+            local_vertices.append(None)
+            continue
+        local_vertices.append(
+            np.asarray(vertices, dtype=np.float64) * np.asarray(scales[index], dtype=np.float64)
+        )
+    sampler = CollisionSupportSampler(
+        shape_body=model.shape_body.numpy(),
+        shape_transform=model.shape_transform.numpy(),
+        shape_aabb_lower=model.shape_collision_aabb_lower.numpy(),
+        shape_aabb_upper=model.shape_collision_aabb_upper.numpy(),
+        shape_local_vertices=local_vertices,
+        shape_flags=model.shape_flags.numpy(),
+        collide_shapes_flag=int(newton.ShapeFlags.COLLIDE_SHAPES),
+    )
+    return sampler if sampler.shape_count else None
+
+
 def _set_bodies_kinematic(model, body_indices: list[int]) -> None:
     """Zero out mass and inertia for selected bodies on a finalized model."""
     if not body_indices:
@@ -218,6 +245,7 @@ class Example:
         self._table = table
         self._validation_report_path = validation_report
         self._validation_tracker: NewtonValidationTracker | None = None
+        self._validation_support_sampler: CollisionSupportSampler | None = None
         self._support_plane_z = (
             float(table["pos"][2] + table["size"][2])
             if table is not None
@@ -804,6 +832,18 @@ class Example:
         )
         if self._validation_report_path is not None:
             points, velocities = _live_validation_state(self.model, self.state_0)
+            self._validation_support_sampler = _build_collision_support_sampler(self.model)
+            support = (
+                self._validation_support_sampler.sample(self.state_0.body_q.numpy())
+                if self._validation_support_sampler is not None
+                else None
+            )
+            solver_iterations = int(
+                bundle.solver_params.get(
+                    "iterations",
+                    getattr(self.solver, "iterations", 0) or 0,
+                )
+            )
             self._validation_tracker = NewtonValidationTracker(
                 points,
                 point_radii=_live_validation_point_radii(
@@ -811,12 +851,64 @@ class Example:
                     points.shape[0],
                 ),
                 support_plane_z=self._support_plane_z,
+                initial_support_min_z=(
+                    support.surface_min_z if support is not None else None
+                ),
+                initial_support_proxy_min_z=(
+                    support.aabb_proxy_min_z if support is not None else None
+                ),
+                support_extent_method=(
+                    self._validation_support_sampler.support_extent_method
+                    if self._validation_support_sampler is not None
+                    else "particle_collision_radius_v1"
+                ),
+                support_proxy_extent_method=(
+                    "collision_shape_aabb_corners_v1"
+                    if self._validation_support_sampler is not None
+                    else "particle_collision_radius_v1"
+                ),
+                support_exact_shape_count=(
+                    support.exact_shape_count if support is not None else 0
+                ),
+                support_aabb_fallback_shape_count=(
+                    support.aabb_fallback_shape_count if support is not None else 0
+                ),
+                solver_name=bundle.solver_name,
+                body_type=bundle.body_type,
+                frames_per_second=float(self.fps),
+                substeps=self.sim_substeps,
+                solver_iterations=(solver_iterations if solver_iterations > 0 else None),
             )
-            self._validation_tracker.observe(points, velocities)
+            self._observe_validation_state(points=points, velocities=velocities)
         self.capture()
         if self._validation_tracker is not None and self.graph is not None:
+            self._observe_validation_state()
+
+    def _observe_validation_state(
+        self,
+        *,
+        points: np.ndarray | None = None,
+        velocities: np.ndarray | None = None,
+    ) -> None:
+        """Record one solver-independent semantic observation."""
+        if self._validation_tracker is None:
+            return
+        if points is None or velocities is None:
             points, velocities = _live_validation_state(self.model, self.state_0)
-            self._validation_tracker.observe(points, velocities)
+        support = (
+            self._validation_support_sampler.sample(self.state_0.body_q.numpy())
+            if self._validation_support_sampler is not None
+            else None
+        )
+        self._validation_tracker.observe(
+            points,
+            velocities,
+            support_min_z=(support.surface_min_z if support is not None else None),
+            support_proxy_min_z=(
+                support.aabb_proxy_min_z if support is not None else None
+            ),
+            sample_time_s=self.sim_time,
+        )
 
     def capture(self):
         self.graph = None
@@ -857,8 +949,7 @@ class Example:
             self.simulate()
         self.sim_time += self.frame_dt
         if self._validation_tracker is not None:
-            points, velocities = _live_validation_state(self.model, self.state_0)
-            self._validation_tracker.observe(points, velocities)
+            self._observe_validation_state()
         if not self._step_diagnostics:
             return
         # Per-frame debug: always print first 5 frames, then every 30.
