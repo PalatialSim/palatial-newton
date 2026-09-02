@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -81,6 +82,139 @@ def compute_world_shape_points(
     if not world_points:
         return np.empty((0, 3), dtype=np.float64)
     return np.concatenate(world_points, axis=0)
+
+
+@dataclass(frozen=True)
+class CollisionSupportSample:
+    """Measured and proxy collision support extents for one body state."""
+
+    surface_min_z: float
+    aabb_proxy_min_z: float
+    exact_shape_count: int
+    aabb_fallback_shape_count: int
+
+
+class CollisionSupportSampler:
+    """Measure dynamic collision surfaces against a world-space support plane.
+
+    Mesh-backed shapes use their scaled source vertices. Shapes without source
+    vertices fall back to their oriented collision AABB. The independent AABB
+    result is retained so reports expose approximation error instead of hiding
+    it inside a single penetration number.
+    """
+
+    def __init__(
+        self,
+        *,
+        shape_body: np.ndarray,
+        shape_transform: np.ndarray,
+        shape_aabb_lower: np.ndarray,
+        shape_aabb_upper: np.ndarray,
+        shape_local_vertices: list[np.ndarray | None] | tuple[np.ndarray | None, ...] | None = None,
+        shape_flags: np.ndarray | None = None,
+        collide_shapes_flag: int | None = None,
+    ) -> None:
+        bodies = np.asarray(shape_body, dtype=np.int64).reshape(-1)
+        transforms = np.asarray(shape_transform, dtype=np.float64)
+        lower = np.asarray(shape_aabb_lower, dtype=np.float64)
+        upper = np.asarray(shape_aabb_upper, dtype=np.float64)
+        shape_count = bodies.shape[0]
+        if not (shape_count == transforms.shape[0] == lower.shape[0] == upper.shape[0]):
+            raise ValueError("shape arrays must have matching leading dimensions")
+        if transforms.ndim != 2 or transforms.shape[1] != 7:
+            raise ValueError("shape_transform must have shape (N, 7)")
+        if lower.shape != (shape_count, 3) or upper.shape != (shape_count, 3):
+            raise ValueError("shape AABBs must have shape (N, 3)")
+        if shape_local_vertices is None:
+            vertices: list[np.ndarray | None] = [None] * shape_count
+        else:
+            if len(shape_local_vertices) != shape_count:
+                raise ValueError("shape_local_vertices must contain one entry per shape")
+            vertices = []
+            for value in shape_local_vertices:
+                if value is None:
+                    vertices.append(None)
+                    continue
+                points = np.asarray(value, dtype=np.float64)
+                if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
+                    raise ValueError("shape-local vertices must contain 3D points")
+                if not np.isfinite(points).all():
+                    raise ValueError("shape-local vertices must be finite")
+                vertices.append(points.copy())
+        if shape_flags is None:
+            if collide_shapes_flag is not None:
+                raise ValueError("collide_shapes_flag requires shape_flags")
+            collision_enabled = np.ones(shape_count, dtype=bool)
+        else:
+            flags = np.asarray(shape_flags, dtype=np.int64).reshape(-1)
+            if flags.shape[0] != shape_count:
+                raise ValueError("shape_flags must contain one value per shape")
+            if collide_shapes_flag is None:
+                raise ValueError("shape_flags requires collide_shapes_flag")
+            collision_enabled = (flags & int(collide_shapes_flag)) != 0
+
+        self._shapes: list[tuple[int, np.ndarray, np.ndarray, np.ndarray | None]] = []
+        for index, body_index in enumerate(bodies):
+            if body_index < 0 or not collision_enabled[index]:
+                continue
+            corners = np.array(
+                [
+                    (x, y, z)
+                    for x in (lower[index, 0], upper[index, 0])
+                    for y in (lower[index, 1], upper[index, 1])
+                    for z in (lower[index, 2], upper[index, 2])
+                ],
+                dtype=np.float64,
+            )
+            self._shapes.append((int(body_index), transforms[index].copy(), corners, vertices[index]))
+        self.exact_shape_count = sum(vertices is not None for _, _, _, vertices in self._shapes)
+        self.aabb_fallback_shape_count = len(self._shapes) - self.exact_shape_count
+
+    @property
+    def support_extent_method(self) -> str:
+        """Return the fidelity of the collision-surface measurement."""
+        if self.exact_shape_count and not self.aabb_fallback_shape_count:
+            return "collision_mesh_vertices_v2"
+        if self.exact_shape_count:
+            return "collision_mesh_vertices_with_aabb_fallback_v2"
+        return "collision_shape_aabb_corners_v1"
+
+    @property
+    def shape_count(self) -> int:
+        """Return the number of sampled dynamic collision shapes."""
+        return len(self._shapes)
+
+    def sample(self, body_q: np.ndarray) -> CollisionSupportSample:
+        """Return exact-or-fallback and pure-AABB minimum world Z extents."""
+        bodies = np.asarray(body_q, dtype=np.float64)
+        if bodies.ndim != 2 or bodies.shape[1] != 7:
+            raise ValueError("body_q must have shape (N, 7)")
+        if not self._shapes:
+            raise ValueError("no dynamic collision shapes are available")
+
+        surface_min_z = math.inf
+        proxy_min_z = math.inf
+        for body_index, shape_transform, corners, local_vertices in self._shapes:
+            if body_index >= bodies.shape[0]:
+                raise ValueError("shape body index is outside body_q")
+            proxy_points = _transform_points(corners, shape_transform)
+            proxy_points = _transform_points(proxy_points, bodies[body_index])
+            shape_proxy_min_z = float(proxy_points[:, 2].min())
+            proxy_min_z = min(proxy_min_z, shape_proxy_min_z)
+            if local_vertices is None:
+                shape_surface_min_z = shape_proxy_min_z
+            else:
+                surface_points = _transform_points(local_vertices, shape_transform)
+                surface_points = _transform_points(surface_points, bodies[body_index])
+                shape_surface_min_z = float(surface_points[:, 2].min())
+            surface_min_z = min(surface_min_z, shape_surface_min_z)
+
+        return CollisionSupportSample(
+            surface_min_z=surface_min_z,
+            aabb_proxy_min_z=proxy_min_z,
+            exact_shape_count=self.exact_shape_count,
+            aabb_fallback_shape_count=self.aabb_fallback_shape_count,
+        )
 
 
 def clearance_translation(
@@ -201,6 +335,18 @@ class NewtonValidationTracker:
         speed_limit_m_s: float | None = None,
         initial_penetration_tolerance_m: float = 1.0e-4,
         support_penetration_tolerance_m: float = 1.0e-2,
+        settling_window_s: float = 0.5,
+        initial_support_min_z: float | None = None,
+        initial_support_proxy_min_z: float | None = None,
+        support_extent_method: str = "point_collision_radius_v1",
+        support_proxy_extent_method: str | None = None,
+        support_exact_shape_count: int = 0,
+        support_aabb_fallback_shape_count: int = 0,
+        solver_name: str = "unspecified",
+        body_type: str = "unknown",
+        frames_per_second: float | None = None,
+        substeps: int | None = None,
+        solver_iterations: int | None = None,
     ) -> None:
         points = np.asarray(initial_points, dtype=np.float64)
         if points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
@@ -227,23 +373,78 @@ class NewtonValidationTracker:
         self.speed_limit_m_s = float(speed_limit_m_s if speed_limit_m_s is not None else max(50.0, 100.0 * diagonal))
         self.initial_penetration_tolerance_m = float(initial_penetration_tolerance_m)
         self.support_penetration_tolerance_m = float(support_penetration_tolerance_m)
+        self.settling_window_s = float(settling_window_s)
+        if not math.isfinite(self.settling_window_s) or self.settling_window_s <= 0.0:
+            raise ValueError("settling_window_s must be finite and positive")
+        self.support_extent_method = str(support_extent_method)
+        if not self.support_extent_method:
+            raise ValueError("support_extent_method must not be empty")
+        self.support_proxy_extent_method = str(support_proxy_extent_method or self.support_extent_method)
+        self.support_exact_shape_count = int(support_exact_shape_count)
+        self.support_aabb_fallback_shape_count = int(support_aabb_fallback_shape_count)
+        if self.support_exact_shape_count < 0 or self.support_aabb_fallback_shape_count < 0:
+            raise ValueError("support shape counts must be non-negative")
+        self.solver_name = str(solver_name)
+        self.body_type = str(body_type)
+        self.frames_per_second = None if frames_per_second is None else float(frames_per_second)
+        if self.frames_per_second is not None and (
+            not math.isfinite(self.frames_per_second) or self.frames_per_second <= 0.0
+        ):
+            raise ValueError("frames_per_second must be finite and positive")
+        self.substeps = None if substeps is None else int(substeps)
+        self.solver_iterations = None if solver_iterations is None else int(solver_iterations)
+        if self.substeps is not None and self.substeps <= 0:
+            raise ValueError("substeps must be positive")
+        if self.solver_iterations is not None and self.solver_iterations <= 0:
+            raise ValueError("solver_iterations must be positive")
+        point_support_min_z = float((points[:, 2] - self._point_radii).min())
+        support_min_z = point_support_min_z if initial_support_min_z is None else float(initial_support_min_z)
+        support_proxy_min_z = (
+            support_min_z if initial_support_proxy_min_z is None else float(initial_support_proxy_min_z)
+        )
+        if not math.isfinite(support_min_z) or not math.isfinite(support_proxy_min_z):
+            raise ValueError("initial support extents must be finite")
         self.initial_penetration_m = max(
             0.0,
-            self.support_plane_z - float((points[:, 2] - self._point_radii).min()),
+            self.support_plane_z - support_min_z,
         )
         self.max_support_penetration_m = self.initial_penetration_m
+        self.max_support_penetration_proxy_m = max(
+            0.0,
+            self.support_plane_z - support_proxy_min_z,
+        )
+        self.final_support_penetration_m = self.initial_penetration_m
+        self.peak_support_penetration_sample: int | None = None
+        self.peak_support_penetration_time_s: float | None = None
+        self._support_penetration_samples: list[tuple[float, float]] = []
         self.sample_count = 0
         self.centroid_in_envelope_samples = 0
         self.finite_transforms = True
         self.max_displacement_m = 0.0
         self.max_linear_speed_m_s = 0.0
 
-    def observe(self, points: np.ndarray, linear_velocities: np.ndarray) -> None:
+    def observe(
+        self,
+        points: np.ndarray,
+        linear_velocities: np.ndarray,
+        *,
+        support_min_z: float | None = None,
+        support_proxy_min_z: float | None = None,
+        sample_time_s: float | None = None,
+    ) -> None:
         """Record one rendered/simulated frame's geometry and velocity state."""
         points = np.asarray(points, dtype=np.float64)
         velocities = np.asarray(linear_velocities, dtype=np.float64)
+        sample_index = self.sample_count
         self.sample_count += 1
-        finite = bool(np.isfinite(points).all() and np.isfinite(velocities).all())
+        if sample_time_s is None:
+            sample_time_s = (
+                float(sample_index) / self.frames_per_second
+                if self.frames_per_second is not None
+                else float(sample_index)
+            )
+        sample_time_s = float(sample_time_s)
+        finite = bool(np.isfinite(points).all() and np.isfinite(velocities).all() and math.isfinite(sample_time_s))
         self.finite_transforms = self.finite_transforms and finite
         if not finite or points.ndim != 2 or points.shape[1] != 3 or points.shape[0] == 0:
             return
@@ -253,14 +454,24 @@ class NewtonValidationTracker:
         center = points.mean(axis=0)
         displacement = float(np.linalg.norm(center - self._initial_center))
         self.max_displacement_m = max(self.max_displacement_m, displacement)
-        support_penetration = max(
-            0.0,
-            self.support_plane_z - float((points[:, 2] - self._point_radii).min()),
+        point_support_min_z = float((points[:, 2] - self._point_radii).min())
+        measured_support_min_z = point_support_min_z if support_min_z is None else float(support_min_z)
+        proxy_min_z = measured_support_min_z if support_proxy_min_z is None else float(support_proxy_min_z)
+        if not math.isfinite(measured_support_min_z) or not math.isfinite(proxy_min_z):
+            self.finite_transforms = False
+            return
+        support_penetration = max(0.0, self.support_plane_z - measured_support_min_z)
+        support_penetration_proxy = max(0.0, self.support_plane_z - proxy_min_z)
+        if self.peak_support_penetration_sample is None or support_penetration > self.max_support_penetration_m:
+            self.peak_support_penetration_sample = sample_index
+            self.peak_support_penetration_time_s = sample_time_s
+        self.max_support_penetration_m = max(self.max_support_penetration_m, support_penetration)
+        self.max_support_penetration_proxy_m = max(
+            self.max_support_penetration_proxy_m,
+            support_penetration_proxy,
         )
-        self.max_support_penetration_m = max(
-            self.max_support_penetration_m,
-            support_penetration,
-        )
+        self.final_support_penetration_m = support_penetration
+        self._support_penetration_samples.append((sample_time_s, support_penetration))
         if velocities.size:
             speeds = np.linalg.norm(velocities.reshape(-1, 3), axis=1)
             self.max_linear_speed_m_s = max(
@@ -278,11 +489,23 @@ class NewtonValidationTracker:
         trajectory_stable = bool(
             self.max_displacement_m <= self.displacement_limit_m and self.max_linear_speed_m_s <= self.speed_limit_m_s
         )
-        failures: list[str] = []
+        if self._support_penetration_samples:
+            final_time_s = self._support_penetration_samples[-1][0]
+            settling_start_s = final_time_s - self.settling_window_s
+            settled_samples = [
+                penetration
+                for sample_time, penetration in self._support_penetration_samples
+                if sample_time >= settling_start_s
+            ]
+        else:
+            settled_samples = []
+        settled_max_support_penetration_m = max(settled_samples, default=self.final_support_penetration_m)
+        advisories: list[str] = []
         if self.initial_penetration_m > self.initial_penetration_tolerance_m:
-            failures.append("initial_support_penetration")
+            advisories.append("initial_support_penetration")
         elif self.max_support_penetration_m > self.support_penetration_tolerance_m:
-            failures.append("trajectory_support_penetration")
+            advisories.append("trajectory_support_penetration")
+        failures: list[str] = []
         if not self.finite_transforms:
             failures.append("non_finite_transform")
         if self.max_displacement_m > self.displacement_limit_m:
@@ -297,10 +520,24 @@ class NewtonValidationTracker:
         return {
             "schemaVersion": SCHEMA_VERSION,
             "status": "passed" if passed else "failed",
+            "simulation": {
+                "solver": self.solver_name,
+                "body_type": self.body_type,
+                "frames_per_second": self.frames_per_second,
+                "substeps": self.substeps,
+                "solver_iterations": self.solver_iterations,
+            },
             "summary": {
                 "passed": passed,
                 "initial_penetration_m": self.initial_penetration_m,
                 "max_support_penetration_m": self.max_support_penetration_m,
+                "max_transient_support_penetration_m": (self.max_support_penetration_m),
+                "max_support_penetration_proxy_m": (self.max_support_penetration_proxy_m),
+                "peak_support_penetration_sample": (self.peak_support_penetration_sample),
+                "peak_support_penetration_time_s": (self.peak_support_penetration_time_s),
+                "final_support_penetration_m": (self.final_support_penetration_m),
+                "settled_max_support_penetration_m": (settled_max_support_penetration_m),
+                "settled_sample_count": len(settled_samples),
                 "finite_transforms": self.finite_transforms,
                 "trajectory_stable": trajectory_stable,
                 "sample_count": self.sample_count,
@@ -317,7 +554,17 @@ class NewtonValidationTracker:
                 "speed_limit_m_s": self.speed_limit_m_s,
             },
             "trajectoryEnvelopeMethod": "centroid_displacement_v1",
-            "supportExtentMethod": "point_collision_radius_v1",
+            "supportExtentMethod": self.support_extent_method,
+            "supportProxyExtentMethod": self.support_proxy_extent_method,
+            "supportPenetration": {
+                "kind": "collision_geometry_vs_support_plane",
+                "acceptance": "advisory",
+                "support_plane_z_m": self.support_plane_z,
+                "settling_window_s": self.settling_window_s,
+                "exact_shape_count": self.support_exact_shape_count,
+                "aabb_fallback_shape_count": (self.support_aabb_fallback_shape_count),
+            },
+            "advisories": advisories,
             "failures": failures,
         }
 

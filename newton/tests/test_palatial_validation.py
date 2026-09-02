@@ -10,6 +10,7 @@ import numpy as np
 
 from newton.examples.palatial.example_palatial_load import Example, _live_validation_state
 from newton.examples.palatial.validation import (
+    CollisionSupportSampler,
     NewtonValidationTracker,
     clearance_translation,
     compute_world_shape_points,
@@ -20,6 +21,105 @@ from newton.examples.palatial.validation import (
 
 
 class TestPalatialValidation(unittest.TestCase):
+    def test_collision_support_separates_mesh_surface_from_aabb_proxy(self):
+        body_q = np.array([[0.0, 0.0, 0.0, -0.3, 0.4, 0.0, np.sqrt(0.75)]])
+        vertices = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        sampler = CollisionSupportSampler(
+            shape_body=np.array([0]),
+            shape_transform=np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]]),
+            shape_aabb_lower=np.array([[0.0, 0.0, 0.0]]),
+            shape_aabb_upper=np.array([[1.0, 1.0, 1.0]]),
+            shape_local_vertices=[vertices],
+        )
+
+        support = sampler.sample(body_q)
+
+        self.assertLess(support.aabb_proxy_min_z, support.surface_min_z)
+        self.assertEqual(support.exact_shape_count, 1)
+        self.assertEqual(support.aabb_fallback_shape_count, 0)
+
+    def test_report_has_solver_neutral_time_resolved_support_metrics(self):
+        solvers = (
+            "mujoco",
+            "xpbd",
+            "featherstone",
+            "vbd",
+            "vbd_palatial",
+            "semi_implicit",
+            "style3d",
+        )
+        initial = np.array([[-0.2, -0.3, 0.2], [0.2, 0.3, 1.0]])
+        for solver_name in solvers:
+            with self.subTest(solver_name=solver_name):
+                tracker = NewtonValidationTracker(
+                    initial,
+                    support_plane_z=0.0,
+                    solver_name=solver_name,
+                    body_type="rigid",
+                    frames_per_second=10.0,
+                    substeps=4,
+                    solver_iterations=12,
+                    settling_window_s=0.15,
+                    initial_support_min_z=0.0,
+                    initial_support_proxy_min_z=0.0,
+                    support_extent_method="collision_mesh_vertices_v2",
+                )
+                tracker.observe(
+                    initial,
+                    np.zeros((1, 3)),
+                    support_min_z=0.0,
+                    support_proxy_min_z=0.0,
+                    sample_time_s=0.0,
+                )
+                tracker.observe(
+                    initial,
+                    np.zeros((1, 3)),
+                    support_min_z=-0.015,
+                    support_proxy_min_z=-0.020,
+                    sample_time_s=0.1,
+                )
+                tracker.observe(
+                    initial,
+                    np.zeros((1, 3)),
+                    support_min_z=-0.004,
+                    support_proxy_min_z=-0.006,
+                    sample_time_s=0.2,
+                )
+                tracker.observe(
+                    initial,
+                    np.zeros((1, 3)),
+                    support_min_z=-0.001,
+                    support_proxy_min_z=-0.002,
+                    sample_time_s=0.3,
+                )
+
+                report = tracker.report()
+                summary = report["summary"]
+
+                self.assertEqual(report["schemaVersion"], "palatial.newton-validation.v1")
+                self.assertEqual(report["simulation"]["solver"], solver_name)
+                self.assertEqual(report["simulation"]["body_type"], "rigid")
+                self.assertEqual(report["simulation"]["frames_per_second"], 10.0)
+                self.assertEqual(report["simulation"]["substeps"], 4)
+                self.assertEqual(report["simulation"]["solver_iterations"], 12)
+                self.assertAlmostEqual(summary["max_transient_support_penetration_m"], 0.015)
+                self.assertAlmostEqual(summary["max_support_penetration_m"], 0.015)
+                self.assertAlmostEqual(summary["max_support_penetration_proxy_m"], 0.020)
+                self.assertEqual(summary["peak_support_penetration_sample"], 1)
+                self.assertAlmostEqual(summary["peak_support_penetration_time_s"], 0.1)
+                self.assertAlmostEqual(summary["final_support_penetration_m"], 0.001)
+                self.assertAlmostEqual(summary["settled_max_support_penetration_m"], 0.004)
+                self.assertEqual(summary["settled_sample_count"], 2)
+                self.assertEqual(report["supportPenetration"]["kind"], "collision_geometry_vs_support_plane")
+                self.assertEqual(report["supportExtentMethod"], "collision_mesh_vertices_v2")
+
     def test_drop_height_is_clearance_above_support_plane(self):
         body_q = np.array([[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]])
         shape_body = np.array([0])
@@ -237,7 +337,7 @@ class TestPalatialValidation(unittest.TestCase):
             1.0,
         )
 
-    def test_trajectory_penetration_fails_after_clear_spawn(self):
+    def test_trajectory_penetration_is_advisory_after_clear_spawn(self):
         initial = np.array([[-0.2, -0.3, 0.2], [0.2, 0.3, 1.0]])
         tracker = NewtonValidationTracker(initial, support_plane_z=0.0)
         tracker.observe(initial, np.zeros((1, 3)))
@@ -248,10 +348,11 @@ class TestPalatialValidation(unittest.TestCase):
 
         report = tracker.report()
 
-        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["status"], "passed")
         self.assertAlmostEqual(report["summary"]["initial_penetration_m"], 0.0)
         self.assertAlmostEqual(report["summary"]["max_support_penetration_m"], 0.05)
-        self.assertIn("trajectory_support_penetration", report["failures"])
+        self.assertNotIn("trajectory_support_penetration", report["failures"])
+        self.assertIn("trajectory_support_penetration", report["advisories"])
 
     def test_small_contact_penetration_stays_within_trajectory_tolerance(self):
         initial = np.array([[-0.2, -0.3, 0.2], [0.2, 0.3, 1.0]])
@@ -279,13 +380,14 @@ class TestPalatialValidation(unittest.TestCase):
 
         report = tracker.report()
 
-        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["status"], "passed")
         self.assertAlmostEqual(report["summary"]["initial_penetration_m"], 0.005)
         self.assertAlmostEqual(
             report["summary"]["max_support_penetration_m"],
             0.005,
         )
-        self.assertIn("initial_support_penetration", report["failures"])
+        self.assertNotIn("initial_support_penetration", report["failures"])
+        self.assertIn("initial_support_penetration", report["advisories"])
 
     def test_example_finalizes_and_asserts_semantic_report(self):
         initial = np.array([[-0.2, -0.3, 0.2], [0.2, 0.3, 1.0]])

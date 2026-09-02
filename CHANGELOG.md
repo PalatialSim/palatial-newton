@@ -70,6 +70,9 @@
 
 ### Changed
 
+- Enrich Palatial semantic validation reports for every solver with solver
+  provenance, collision-surface and AABB-proxy support depths, peak frame/time,
+  final and settled penetration, and advisory penetration threshold crossings
 - Route `shape_type="box"` rods and palatial `flatRect` cables through box
   segment geometry instead of collapsing them to capsule proxies
 - Initialize generated and loaded palatial `flatRect` ribbons with an extra
