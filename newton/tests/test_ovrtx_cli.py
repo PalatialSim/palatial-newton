@@ -24,7 +24,7 @@ class TestOVRTXCli(unittest.TestCase):
         self.assertEqual(args.ovrtx_height, 720)
         self.assertEqual(args.ovrtx_camera_position, (3.0, -3.0, 2.5))
         self.assertEqual(args.ovrtx_camera_target, (0.0, 0.0, 0.5))
-        self.assertEqual(args.ovrtx_render_mode, "Minimal")
+        self.assertEqual(args.ovrtx_render_mode, "RealTimePathTracing")
         self.assertEqual(args.ovrtx_warmup_frames, 4)
         self.assertEqual(args.ovrtx_samples_per_frame, 1)
         self.assertEqual(args.ovrtx_render_every, 1)

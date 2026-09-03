@@ -294,13 +294,15 @@ different scene scale or framing, set ``--ovrtx-camera-position X Y Z`` and
 control the output resolution. By default the renderer performs 40 warmup
 steps before it downloads the PNG, which is a quality-first setting for
 real-time path tracing. Use ``--ovrtx-warmup-frames`` to trade warmup time for
-latency, or choose ``--ovrtx-render-mode Minimal`` for throughput-oriented
-rasterization.
+latency. ``Minimal`` remains available as an explicit opt-in, but its first
+native pipeline compilation can be substantially slower than real-time path
+tracing on some headless driver/runtime combinations.
 
 OVRTX needs an RTX-capable GPU and a compatible NVIDIA driver. Its first render
-usually compiles and caches shaders, which can take one or two minutes; keep the
-cache on persistent storage when using a cloud pod. OVRTX is pre-release and is
-not a substitute for Newton physics validation.
+usually compiles and caches shaders, which can take several minutes; keep both
+the environment-local shader cache and any configured datastore cache stable
+across runs on a cloud pod. OVRTX is pre-release and is not a substitute for
+Newton physics validation.
 
 Constructor parameters:
 

@@ -119,6 +119,10 @@
 
 ### Fixed
 
+- Default the live OVRTX viewer and shared examples CLI to
+  `RealTimePathTracing`, the validated headless path, because `Minimal` can
+  spend multiple minutes compiling its first native ray-tracing PSO group and
+  appear hung on cloud GPU watchdogs.
 - Preserve explicitly configured USD sublayers when `ViewerUSD` or
   `ViewerOVRTX` clears a reused output layer, and configure OVRTX's persistent
   datastore cache URI and headless renderer lifetime through public options

@@ -77,6 +77,7 @@ class TestOVRTXRendering(unittest.TestCase):
         config = newton_ovrtx.OVRTXConfig(render_vars=("rgb", "depth", "normals", "semantic_segmentation"))
 
         self.assertFalse(hasattr(config, "output"))
+        self.assertEqual(config.render_mode, "RealTimePathTracing")
         self.assertTrue(config.keep_system_alive)
         self.assertEqual(newton_ovrtx.RENDER_VARS["depth"], "DepthSD")
         self.assertEqual(newton_ovrtx.RENDER_VARS["normals"], "NormalSD")

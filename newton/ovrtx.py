@@ -186,7 +186,7 @@ class OVRTXConfig:
 
     width: int = 1280
     height: int = 720
-    render_mode: str = "Minimal"
+    render_mode: str = "RealTimePathTracing"
     render_every: int = 1
     warmup_frames: int = 4
     samples_per_frame: int = 1

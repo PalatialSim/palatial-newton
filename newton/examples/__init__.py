@@ -536,7 +536,7 @@ def create_parser():
     parser.add_argument(
         "--ovrtx-render-mode",
         choices=["RealTimePathTracing", "PathTracing", "Minimal"],
-        default="Minimal",
+        default="RealTimePathTracing",
         help="OVRTX camera render mode.",
     )
     parser.add_argument(
