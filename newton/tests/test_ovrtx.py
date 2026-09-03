@@ -63,6 +63,9 @@ class TestOVRTXRendering(unittest.TestCase):
             480,
             (3.0, -3.0, 2.5),
             (0.0, 0.0, 0.5),
+            None,
+            1000.0,
+            3000.0,
             "RealTimePathTracing",
         )
 
@@ -134,6 +137,9 @@ class TestOVRTXRendering(unittest.TestCase):
             480,
             (3.0, -3.0, 2.5),
             (0.0, 0.0, 0.5),
+            None,
+            1000.0,
+            3000.0,
             "RealTimePathTracing",
         )
 
@@ -151,8 +157,32 @@ class TestOVRTXRendering(unittest.TestCase):
                 480,
                 (3.0, -3.0, 2.5),
                 (0.0, 0.0, 0.5),
+                None,
+                1000.0,
+                3000.0,
                 "RealTimePathTracing",
             )
+
+    def test_compose_render_stage_adds_environment_texture(self):
+        environment = Path("/tmp/sunny field@1k.hdr")
+        stage = newton_ovrtx._compose_render_stage(
+            Path("/tmp/scene.usd"),
+            "/Render/Newton",
+            640,
+            480,
+            (3.0, -3.0, 2.5),
+            (0.0, 0.0, 0.5),
+            environment,
+            750.0,
+            2400.0,
+            "RealTimePathTracing",
+        )
+
+        self.assertIn("@/tmp/sunny field%401k.hdr@", stage)
+        self.assertIn('token inputs:texture:format = "automatic"', stage)
+        self.assertIn("bool visibleInPrimaryRay = 1", stage)
+        self.assertIn("float inputs:intensity = 750", stage)
+        self.assertIn("float inputs:intensity = 2400", stage)
 
     def test_render_usd_requires_existing_source(self):
         with self.assertRaisesRegex(FileNotFoundError, "does not exist"):

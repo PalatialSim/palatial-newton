@@ -411,6 +411,9 @@ class OVRTXStage:
         height: int = 720,
         camera_position: tuple[float, float, float] = (3.0, -3.0, 2.5),
         camera_target: tuple[float, float, float] = (0.0, 0.0, 0.5),
+        environment_texture: str | Path | None = None,
+        dome_light_intensity: float = 1000.0,
+        key_light_intensity: float = 3000.0,
         render_mode: str = "RealTimePathTracing",
         warmup_frames: int = 40,
         samples_per_frame: int = 1,
@@ -430,6 +433,16 @@ class OVRTXStage:
             raise ValueError("OVRTX warmup frames must be positive")
         if samples_per_frame <= 0:
             raise ValueError("OVRTX samples per frame must be positive")
+        if dome_light_intensity < 0.0:
+            raise ValueError("OVRTX dome light intensity must be non-negative")
+        if key_light_intensity < 0.0:
+            raise ValueError("OVRTX key light intensity must be non-negative")
+
+        self.environment_texture = (
+            Path(environment_texture).expanduser().resolve() if environment_texture is not None else None
+        )
+        if self.environment_texture is not None and not self.environment_texture.is_file():
+            raise FileNotFoundError(f"OVRTX environment texture does not exist: {self.environment_texture}")
 
         self._stage_text = _compose_render_stage(
             self.source_path,
@@ -438,6 +451,9 @@ class OVRTXStage:
             height,
             camera_position,
             camera_target,
+            self.environment_texture,
+            dome_light_intensity,
+            key_light_intensity,
             render_mode,
             render_vars,
         )
@@ -887,6 +903,9 @@ def _compose_render_stage(
     height: int,
     camera_position: tuple[float, float, float],
     camera_target: tuple[float, float, float],
+    environment_texture: Path | None,
+    dome_light_intensity: float,
+    key_light_intensity: float,
     render_mode: str,
     render_vars: Sequence[str] = ("rgb",),
 ) -> str:
@@ -907,6 +926,12 @@ def _compose_render_stage(
 
     quat_w, quat_x, quat_y, quat_z = _camera_orientation(camera_position, camera_target)
     source_asset_path = source_path.as_posix().replace("@", "%40")
+    dome_texture = ""
+    if environment_texture is not None:
+        environment_asset_path = environment_texture.as_posix().replace("@", "%40")
+        dome_texture = f"""\n        asset inputs:texture:file = @{environment_asset_path}@
+        token inputs:texture:format = "automatic"
+        bool visibleInPrimaryRay = 1"""
     source_names = [RENDER_VARS[name] for name in render_vars]
     ordered_vars = ", ".join(f"<{name}>" for name in source_names)
     render_var_defs = "\n".join(
@@ -937,13 +962,13 @@ def "Lighting"
 {{
     def DomeLight "Dome"
     {{
-        float inputs:intensity = 1000
+        float inputs:intensity = {dome_light_intensity:.9g}{dome_texture}
     }}
 
     def DistantLight "Key"
     {{
         float inputs:angle = 1
-        float inputs:intensity = 3000
+        float inputs:intensity = {key_light_intensity:.9g}
         float3 xformOp:rotateXYZ = (-55, 30, 0)
         uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
     }}
@@ -973,6 +998,9 @@ def render_usd(
     height: int = 720,
     camera_position: tuple[float, float, float] = (3.0, -3.0, 2.5),
     camera_target: tuple[float, float, float] = (0.0, 0.0, 0.5),
+    environment_texture: str | Path | None = None,
+    dome_light_intensity: float = 1000.0,
+    key_light_intensity: float = 3000.0,
     render_mode: str = "RealTimePathTracing",
     warmup_frames: int = 40,
     samples_per_frame: int = 1,
@@ -1010,6 +1038,9 @@ def render_usd(
         height=height,
         camera_position=camera_position,
         camera_target=camera_target,
+        environment_texture=environment_texture,
+        dome_light_intensity=dome_light_intensity,
+        key_light_intensity=key_light_intensity,
         render_mode=render_mode,
         warmup_frames=warmup_frames,
         samples_per_frame=samples_per_frame,
