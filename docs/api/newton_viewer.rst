@@ -13,6 +13,7 @@ newton.viewer
    :toctree: _generated
    :nosignatures:
 
+   Layer
    OVRTXConfig
    OVRTXMaterial
    ViewerBase
@@ -20,6 +21,7 @@ newton.viewer
    ViewerGL
    ViewerNull
    ViewerOVRTX
+   ViewerRTX
    ViewerRerun
    ViewerUSD
    ViewerViser

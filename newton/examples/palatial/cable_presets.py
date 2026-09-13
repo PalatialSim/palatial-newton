@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-
 _ANISOTROPIC_CABLE_PRESETS: dict[str, dict[str, object]] = {
     "flat_balanced_demo": {
         "cross_section_type": "flatRect",
@@ -119,4 +118,3 @@ def get_anisotropic_cable_preset(name: str) -> dict[str, object]:
         available = ", ".join(list_anisotropic_cable_presets())
         raise ValueError(f"Unknown anisotropic cable preset {name!r}. Available presets: {available}")
     return dict(preset)
-

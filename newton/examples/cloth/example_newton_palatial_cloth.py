@@ -1,5 +1,5 @@
 ###########################################################################
-#TO RUN :python -m newton.examples cloth_gown_franka
+# TO RUN :python -m newton.examples cloth_gown_franka
 ###########################################################################
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import newton.usd
 import newton.utils
 from newton import Model, ModelBuilder, State, eval_fk
 from newton.solvers import SolverFeatherstone, SolverVBD
-
 
 # Path to the Palatial-converted red gown USDA. Override on the CLI with
 # --gown-usd if you want to try a different shell asset.
@@ -148,9 +147,7 @@ class Example:
             raise RuntimeError(f"Cannot open gown USDA: {gown_usd_path}")
         usd_prim = usd_stage.GetPrimAtPath(gown_usd_prim)
         if not usd_prim or not usd_prim.IsValid():
-            raise RuntimeError(
-                f"Prim {gown_usd_prim!r} not found in {gown_usd_path}"
-            )
+            raise RuntimeError(f"Prim {gown_usd_prim!r} not found in {gown_usd_path}")
 
         gown_mesh = newton.usd.get_mesh(usd_prim)
         mesh_points = gown_mesh.vertices
@@ -439,7 +436,7 @@ class Example:
                 [1.5, 0.0, -40.0, 35.0, 0.9239, -0.3827, 0.0, 0.0, clamp_close_activation_val],
                 [1.5, 0.0, -40.0, 35.0, 0.9239, -0.3827, 0.0, 0.0, clamp_open_activation_val],
                 [2, -28.0, -60.0, 28.0, 0.9239, -0.3827, 0.0, 0.0, clamp_open_activation_val],
-                #bottom-bottom
+                # bottom-bottom
                 [2, 0.0, -50.0, 30.0, 0.9239, -0.3827, 0.0, 0.0, clamp_open_activation_val],
                 [2, 0.0, -50.0, 19.5, 0.9239, -0.3827, 0.0, 0.0, clamp_open_activation_val],
                 [2, 0.0, -50.0, 18.5, 0.9239, -0.3827, 0.0, 0.0, clamp_close_activation_val],
@@ -682,9 +679,7 @@ def _run_with_mp4(example, viewer, args):
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
     if not hasattr(viewer, "get_frame"):
-        raise RuntimeError(
-            "viewer does not support get_frame(); use --viewer gl for --record-mp4"
-        )
+        raise RuntimeError("viewer does not support get_frame(); use --viewer gl for --record-mp4")
 
     # Render an initial frame to discover the output resolution.
     example.render()
@@ -693,13 +688,30 @@ def _run_with_mp4(example, viewer, args):
 
     # libx264 + yuv420p requires even width/height; pad to nearest even.
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
-        "-i", "-",
-        "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p",
-        "-crf", "20", "-preset", "fast",
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{w}x{h}",
+        "-r",
+        str(args.mp4_fps),
+        "-i",
+        "-",
+        "-vf",
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-crf",
+        "20",
+        "-preset",
+        "fast",
         args.record_mp4,
     ]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -729,15 +741,20 @@ if __name__ == "__main__":
     parser = newton.examples.create_parser()
     parser.set_defaults(num_frames=1500)
     parser.add_argument(
-        "--gown-usd", type=str, default=None,
+        "--gown-usd",
+        type=str,
+        default=None,
         help="Override the gown USDA path (default: bundled red gown).",
     )
     parser.add_argument(
-        "--gown-prim", type=str, default=None,
+        "--gown-prim",
+        type=str,
+        default=None,
         help=f"USD prim path of the gown mesh (default: {DEFAULT_GOWN_PRIM}).",
     )
     parser.add_argument(
-        "--record-mp4", default=None,
+        "--record-mp4",
+        default=None,
         help="Path to output .mp4 (requires --viewer gl and ffmpeg on PATH).",
     )
     parser.add_argument("--mp4-fps", type=int, default=60)

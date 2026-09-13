@@ -1,21 +1,26 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-import unittest
+from __future__ import annotations
+
 import tempfile
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 from unittest import mock
 
-from pxr import Gf, Usd, UsdGeom, UsdPhysics
+if TYPE_CHECKING:
+    pass
 
 import newton.palatial
-
 from newton._src.palatial.load import _synchronize_newton_contact_capacity
 
 
 class TestPalatialLoad(unittest.TestCase):
     def _write_rigid_parts(self, directory: str, joint_schema):
+        from pxr import Gf, Usd, UsdGeom, UsdPhysics
+
         usd_path = Path(directory) / "parts.usda"
         stage = Usd.Stage.CreateNew(str(usd_path))
         UsdPhysics.Scene.Define(stage, "/World/physicsScene")
@@ -52,19 +57,19 @@ class TestPalatialLoad(unittest.TestCase):
         return bundle, options
 
     def test_fixed_parts_load_as_one_compound_rigid_body(self):
+        from pxr import UsdPhysics
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            bundle, options = self._load_with_import_options(
-                self._write_rigid_parts(tmpdir, UsdPhysics.FixedJoint)
-            )
+            bundle, options = self._load_with_import_options(self._write_rigid_parts(tmpdir, UsdPhysics.FixedJoint))
 
             self.assertEqual(bundle.model.body_count, 1)
             self.assertFalse(options["enable_self_collisions"])
 
     def test_movable_parts_keep_articulation_self_collision_enabled(self):
+        from pxr import UsdPhysics
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            bundle, options = self._load_with_import_options(
-                self._write_rigid_parts(tmpdir, UsdPhysics.RevoluteJoint)
-            )
+            bundle, options = self._load_with_import_options(self._write_rigid_parts(tmpdir, UsdPhysics.RevoluteJoint))
 
             self.assertEqual(bundle.model.body_count, 2)
             self.assertTrue(options["enable_self_collisions"])

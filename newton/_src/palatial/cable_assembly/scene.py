@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
-import newton
 import warp as wp
+
+import newton
 
 _IDENTITY_QUAT = wp.quat(0.0, 0.0, 0.0, 1.0)
 

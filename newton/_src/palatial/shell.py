@@ -4,7 +4,13 @@ Authoring lives in the converter package (palatial-sim-gen-isaac). This
 module only resolves cloth/shell parameters off a converted USD so the
 loader can build a Newton model.
 """
+
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pxr import Usd
 
 # `import newton` registers the bundled USD plugins (newton + newton_shell)
 # via newton/_src/usd/__init__.py. Must precede any pxr.Usd usage in the
@@ -13,27 +19,24 @@ import newton  # noqa: F401
 
 from . import _resolvers  # noqa: F401  (kept for parity with cloth.py init)
 
-from pxr import Usd, UsdGeom, UsdShade
-
-
 # Default values (mirrored from the schema plugin's generatedSchema.usda
 # so the read path always returns a complete dict even when the source
 # USD omits explicit attribute values).
 DEFAULTS = {
     # geometry (NewtonShellAPI on Mesh)
-    "thickness":         1e-3,
-    "particleRadius":    0.01,
-    "addBendingEdges":   True,
-    "dropHeight":        1.0,
+    "thickness": 1e-3,
+    "particleRadius": 0.01,
+    "addBendingEdges": True,
+    "dropHeight": 1.0,
     # material (NewtonShellMaterialAPI on Material)
-    "density":           300.0,
-    "triStiffness":      1.0e2,
-    "triAreaStiffness":  1.0e2,
-    "triDamping":        0.0,
-    "triDrag":           0.0,
-    "triLift":           0.0,
-    "bendStiffness":     1.0e-3,
-    "bendDamping":       0.0,
+    "density": 300.0,
+    "triStiffness": 1.0e2,
+    "triAreaStiffness": 1.0e2,
+    "triDamping": 0.0,
+    "triDrag": 0.0,
+    "triLift": 0.0,
+    "bendStiffness": 1.0e-3,
+    "bendDamping": 0.0,
 }
 
 
@@ -59,6 +62,8 @@ def find_shell_prim_path(usd_path: str) -> str | None:
       1. Mesh with NewtonShellAPI / NewtonClothAPI applied (new schema).
       2. Mesh tagged with the legacy `newton:bodyType="cloth"` marker.
     """
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return None
@@ -83,6 +88,8 @@ def _bound_shell_material_prims(mesh_prim: Usd.Prim) -> list[Usd.Prim]:
     Walks the all-purpose binding plus the `physics` purpose binding (the
     purpose used by the converter when it creates `<defaultPrim>/cloth_material`).
     """
+    from pxr import UsdShade
+
     out: list[Usd.Prim] = []
     binding = UsdShade.MaterialBindingAPI(mesh_prim)
     candidates = []
@@ -121,6 +128,8 @@ def read_shell_params(usd_path: str) -> dict:
     Missing values fall back to DEFAULTS, so the result always contains
     every key.
     """
+    from pxr import Usd
+
     out = dict(DEFAULTS)
     stage = Usd.Stage.Open(usd_path)
     cloth_path = find_shell_prim_path(usd_path)
@@ -139,27 +148,30 @@ def read_shell_params(usd_path: str) -> dict:
         return default
 
     # Geometry (mesh-only).
-    out["thickness"]       = float(_walk("newton:shell:thickness",       default=DEFAULTS["thickness"]))
-    out["particleRadius"]  = float(_walk("newton:shell:particleRadius",  default=DEFAULTS["particleRadius"]))
-    out["addBendingEdges"] = bool (_walk("newton:shell:addBendingEdges", default=DEFAULTS["addBendingEdges"]))
-    out["dropHeight"]      = float(_walk("newton:shell:dropHeight",
-                                          "newton:cloth:dropHeight",
-                                          default=DEFAULTS["dropHeight"]))
+    out["thickness"] = float(_walk("newton:shell:thickness", default=DEFAULTS["thickness"]))
+    out["particleRadius"] = float(_walk("newton:shell:particleRadius", default=DEFAULTS["particleRadius"]))
+    out["addBendingEdges"] = bool(_walk("newton:shell:addBendingEdges", default=DEFAULTS["addBendingEdges"]))
+    out["dropHeight"] = float(
+        _walk("newton:shell:dropHeight", "newton:cloth:dropHeight", default=DEFAULTS["dropHeight"])
+    )
     # Material (Material + legacy-on-mesh fallback).
-    out["density"]          = float(_walk("newton:shell:density",
-                                           "newton:cloth:density",         default=DEFAULTS["density"]))
-    out["triStiffness"]     = float(_walk("newton:shell:triStiffness",
-                                           "newton:cloth:triKe",           default=DEFAULTS["triStiffness"]))
-    out["triAreaStiffness"] = float(_walk("newton:shell:triAreaStiffness",
-                                           "newton:cloth:triKa",           default=DEFAULTS["triAreaStiffness"]))
-    out["triDamping"]       = float(_walk("newton:shell:triDamping",
-                                           "newton:cloth:triKd",           default=DEFAULTS["triDamping"]))
-    out["triDrag"]          = float(_walk("newton:shell:triDrag",          default=DEFAULTS["triDrag"]))
-    out["triLift"]          = float(_walk("newton:shell:triLift",          default=DEFAULTS["triLift"]))
-    out["bendStiffness"]    = float(_walk("newton:shell:bendStiffness",
-                                           "newton:cloth:edgeKe",          default=DEFAULTS["bendStiffness"]))
-    out["bendDamping"]      = float(_walk("newton:shell:bendDamping",
-                                           "newton:cloth:edgeKd",          default=DEFAULTS["bendDamping"]))
+    out["density"] = float(_walk("newton:shell:density", "newton:cloth:density", default=DEFAULTS["density"]))
+    out["triStiffness"] = float(
+        _walk("newton:shell:triStiffness", "newton:cloth:triKe", default=DEFAULTS["triStiffness"])
+    )
+    out["triAreaStiffness"] = float(
+        _walk("newton:shell:triAreaStiffness", "newton:cloth:triKa", default=DEFAULTS["triAreaStiffness"])
+    )
+    out["triDamping"] = float(_walk("newton:shell:triDamping", "newton:cloth:triKd", default=DEFAULTS["triDamping"]))
+    out["triDrag"] = float(_walk("newton:shell:triDrag", default=DEFAULTS["triDrag"]))
+    out["triLift"] = float(_walk("newton:shell:triLift", default=DEFAULTS["triLift"]))
+    out["bendStiffness"] = float(
+        _walk("newton:shell:bendStiffness", "newton:cloth:edgeKe", default=DEFAULTS["bendStiffness"])
+    )
+    out["bendDamping"] = float(
+        _walk("newton:shell:bendDamping", "newton:cloth:edgeKd", default=DEFAULTS["bendDamping"])
+    )
+
     # Optional extensions (None if unauthored).
     def _opt_vec3(*names):
         for prim in sources:
@@ -170,11 +182,11 @@ def read_shell_params(usd_path: str) -> dict:
                     return (float(v[0]), float(v[1]), float(v[2]))
         return None
 
-    out["style3dTriAnisoKe"]  = _opt_vec3("newton:shell:style3d:triAnisoKe")
+    out["style3dTriAnisoKe"] = _opt_vec3("newton:shell:style3d:triAnisoKe")
     out["style3dEdgeAnisoKe"] = _opt_vec3("newton:shell:style3d:edgeAnisoKe")
-    out["vbdSelfContactRadius"]            = _walk("newton:shell:vbd:selfContactRadius",            default=None)
-    out["vbdSelfContactMargin"]            = _walk("newton:shell:vbd:selfContactMargin",            default=None)
-    out["vbdConservativeBoundRelaxation"]  = _walk("newton:shell:vbd:conservativeBoundRelaxation",  default=None)
+    out["vbdSelfContactRadius"] = _walk("newton:shell:vbd:selfContactRadius", default=None)
+    out["vbdSelfContactMargin"] = _walk("newton:shell:vbd:selfContactMargin", default=None)
+    out["vbdConservativeBoundRelaxation"] = _walk("newton:shell:vbd:conservativeBoundRelaxation", default=None)
 
     # Intent (advisory).
     a = mesh.GetAttribute("newton:deformable:simulationIntent")

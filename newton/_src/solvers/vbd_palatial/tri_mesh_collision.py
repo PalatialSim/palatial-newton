@@ -10,8 +10,4 @@ for _name in dir(_tri_mesh_collision):
         continue
     globals()[_name] = getattr(_tri_mesh_collision, _name)
 
-__all__ = [
-    name
-    for name in dir(_tri_mesh_collision)
-    if not name.startswith("__")
-]
+__all__ = [name for name in dir(_tri_mesh_collision) if not name.startswith("__")]

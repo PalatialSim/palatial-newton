@@ -5,12 +5,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from pxr import Gf, Usd, UsdGeom
+
 # `import newton` registers the bundled USD plugins via
 # newton/_src/usd/__init__.py. Must precede any pxr.Usd usage.
 import newton  # noqa: F401
-
-import numpy as np
-from pxr import Gf, Usd, UsdGeom
 
 
 def has_api_schema(prim: Usd.Prim, schema_name: str) -> bool:
@@ -26,6 +30,8 @@ def has_api_schema(prim: Usd.Prim, schema_name: str) -> bool:
 
 def stage_units(stage: Usd.Stage) -> tuple[float, str]:
     """Return ``(meters_per_unit, up_axis)`` for a USD stage."""
+    from pxr import UsdGeom
+
     meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
     up_axis = str(UsdGeom.GetStageUpAxis(stage) or "Z")
     return meters_per_unit, up_axis
@@ -43,6 +49,8 @@ def to_newton_world(points: np.ndarray, meters_per_unit: float, up_axis: str) ->
 
 def matrix_transform_points(matrix: Gf.Matrix4d, points: np.ndarray) -> np.ndarray:
     """Apply a USD transform matrix to a point cloud."""
+    from pxr import Gf
+
     if points.size == 0:
         return points
     world = np.empty_like(points, dtype=np.float64)
@@ -61,6 +69,8 @@ def read_mesh_world_points(
     xform_cache: UsdGeom.XformCache,
 ) -> np.ndarray:
     """Read mesh points in Newton world coordinates."""
+    from pxr import UsdGeom
+
     mesh = UsdGeom.Mesh(prim)
     points = mesh.GetPointsAttr().Get()
     if points is None:

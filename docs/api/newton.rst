@@ -7,23 +7,10 @@ newton
 .. py:module:: newton
 .. currentmodule:: newton
 
-.. toctree::
-   :hidden:
-
-   newton_actuators
-   newton_geometry
-   newton_ik
-   newton_math
-   newton_selection
-   newton_sensors
-   newton_solvers
-   newton_usd
-   newton_utils
-   newton_viewer
-
 .. rubric:: Submodules
 
 - :doc:`newton.actuators <newton_actuators>`
+- :doc:`newton.controllers <newton_controllers>`
 - :doc:`newton.geometry <newton_geometry>`
 - :doc:`newton.ik <newton_ik>`
 - :doc:`newton.math <newton_math>`
@@ -54,11 +41,14 @@ newton
    Mesh
    Model
    ModelBuilder
+   ModelFlags
    OpenPBRMaterial
    ParticleFlags
+   Rod
    SDF
    ShapeFlags
    State
+   StateFlags
    TetMesh
 
 .. rubric:: Functions
@@ -70,8 +60,13 @@ newton
    AxisType
    eval_fk
    eval_ik
+   eval_inverse_dynamics_force
+   eval_inverse_dynamics_passive
    eval_jacobian
    eval_mass_matrix
+   eval_mimic
+   eval_rigid_contact_kinematics
+   intersect_ray
 
 .. rubric:: Constants
 
@@ -83,4 +78,6 @@ newton
    * - ``MAXVAL``
      - ``10000000000.0``
    * - ``__version__``
-     - ``1.3.0.dev0``
+     - ``1.7.0.dev0``
+   * - ``use_coord_layout_targets``
+     - ``True``

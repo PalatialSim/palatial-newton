@@ -10,9 +10,9 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-import newton  # noqa: F401
 import numpy as np
 
+import newton
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import load
 from newton.tests.unittest_utils import USD_AVAILABLE
@@ -25,12 +25,11 @@ if USD_AVAILABLE:
 else:
     Usd = None  # type: ignore[assignment]
 
-from newton._src.palatial.load import _detect_scene_kind
-
 from newton._src.palatial.cable_assembly import (
     build_power_cable_assembly_model,
     is_power_cable_assembly_stage,
 )
+from newton._src.palatial.load import _detect_scene_kind
 
 
 def _create_mesh_prim(stage: Any, prim_path: str, *, size: tuple[float, float, float]) -> None:
@@ -51,12 +50,30 @@ def _create_mesh_prim(stage: Any, prim_path: str, *, size: tuple[float, float, f
     mesh.CreateFaceVertexCountsAttr().Set([4, 4, 4, 4, 4, 4])
     mesh.CreateFaceVertexIndicesAttr().Set(
         [
-            0, 1, 2, 3,
-            4, 5, 6, 7,
-            0, 1, 5, 4,
-            1, 2, 6, 5,
-            2, 3, 7, 6,
-            3, 0, 4, 7,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            0,
+            1,
+            5,
+            4,
+            1,
+            2,
+            6,
+            5,
+            2,
+            3,
+            7,
+            6,
+            3,
+            0,
+            4,
+            7,
         ]
     )
     mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)

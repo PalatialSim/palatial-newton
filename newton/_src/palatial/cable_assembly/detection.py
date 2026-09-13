@@ -5,9 +5,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pxr import Usd
+
 # Importing newton registers the bundled USD schema plugins before pxr.Usd use.
 import newton as _newton  # noqa: F401
-from pxr import Usd
 
 from .constants import GEOMETRY_SCOPE_PATH, POWER_REQUIRED_PRIM_NAMES
 

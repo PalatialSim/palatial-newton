@@ -12,8 +12,8 @@ demonstrate twist propagation through the loaded cable bundle.
 from __future__ import annotations
 
 import argparse
-import math
 import inspect
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -22,7 +22,6 @@ import numpy as np
 import warp as wp
 
 import newton
-
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import create_cable_quaternions, extract_cable_points, load, read_cable_params
 
@@ -211,12 +210,7 @@ def _box_corners(center: tuple[float, float, float], hx: float, hy: float, hz: f
 
     cx, cy, cz = center
     return np.asarray(
-        [
-            (cx + sx * hx, cy + sy * hy, cz + sz * hz)
-            for sx in (-1.0, 1.0)
-            for sy in (-1.0, 1.0)
-            for sz in (-1.0, 1.0)
-        ],
+        [(cx + sx * hx, cy + sy * hy, cz + sz * hz) for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)],
         dtype=float,
     )
 
@@ -457,7 +451,9 @@ def _build_simple_cable_model(
             thickness=float(params["thickness"]),
         )
         if obstacle_box:
-            point_array = np.asarray([(float(point[0]), float(point[1]), float(point[2])) for point in points], dtype=float)
+            point_array = np.asarray(
+                [(float(point[0]), float(point[1]), float(point[2])) for point in points], dtype=float
+            )
             box_center = wp.vec3(
                 float((point_array[:, 0].min() + point_array[:, 0].max()) * 0.5),
                 float(point_array[:, 1].mean()),
@@ -510,9 +506,7 @@ class Example:
 
         bundle = load(usd_path, solver_override=solver_override, device=device)
         if bundle.body_type != "cable":
-            raise RuntimeError(
-                f"example_palatial_cable needs a cable or rod USDA, got body_type={bundle.body_type!r}"
-            )
+            raise RuntimeError(f"example_palatial_cable needs a cable or rod USDA, got body_type={bundle.body_type!r}")
 
         self.bundle = bundle
         self.scene_kind = bundle.scene_kind or bundle.body_type
@@ -626,9 +620,13 @@ class Example:
         body_device = self.state_0.body_q.device if self.state_0.body_q is not None else self.model.device
         spin_rate_by_body: dict[int, float] = {}
         if abs(self.spin_rate) > 0.0:
-            spin_rate_by_body[self.anchor_body_index] = spin_rate_by_body.get(self.anchor_body_index, 0.0) + self.spin_rate
+            spin_rate_by_body[self.anchor_body_index] = (
+                spin_rate_by_body.get(self.anchor_body_index, 0.0) + self.spin_rate
+            )
         if abs(self.spin_last_rate) > 0.0:
-            spin_rate_by_body[self.tip_body_index] = spin_rate_by_body.get(self.tip_body_index, 0.0) + self.spin_last_rate
+            spin_rate_by_body[self.tip_body_index] = (
+                spin_rate_by_body.get(self.tip_body_index, 0.0) + self.spin_last_rate
+            )
         if spin_rate_by_body:
             self.spin_body_indices = wp.array(list(spin_rate_by_body.keys()), dtype=wp.int32, device=body_device)
             self.spin_rates = wp.array(list(spin_rate_by_body.values()), dtype=wp.float32, device=body_device)
@@ -778,9 +776,7 @@ class Example:
                 f"thickness={float(params['thickness']):.4f}m  radius={float(params['radius']):.4f}m"
             )
         else:
-            cross_section_summary = (
-                f"cross_section={cross_section}  radius={float(params['radius']):.4f}m"
-            )
+            cross_section_summary = f"cross_section={cross_section}  radius={float(params['radius']):.4f}m"
         print(
             f"[cable] usd={self.usd_path}  solver={self.bundle.solver_name}  "
             f"fps={self.fps}  substeps={self.sim_substeps}  bodies={int(self.model.body_count)}  "
@@ -950,9 +946,15 @@ def main(argv=None) -> int:
         default=False,
         help="For simple ribbon or rod assets, add a static box above the ground so the cable can drop onto it.",
     )
-    parser.add_argument("--obstacle-box-hx", type=float, default=DEFAULT_OBSTACLE_BOX_HX, help="Obstacle box half-width in X [m].")
-    parser.add_argument("--obstacle-box-hy", type=float, default=DEFAULT_OBSTACLE_BOX_HY, help="Obstacle box half-width in Y [m].")
-    parser.add_argument("--obstacle-box-hz", type=float, default=DEFAULT_OBSTACLE_BOX_HZ, help="Obstacle box half-height in Z [m].")
+    parser.add_argument(
+        "--obstacle-box-hx", type=float, default=DEFAULT_OBSTACLE_BOX_HX, help="Obstacle box half-width in X [m]."
+    )
+    parser.add_argument(
+        "--obstacle-box-hy", type=float, default=DEFAULT_OBSTACLE_BOX_HY, help="Obstacle box half-width in Y [m]."
+    )
+    parser.add_argument(
+        "--obstacle-box-hz", type=float, default=DEFAULT_OBSTACLE_BOX_HZ, help="Obstacle box half-height in Z [m]."
+    )
     parser.add_argument(
         "--record-mp4",
         default=None,
@@ -960,7 +962,9 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--mp4-fps", type=int, default=60, help="Output mp4 framerate (default 60)")
     parser.add_argument("--top-view", action="store_true", help="Place camera straight above the cable looking down")
-    parser.add_argument("--contact-ke", type=float, default=None, help="Override rigid contact stiffness for all shapes.")
+    parser.add_argument(
+        "--contact-ke", type=float, default=None, help="Override rigid contact stiffness for all shapes."
+    )
     parser.add_argument("--contact-kd", type=float, default=None, help="Override rigid contact damping for all shapes.")
     parser.add_argument("--contact-kf", type=float, default=None, help="Override friction damping for all shapes.")
     parser.add_argument("--contact-mu", type=float, default=None, help="Override Coulomb friction for all shapes.")
@@ -984,7 +988,7 @@ def main(argv=None) -> int:
         solver_override=args.solver_override,
     )
 
-    from newton import viewer as v
+    from newton import viewer as v  # noqa: PLC0415 - defer feature initialization
 
     if args.record_mp4:
         viewer = v.ViewerGL(headless=not args.gui)
@@ -1019,7 +1023,9 @@ def main(argv=None) -> int:
 
     body_points = example.state_0.body_q.numpy()[:, 0:3]
     if hasattr(example.viewer, "set_camera"):
-        cable_kind = str(example.cable_params.get("crossSectionType", "")) if example.scene_kind != "cable_assembly" else ""
+        cable_kind = (
+            str(example.cable_params.get("crossSectionType", "")) if example.scene_kind != "cable_assembly" else ""
+        )
         if args.top_view:
             if args.obstacle_box:
                 box_center = _compute_obstacle_box_center(body_points, args.obstacle_box_hz)
@@ -1035,7 +1041,9 @@ def main(argv=None) -> int:
         elif not args.no_auto_camera and cable_kind == "flatRect":
             if args.obstacle_box:
                 box_center = _compute_obstacle_box_center(body_points, args.obstacle_box_hz)
-                extra_points = _box_corners(box_center, args.obstacle_box_hx, args.obstacle_box_hy, args.obstacle_box_hz)
+                extra_points = _box_corners(
+                    box_center, args.obstacle_box_hx, args.obstacle_box_hy, args.obstacle_box_hz
+                )
                 _set_ribbon_camera(example.viewer, body_points, extra_points)
             else:
                 _set_ribbon_camera(example.viewer, body_points)
@@ -1052,8 +1060,8 @@ def main(argv=None) -> int:
 
     ffmpeg_proc = None
     if args.record_mp4:
-        import shutil
-        import subprocess
+        import shutil  # noqa: PLC0415 - defer feature initialization
+        import subprocess  # noqa: PLC0415 - defer feature initialization
 
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg not on PATH; cannot record mp4")

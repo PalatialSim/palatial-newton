@@ -1,4 +1,5 @@
 """Locate Newton's schema resolver classes regardless of API location."""
+
 from __future__ import annotations
 
 
@@ -10,13 +11,17 @@ def get_default_resolvers():
     through unchanged so add_usd uses its own default.
     """
     try:
-        from newton.usd import (  # type: ignore
-            SchemaResolverNewton, SchemaResolverPhysx, SchemaResolverMjc,
+        from newton.usd import (  # type: ignore  # noqa: PLC0415
+            SchemaResolverMjc,
+            SchemaResolverNewton,
+            SchemaResolverPhysx,
         )
     except ImportError:
         try:
-            from newton._src.usd.schemas import (  # type: ignore
-                SchemaResolverNewton, SchemaResolverPhysx, SchemaResolverMjc,
+            from newton._src.usd.schemas import (  # type: ignore  # noqa: PLC0415
+                SchemaResolverMjc,
+                SchemaResolverNewton,
+                SchemaResolverPhysx,
             )
         except ImportError:
             return None

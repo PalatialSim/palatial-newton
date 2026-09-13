@@ -182,7 +182,9 @@ class ViewerOVRTX(ViewerUSD):
         self._instance_paths.clear()
         self._pending_matrices.clear()
         self._mesh_materials.clear()
-        super().set_model(model, max_worlds)
+        super().set_model(model)
+        if model is not None and max_worlds is not None:
+            self.set_visible_worlds(range(min(max_worlds, model.world_count)))
         if model is None or self.stage is None:
             return
 
@@ -248,6 +250,7 @@ class ViewerOVRTX(ViewerUSD):
         color: tuple[float, float, float] | None = None,
         roughness: float | None = None,
         metallic: float | None = None,
+        dynamic: bool = False,
         opacity: float | None = None,
         ior: float | None = None,
         material: OpenPBRMaterial | None = None,
@@ -271,9 +274,10 @@ class ViewerOVRTX(ViewerUSD):
             backface_culling,
             color,
             roughness,
-            metallic,
-            opacity,
-            ior,
+            metallic=metallic,
+            dynamic=dynamic,
+            opacity=opacity,
+            ior=ior,
         )
         mesh = self._meshes.get(name)
         has_uvs = False
@@ -441,8 +445,9 @@ class ViewerOVRTX(ViewerUSD):
         colors: wp.array[wp.vec3] | None,
         materials: wp.array[wp.vec4] | None,
         hidden: bool = False,
+        opacities: wp.array[wp.float32] | None = None,
     ):
-        super().log_instances(name, mesh, xforms, scales, colors, materials, hidden)
+        super().log_instances(name, mesh, xforms, scales, colors, materials, hidden, opacities=opacities)
         if xforms is None:
             return
         xforms_np = xforms.numpy()

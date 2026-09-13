@@ -7,12 +7,15 @@ from __future__ import annotations
 
 from math import isfinite
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from pxr import Usd
 
 # Importing newton registers the bundled USD schema plugins before pxr.Usd use.
 import newton as _newton  # noqa: F401
-import numpy as np
-import warp as wp
-from pxr import Usd, UsdGeom
 
 from .constants import (
     GEOMETRY_SCOPE_PATH,
@@ -42,6 +45,7 @@ from .utils import (
 
 def extract_power_cable_assembly(usd_path: str) -> PowerCableAssemblyExtraction:
     """Extract the v1 Power cable assembly from a USD stage."""
+    from pxr import Usd
 
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -74,6 +78,8 @@ def extract_power_cable_assembly(usd_path: str) -> PowerCableAssemblyExtraction:
 
 
 def _validate_stage_contract(stage: Usd.Stage, usd_path: str) -> None:
+    from pxr import UsdGeom
+
     meters_per_unit = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0)
     if abs(meters_per_unit - 1.0) > 1.0e-9:
         raise RuntimeError(f"Power cable assembly {usd_path} must use metersPerUnit=1.0")
@@ -84,6 +90,8 @@ def _validate_stage_contract(stage: Usd.Stage, usd_path: str) -> None:
 
 
 def _build_extracted_prim(prim: Usd.Prim) -> ExtractedPrim:
+    from pxr import Usd, UsdGeom
+
     mesh_prim = _single_mesh_child(prim)
     mesh = UsdGeom.Mesh(mesh_prim)
     points = mesh.GetPointsAttr().Get()
@@ -116,6 +124,8 @@ def _build_extracted_prim(prim: Usd.Prim) -> ExtractedPrim:
 
 
 def _single_mesh_child(prim: Usd.Prim) -> Usd.Prim:
+    from pxr import UsdGeom
+
     meshes = [child for child in prim.GetChildren() if child.IsA(UsdGeom.Mesh)]
     if len(meshes) != 1:
         raise RuntimeError(f"Assembly prim {prim.GetPath()} must contain exactly one Mesh child")
@@ -181,16 +191,17 @@ def _extract_cable_from_world_points_pca(
     start = mean + t_min * axis
     end = mean + t_max * axis
     return (
-        (float(start[0]), float(start[1]), float(start[2])),
-        (float(end[0]), float(end[1]), float(end[2])),
-    ), radius, length
+        (
+            (float(start[0]), float(start[1]), float(start[2])),
+            (float(end[0]), float(end[1]), float(end[2])),
+        ),
+        radius,
+        length,
+    )
 
 
 def _extract_cable_from_world_bounds(prim: ExtractedPrim) -> tuple[tuple[Point3, Point3], float, float]:
-    extents = tuple(
-        prim.world_bounds_max[index] - prim.world_bounds_min[index]
-        for index in range(3)
-    )
+    extents = tuple(prim.world_bounds_max[index] - prim.world_bounds_min[index] for index in range(3))
     major_axis_index = int(np.argmax(np.asarray(extents, dtype=np.float64)))
     center = midpoint(prim.world_bounds_min, prim.world_bounds_max)
     start = list(center)

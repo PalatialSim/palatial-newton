@@ -5,22 +5,26 @@ from __future__ import annotations
 
 import unittest
 
-import newton
 import warp as wp
 
+import newton
 from newton._src.solvers.vbd import particle_vbd_kernels as particle_vbd_kernels_stock
+from newton._src.solvers.vbd import tri_mesh_collision as tri_mesh_collision_stock
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     evaluate_angular_constraint_force_hessian as evaluate_angular_constraint_force_hessian_stock,
+)
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
     evaluate_anisotropic_angular_constraint_force_hessian as evaluate_anisotropic_angular_constraint_force_hessian_stock,
 )
-from newton._src.solvers.vbd import tri_mesh_collision as tri_mesh_collision_stock
 from newton._src.solvers.vbd_palatial import particle_vbd_kernels as particle_vbd_kernels_palatial
+from newton._src.solvers.vbd_palatial import tri_mesh_collision as tri_mesh_collision_palatial
 from newton._src.solvers.vbd_palatial.rigid_vbd_kernels import (
     evaluate_angular_constraint_force_hessian as evaluate_angular_constraint_force_hessian_palatial,
+)
+from newton._src.solvers.vbd_palatial.rigid_vbd_kernels import (
     evaluate_anisotropic_angular_constraint_force_hessian as evaluate_anisotropic_angular_constraint_force_hessian_palatial,
 )
 from newton._src.solvers.vbd_palatial.solver_vbd import SolverVBD as SolverVBDPalatialInternal
-from newton._src.solvers.vbd_palatial import tri_mesh_collision as tri_mesh_collision_palatial
 
 
 class TestSolverVBDPalatial(unittest.TestCase):

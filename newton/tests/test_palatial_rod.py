@@ -1,15 +1,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
+import math
 import tempfile
 import textwrap
 import unittest
-import math
 from pathlib import Path
 
-import newton
 import numpy as np
 import warp as wp
+
+import newton
 from newton.examples.palatial.example_palatial_isotropic import (
     _find_longest_rod_body_chain,
     _infer_rod_endpoint_bodies,
@@ -64,7 +65,9 @@ def _format_point(point: tuple[float, float, float]) -> str:
     return f"({point[0]:.6f}, {point[1]:.6f}, {point[2]:.6f})"
 
 
-def _point_cloud(center: tuple[float, float, float], radius: float, along: float = 0.004) -> list[tuple[float, float, float]]:
+def _point_cloud(
+    center: tuple[float, float, float], radius: float, along: float = 0.004
+) -> list[tuple[float, float, float]]:
     x, y, z = center
     return [
         (x - along, y - radius, z - radius),
@@ -155,10 +158,17 @@ def _rod_test_stage() -> str:
         (0.70, 0.12, 0.06),
         (0.90, 0.02, 0.08),
     ]
-    shuffled_centers = [ordered_centers[3], ordered_centers[1], ordered_centers[4], ordered_centers[0], ordered_centers[2]]
+    shuffled_centers = [
+        ordered_centers[3],
+        ordered_centers[1],
+        ordered_centers[4],
+        ordered_centers[0],
+        ordered_centers[2],
+    ]
 
-    return textwrap.dedent(
-        f"""
+    return (
+        textwrap.dedent(
+            f"""
         #usda 1.0
         (
             defaultPrim = "World"
@@ -204,7 +214,9 @@ def _rod_test_stage() -> str:
             {_rigid_body_block("ConnectorShell", [(1.200000, 0.000000, 0.100000)], radius=0.050)}
         }}
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 def _rod_attachment_stage() -> str:
@@ -216,8 +228,9 @@ def _rod_attachment_stage() -> str:
         visual_points=right_boot_visual_points,
     )
 
-    return textwrap.dedent(
-        f"""
+    return (
+        textwrap.dedent(
+            f"""
         #usda 1.0
         (
             defaultPrim = "World"
@@ -274,12 +287,15 @@ def _rod_attachment_stage() -> str:
             }}
         }}
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 def _straight_rod_stage() -> str:
-    return textwrap.dedent(
-        """
+    return (
+        textwrap.dedent(
+            """
         #usda 1.0
         (
             defaultPrim = "World"
@@ -318,12 +334,15 @@ def _straight_rod_stage() -> str:
             }
         }
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 def _schema_attr_rod_stage() -> str:
-    return textwrap.dedent(
-        """
+    return (
+        textwrap.dedent(
+            """
         #usda 1.0
         (
             defaultPrim = "World"
@@ -372,7 +391,9 @@ def _schema_attr_rod_stage() -> str:
             }
         }
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 def _closed_rod_stage() -> str:
@@ -383,8 +404,9 @@ def _closed_rod_stage() -> str:
         (0.00, -0.30, 0.40),
         (0.30, 0.00, 0.40),
     ]
-    return textwrap.dedent(
-        f"""
+    return (
+        textwrap.dedent(
+            f"""
         #usda 1.0
         (
             defaultPrim = "World"
@@ -425,7 +447,9 @@ def _closed_rod_stage() -> str:
             }}
         }}
         """
-    ).strip() + "\n"
+        ).strip()
+        + "\n"
+    )
 
 
 @unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
@@ -567,7 +591,12 @@ class TestPalatialRod(unittest.TestCase):
                 self.assertAlmostEqual(float(body_q[body_index, 1]), 0.0, places=6)
                 self.assertAlmostEqual(float(body_q[body_index, 2]), 0.7, places=6)
 
-            expected_points = [wp.vec3(0.0, 0.0, 0.7), wp.vec3(0.5, 0.0, 0.7), wp.vec3(1.0, 0.0, 0.7), wp.vec3(1.5, 0.0, 0.7)]
+            expected_points = [
+                wp.vec3(0.0, 0.0, 0.7),
+                wp.vec3(0.5, 0.0, 0.7),
+                wp.vec3(1.0, 0.0, 0.7),
+                wp.vec3(1.5, 0.0, 0.7),
+            ]
             expected_quaternions = newton.utils.create_parallel_transport_cable_quaternions(
                 expected_points,
                 twist_total=0.45,
@@ -581,13 +610,13 @@ class TestPalatialRod(unittest.TestCase):
 
             np.testing.assert_allclose(
                 bundle.model.joint_target_ke.numpy(),
-                np.array([100.0, 6.0, 100.0, 6.0], dtype=np.float32),
+                np.array([100.0, 6.0, 6.0, 6.0] * 2, dtype=np.float32),
                 atol=1.0e-6,
                 rtol=0.0,
             )
             np.testing.assert_allclose(
                 bundle.model.joint_target_kd.numpy(),
-                np.array([0.2, 0.3, 0.2, 0.3], dtype=np.float32),
+                np.array([0.2, 0.3, 0.3, 0.3] * 2, dtype=np.float32),
                 atol=1.0e-6,
                 rtol=0.0,
             )
@@ -611,13 +640,13 @@ class TestPalatialRod(unittest.TestCase):
             self.assertEqual(int(bundle.model.joint_count), 4)
             np.testing.assert_allclose(
                 bundle.model.joint_target_ke.numpy(),
-                np.array([200.0, 9.0, 200.0, 9.0, 200.0, 9.0, 200.0, 9.0], dtype=np.float32),
+                np.array([200.0, 9.0, 9.0, 9.0] * 4, dtype=np.float32),
                 atol=1.0e-6,
                 rtol=0.0,
             )
             np.testing.assert_allclose(
                 bundle.model.joint_target_kd.numpy(),
-                np.full(8, 0.4, dtype=np.float32),
+                np.full(16, 0.4, dtype=np.float32),
                 atol=1.0e-6,
                 rtol=0.0,
             )
@@ -682,8 +711,7 @@ class TestPalatialRod(unittest.TestCase):
             joint_X_c = bundle.model.joint_X_c.numpy()
             pairs = {(int(parent[i]), int(child[i])) for i in range(int(bundle.model.joint_count))}
             pair_types = {
-                (int(parent[i]), int(child[i])): int(joint_type[i])
-                for i in range(int(bundle.model.joint_count))
+                (int(parent[i]), int(child[i])): int(joint_type[i]) for i in range(int(bundle.model.joint_count))
             }
             self.assertIn((rod_start, left_root), pairs)
             self.assertIn((rod_end, right_root), pairs)
@@ -705,7 +733,11 @@ class TestPalatialRod(unittest.TestCase):
                 self.assertGreater(float(np.linalg.norm(target.local_axis)), 0.9)
                 self.assertGreater(float(np.linalg.norm(target.world_axis)), 0.9)
                 self.assertLess(
-                    float(np.linalg.norm(_transform_point(body_q[target.body_index], target.local_pivot) - target.world_pivot)),
+                    float(
+                        np.linalg.norm(
+                            _transform_point(body_q[target.body_index], target.local_pivot) - target.world_pivot
+                        )
+                    ),
                     1.0e-6,
                 )
 
@@ -765,7 +797,7 @@ class TestPalatialRod(unittest.TestCase):
             self.assertEqual(len(rod_shape_indices), 5)
             filter_pairs = set(bundle.model.shape_collision_filter_pairs)
             for i, shape_a in enumerate(rod_shape_indices):
-                for shape_b in rod_shape_indices[i + 1:]:
+                for shape_b in rod_shape_indices[i + 1 :]:
                     self.assertIn((min(shape_a, shape_b), max(shape_a, shape_b)), filter_pairs)
 
             flags = bundle.model.shape_flags.numpy()

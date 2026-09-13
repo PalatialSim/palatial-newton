@@ -5,8 +5,9 @@
 
 from __future__ import annotations
 
-import newton
 import warp as wp
+
+import newton
 
 from .builder import build_power_cable_assembly
 from .canonical import build_power_canonical_assembly

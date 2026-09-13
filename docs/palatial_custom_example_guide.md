@@ -9,13 +9,13 @@ The public surface lives at `newton.palatial` (re-exported from
 
 ```python
 from newton.palatial import (
-    NewtonBundle,            # dataclass returned by load()
-    load,                    # USDA -> ready-to-step bundle
-    find_shell_prim_path,    # prim path of the cloth/shell mesh (or None)
-    find_cloth_prim_path,    # legacy: bodyType="cloth" mesh path
-    find_rod_prim_path,      # prim path of the rod guide (or None)
-    read_shell_params,       # resolved cloth/shell param dict
-    read_rod_params,         # resolved rod centerline + material param dict
+    NewtonBundle,  # dataclass returned by load()
+    load,  # USDA -> ready-to-step bundle
+    find_shell_prim_path,  # prim path of the cloth/shell mesh (or None)
+    find_cloth_prim_path,  # legacy: bodyType="cloth" mesh path
+    find_rod_prim_path,  # prim path of the rod guide (or None)
+    read_shell_params,  # resolved cloth/shell param dict
+    read_rod_params,  # resolved rod centerline + material param dict
 )
 ```
 
@@ -48,9 +48,9 @@ from newton.palatial import load
 
 bundle = load(
     "/path/to/asset.newton.usda",
-    solver_override=None,   # force "mujoco" / "vbd" / ... if you must
-    device=None,            # "cuda:0", "cpu"; default = wp.get_preferred_device()
-    fix_base=False,         # rigid only: anchor floating roots with FIXED joints
+    solver_override=None,  # force "mujoco" / "vbd" / ... if you must
+    device=None,  # "cuda:0", "cpu"; default = wp.get_preferred_device()
+    fix_base=False,  # rigid only: anchor floating roots with FIXED joints
 )
 ```
 
@@ -60,17 +60,18 @@ bundle = load(
 @dataclass
 class NewtonBundle:
     usd_path: str
-    body_type: str        # "rigid", "cloth", or "rod"
+    body_type: str  # "rigid", "cloth", or "rod"
     solver_name: str
     fps: int
-    model: Any            # newton Model
-    solver: Any           # SolverMuJoCo / SolverVBD / ...
-    state_in: Any         # model.state()
-    state_out: Any        # model.state()
-    control: Any          # model.control()
-    solver_params: dict   # raw newton:solver:* attrs
+    model: Any  # newton Model
+    solver: Any  # SolverMuJoCo / SolverVBD / ...
+    state_in: Any  # model.state()
+    state_out: Any  # model.state()
+    control: Any  # model.control()
+    solver_params: dict  # raw newton:solver:* attrs
+
     @property
-    def dt(self) -> float: ...   # 1 / fps
+    def dt(self) -> float: ...  # 1 / fps
 ```
 
 That is the entire contract. Every example below builds on top of it.
@@ -136,8 +137,7 @@ class Example:
             self.state_0.clear_forces()
             self.viewer.apply_forces(self.state_0)
             self.contacts = self.model.collide(self.state_0)
-            self.solver.step(self.state_0, self.state_1, self.control,
-                             self.contacts, self.sim_dt)
+            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def step(self):
@@ -278,6 +278,7 @@ soft-contact knobs onto the cloth model:
 
 ```python
 import numpy as np
+
 n = int(bundle.model.particle_count)
 bundle.model.particle_radius.assign(np.full(n, 0.005, dtype=np.float32))
 bundle.model.soft_contact_ke = 1e5

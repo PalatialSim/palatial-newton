@@ -10,9 +10,9 @@ import math
 from pathlib import Path
 from typing import Any
 
-import newton  # noqa: F401
 import warp as wp
 
+import newton  # noqa: F401
 from newton.examples.palatial.cable_presets import (
     get_anisotropic_cable_preset,
     list_anisotropic_cable_presets,
@@ -53,16 +53,15 @@ _AUTHOR_KWARG_NAMES = (
 
 def _usd_modules() -> tuple[Any, Any, Any, Any, Any, Any]:
     try:
-        import newton_usd_schemas  # noqa: F401
+        import newton_usd_schemas  # noqa: F401, PLC0415 - register optional USD schemas
     except (ImportError, ModuleNotFoundError):
         pass
 
     try:
-        from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
+        from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade  # noqa: PLC0415 - defer feature initialization
     except (ImportError, ModuleNotFoundError) as exc:
         raise RuntimeError(
-            "Generating palatial cable USD assets requires 'usd-core' and the "
-            "Newton USD schemas plugin."
+            "Generating palatial cable USD assets requires 'usd-core' and the Newton USD schemas plugin."
         ) from exc
 
     return Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
@@ -297,9 +296,7 @@ def _author_surface_mesh(
     mesh.CreateDoubleSidedAttr().Set(True)
     mesh.CreateFaceVertexCountsAttr().Set(face_vertex_counts)
     mesh.CreateFaceVertexIndicesAttr().Set(face_vertex_indices)
-    mesh.CreatePointsAttr().Set(
-        [Gf.Vec3f(float(vertex[0]), float(vertex[1]), float(vertex[2])) for vertex in vertices]
-    )
+    mesh.CreatePointsAttr().Set([Gf.Vec3f(float(vertex[0]), float(vertex[1]), float(vertex[2])) for vertex in vertices])
     mesh.CreateDisplayColorPrimvar(UsdGeom.Tokens.constant).Set([Gf.Vec3f(0.16, 0.19, 0.24)])
 
 
@@ -455,15 +452,11 @@ def author_cable_usd(
     _create_custom_attribute(
         material_prim, "newton:rod:bendYStiffness", Sdf.ValueTypeNames.Float, float(bend_y_stiffness)
     )
-    _create_custom_attribute(
-        material_prim, "newton:rod:bendYDamping", Sdf.ValueTypeNames.Float, float(bend_y_damping)
-    )
+    _create_custom_attribute(material_prim, "newton:rod:bendYDamping", Sdf.ValueTypeNames.Float, float(bend_y_damping))
     _create_custom_attribute(
         material_prim, "newton:rod:bendZStiffness", Sdf.ValueTypeNames.Float, float(bend_z_stiffness)
     )
-    _create_custom_attribute(
-        material_prim, "newton:rod:bendZDamping", Sdf.ValueTypeNames.Float, float(bend_z_damping)
-    )
+    _create_custom_attribute(material_prim, "newton:rod:bendZDamping", Sdf.ValueTypeNames.Float, float(bend_z_damping))
     _create_custom_attribute(
         material_prim, "newton:rod:torsionStiffness", Sdf.ValueTypeNames.Float, float(torsion_stiffness)
     )
@@ -574,10 +567,7 @@ def main(argv: list[str] | None = None) -> int:
         f"fps={applied_fps} solver={applied_solver}"
     )
     print("Run:")
-    print(
-        "  python -m newton.examples.palatial.example_palatial_cable "
-        f"\"{output_path}\" --gui --device cuda:0"
-    )
+    print(f'  python -m newton.examples.palatial.example_palatial_cable "{output_path}" --gui --device cuda:0')
     return 0
 
 

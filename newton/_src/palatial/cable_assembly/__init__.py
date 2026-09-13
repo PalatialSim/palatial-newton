@@ -30,6 +30,10 @@ from .types import (
 )
 
 __all__ = [
+    "DEFAULT_ASSEMBLY_FPS",
+    "DEFAULT_ASSEMBLY_ITERATIONS",
+    "DEFAULT_ASSEMBLY_SUBSTEPS",
+    "POWER_REQUIRED_PRIM_NAMES",
     "CableExtraction",
     "CanonicalCable",
     "CanonicalConnectorBody",
@@ -37,12 +41,8 @@ __all__ = [
     "ConnectorAttachmentSite",
     "ConnectorEndpointExtraction",
     "ConnectorMergedMesh",
-    "DEFAULT_ASSEMBLY_FPS",
-    "DEFAULT_ASSEMBLY_ITERATIONS",
-    "DEFAULT_ASSEMBLY_SUBSTEPS",
     "EndpointId",
     "ExtractedPrim",
-    "POWER_REQUIRED_PRIM_NAMES",
     "Point3",
     "PowerCableAssemblyBuildResult",
     "PowerCableAssemblyExtraction",

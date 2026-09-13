@@ -8,15 +8,26 @@ geometry, material parameters, and centerline/radius fallbacks from a
 converted USDA so the generic palatial loader can build an isotropic rod in
 Newton.
 """
+
 from __future__ import annotations
+
+import math
+import os
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    from pxr import Usd, UsdGeom
 
 # `import newton` registers the bundled USD plugins (newton + newton_shell)
 # via newton/_src/usd/__init__.py. Must precede any pxr.Usd usage in the
 # same process.
 import newton  # noqa: F401
 
-from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
 from ..usd import utils as _usd_material_utils
+from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
 from .usd_utils import (
     has_api_schema,
     matrix_transform_points,
@@ -24,14 +35,6 @@ from .usd_utils import (
     stage_units,
     to_newton_world,
 )
-
-from dataclasses import dataclass
-import math
-import os
-
-import numpy as np
-from pxr import Usd, UsdGeom, UsdShade
-
 
 DEFAULTS = {
     # geometry
@@ -89,6 +92,8 @@ def _has_rod_material_api(prim: Usd.Prim) -> bool:
 
 def _find_rod_prim(stage: Usd.Stage) -> Usd.Prim | None:
     """Return the first rod guide prim on the stage."""
+    from pxr import UsdGeom
+
     found_intent = None
     for prim in stage.Traverse():
         if not prim.IsA(UsdGeom.BasisCurves):
@@ -104,6 +109,7 @@ def _find_rod_prim(stage: Usd.Stage) -> Usd.Prim | None:
 
 def _geometry_source_prims(rod_prim: Usd.Prim) -> list[Usd.Prim]:
     """Return the rod guide plus ancestors that may carry rod attrs."""
+
     out: list[Usd.Prim] = []
     seen = set()
     prim = rod_prim
@@ -128,6 +134,8 @@ def _authored_attribute_value(sources: list[Usd.Prim], *names: str) -> tuple[obj
 
 def find_rod_prim_path(usd_path: str) -> str | None:
     """Return the prim path of the first rod guide on the stage."""
+    from pxr import Usd
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return None
@@ -137,6 +145,8 @@ def find_rod_prim_path(usd_path: str) -> str | None:
 
 def _bound_rod_material_prims(rod_prim: Usd.Prim) -> list[Usd.Prim]:
     """Return Material prims bound to the rod guide that carry NewtonRodMaterialAPI."""
+    from pxr import UsdShade
+
     out: list[Usd.Prim] = []
     binding = UsdShade.MaterialBindingAPI(rod_prim)
     candidates = []
@@ -184,7 +194,7 @@ def _sample_texture_mean_rgb(
     and ``<usda_dir>/textures/<name>`` since some exports record absolute paths
     that no longer exist on the consumer's machine.
     """
-    from ..utils.texture import load_texture_from_file
+    from ..utils.texture import load_texture_from_file  # noqa: PLC0415 - defer feature initialization
 
     candidates: list[str] = []
     if texture_path:
@@ -233,6 +243,8 @@ def _resolve_display_color(
     Returns None when no color can be resolved (the loader then falls back to
     a neutral grey).
     """
+    from pxr import Usd, UsdGeom
+
     props = _usd_material_utils.resolve_material_properties_for_prim(rod_prim)
     color = _coerce_color_triplet(props.get("color"))
     if color is not None:
@@ -307,6 +319,8 @@ def _resolve_diffuse_texture_path(
     centerline_source_path: str | None,
 ) -> str | None:
     """Resolve an on-disk diffuse texture path bound to the rod's cable mesh."""
+    from pxr import Usd, UsdGeom
+
     props = _usd_material_utils.resolve_material_properties_for_prim(rod_prim)
     texture = props.get("texture")
     if texture:
@@ -379,6 +393,8 @@ def _collect_rigid_body_candidates(
     xform_cache: UsdGeom.XformCache,
 ) -> list[_RigidBodyCandidate]:
     """Collect rigid-body candidates that can act as centerline/radius sources."""
+    from pxr import UsdGeom
+
     candidates: list[_RigidBodyCandidate] = []
     for prim in stage.Traverse():
         applied = set(prim.GetAppliedSchemas())
@@ -722,6 +738,8 @@ def _read_centerline_spec(
     fallback_drop_height: float,
 ) -> RodCenterlineSpec:
     """Resolve the rod centerline and isotropic radius from guide + helper meshes."""
+    from pxr import UsdGeom
+
     meters_per_unit, up_axis = stage_units(stage)
     xform_cache = UsdGeom.XformCache()
 
@@ -820,6 +838,8 @@ def _canonical_or_compat_value(
 
 def read_rod_params(usd_path: str) -> dict:
     """Resolve rod geometry + material parameters into a normalized dict."""
+    from pxr import Usd
+
     out = dict(DEFAULTS)
     out["points"] = []
     out["guidePrimPath"] = None
@@ -895,9 +915,7 @@ def read_rod_params(usd_path: str) -> dict:
     out["bendStiffness"] = float(
         _walk_material("bendStiffness", "newton:rod:bendStiffness", default=DEFAULTS["bendStiffness"])
     )
-    out["bendDamping"] = float(
-        _walk_material("bendDamping", "newton:rod:bendDamping", default=DEFAULTS["bendDamping"])
-    )
+    out["bendDamping"] = float(_walk_material("bendDamping", "newton:rod:bendDamping", default=DEFAULTS["bendDamping"]))
 
     centerline = _read_centerline_spec(
         stage,
@@ -911,7 +929,9 @@ def read_rod_params(usd_path: str) -> dict:
     out["centerlineSourcePath"] = centerline.centerline_source_path
 
     widths_attr = rod_prim.GetAttribute("widths")
-    out["widths"] = [float(width) for width in (widths_attr.Get() or [])] if widths_attr and widths_attr.HasAuthoredValue() else []
+    out["widths"] = (
+        [float(width) for width in (widths_attr.Get() or [])] if widths_attr and widths_attr.HasAuthoredValue() else []
+    )
 
     explicit_radius_value, explicit_radius_path = _authored_attribute_value(geometry_sources, "newton:rod:radius")
     if explicit_radius_value is not None:
@@ -961,7 +981,5 @@ def read_rod_params(usd_path: str) -> dict:
     out["intent"] = str(intent_attr.Get()) if intent_attr and intent_attr.HasAuthoredValue() else "rod"
 
     out["displayColor"] = _resolve_display_color(stage, rod_prim, out.get("centerlineSourcePath"))
-    out["diffuseTexturePath"] = _resolve_diffuse_texture_path(
-        stage, rod_prim, out.get("centerlineSourcePath")
-    )
+    out["diffuseTexturePath"] = _resolve_diffuse_texture_path(stage, rod_prim, out.get("centerlineSourcePath"))
     return out

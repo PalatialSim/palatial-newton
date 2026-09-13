@@ -1,9 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-from .articulation import eval_fk, eval_ik, eval_jacobian, eval_mass_matrix
+from .articulation import eval_fk, eval_ik, eval_inverse_dynamics_force, eval_jacobian, eval_mass_matrix
 from .builder import ModelBuilder
 from .collide import CollisionPipeline
+from .contact_kinematics import eval_rigid_contact_kinematics
 from .contacts import Contacts
 from .control import Control
 from .enums import (
@@ -11,8 +12,13 @@ from .enums import (
     EqType,
     JointTargetMode,
     JointType,
+    ModelFlags,
+    StateFlags,
 )
+from .inverse_dynamics import eval_inverse_dynamics_passive
+from .joint_mimic import eval_mimic
 from .model import Model
+from .rod import Rod
 from .state import State
 
 __all__ = [
@@ -25,9 +31,16 @@ __all__ = [
     "JointType",
     "Model",
     "ModelBuilder",
+    "ModelFlags",
+    "Rod",
     "State",
+    "StateFlags",
     "eval_fk",
     "eval_ik",
+    "eval_inverse_dynamics_force",
+    "eval_inverse_dynamics_passive",
     "eval_jacobian",
     "eval_mass_matrix",
+    "eval_mimic",
+    "eval_rigid_contact_kinematics",
 ]

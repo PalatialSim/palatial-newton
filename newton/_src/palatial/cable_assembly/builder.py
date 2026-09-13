@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
-import newton
 import numpy as np
 import warp as wp
+
+import newton
 
 from .constants import (
     DEFAULT_ASSEMBLY_ROD_SEGMENT_COUNT,
@@ -33,7 +34,7 @@ def build_power_cable_assembly(
 ) -> PowerCableAssemblyBuildResult:
     """Populate ``builder`` with a canonical Power cable assembly."""
 
-    from newton import utils as newton_utils
+    from newton import utils as newton_utils  # noqa: PLC0415 - defer feature initialization
 
     rod_cfg = builder.default_shape_cfg.copy()
     rod_cfg.density = DEFAULT_ROD_DENSITY
@@ -140,20 +141,17 @@ def _add_connector_mesh_shape(
 
 
 def _apply_contact_config(shape_cfg: object) -> None:
-    setattr(shape_cfg, "ke", DEFAULT_CONTACT_KE)
-    setattr(shape_cfg, "kd", DEFAULT_CONTACT_KD)
-    setattr(shape_cfg, "kf", DEFAULT_CONTACT_KF)
-    setattr(shape_cfg, "mu", DEFAULT_CONTACT_MU)
+    shape_cfg.ke = DEFAULT_CONTACT_KE
+    shape_cfg.kd = DEFAULT_CONTACT_KD
+    shape_cfg.kf = DEFAULT_CONTACT_KF
+    shape_cfg.mu = DEFAULT_CONTACT_MU
 
 
 def _interpolate_centerline(points: tuple[wp.vec3, wp.vec3], segment_count: int) -> list[wp.vec3]:
     start, end = points
     if segment_count < 2:
         raise ValueError("segment_count must be >= 2")
-    return [
-        start + (end - start) * (float(index) / float(segment_count))
-        for index in range(segment_count + 1)
-    ]
+    return [start + (end - start) * (float(index) / float(segment_count)) for index in range(segment_count + 1)]
 
 
 def _segment_length(points: list[wp.vec3]) -> float:

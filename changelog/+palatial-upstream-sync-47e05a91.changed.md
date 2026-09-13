@@ -1,0 +1,1 @@
+Integrate upstream Newton 1.6 APIs while retaining OVRTX rendering, OpenPBR materials, and Palatial USD loaders. Preserve authored Palatial rod frames and Rayleigh damping through equal per-axis cable coefficients; these assets require `SolverVBD(rigid_compliant_alm=False)`. Regular `ModelBuilder.add_rod` calls retain upstream rod semantics.

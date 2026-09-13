@@ -92,13 +92,13 @@ def _eval_stock_cable_angular_kernel(
         q_wc_prev[0],
         True,
         k_eff,
+        k_eff,
         wp.identity(3, float),
         wp.vec3(0.0),
         wp.vec3(0.0),
-        wp.vec3(0.0),
-        wp.vec3(0.0),
         0.0,
-        damping,
+        damping * k_eff,
+        0,
         1.0,
     )
     torque_out[0] = tau
@@ -208,10 +208,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         hessian_np = hessian_out.numpy()[0]
         return (
             (float(torque_np[0]), float(torque_np[1]), float(torque_np[2])),
-            tuple(
-                tuple(float(hessian_np[row, col]) for col in range(3))
-                for row in range(3)
-            ),
+            tuple(tuple(float(hessian_np[row, col]) for col in range(3)) for row in range(3)),
         )
 
     def _evaluate_anisotropic(
@@ -253,10 +250,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         hessian_np = hessian_out.numpy()[0]
         return (
             (float(torque_np[0]), float(torque_np[1]), float(torque_np[2])),
-            tuple(
-                tuple(float(hessian_np[row, col]) for col in range(3))
-                for row in range(3)
-            ),
+            tuple(tuple(float(hessian_np[row, col]) for col in range(3)) for row in range(3)),
         )
 
     def _assert_channel_isolated(
@@ -333,7 +327,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
             [0.1, 0.2, 0.3, 0.25, 0.1, 0.2, 0.3, 0.25],
         )
 
-    def test_add_rod_uses_isotropic_cable_when_only_isotropic_args_are_authored(self):
+    def test_add_rod_uses_upstream_modes_when_only_isotropic_args_are_authored(self):
         builder = newton.ModelBuilder()
         positions, quaternions = self._straight_points_and_quaternions()
 
@@ -348,10 +342,10 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
 
         self.assertEqual(
             [builder.joint_type[joint_index] for joint_index in rod_joints],
-            [newton.JointType.CABLE, newton.JointType.CABLE],
+            [newton.JointType.ROD, newton.JointType.ROD],
         )
-        self.assertEqual(builder.joint_target_ke[-4:], [50.0, 7.5, 50.0, 7.5])
-        self.assertEqual(builder.joint_target_kd[-4:], [0.1, 0.3, 0.1, 0.3])
+        self.assertEqual(builder.joint_target_ke[-8:], [50.0, 50.0, 7.5, 7.5] * 2)
+        self.assertEqual(builder.joint_target_kd[-8:], [0.1, 0.1, 0.3, 0.3] * 2)
 
     def test_add_joint_cable_rejects_anisotropic_kwargs(self):
         builder = newton.ModelBuilder()
@@ -516,7 +510,7 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
         self.assertEqual(solver.joint_constraint_dim.numpy().tolist(), [4, 4])
         self.assertEqual(solver.joint_constraint_start.numpy().tolist(), [0, 4])
         np.testing.assert_allclose(
-            solver.joint_penalty_k_max.numpy(),
+            solver.joint_material_k.numpy(),
             np.array([123.0, 12.0, 20.0, 9.0, 123.0, 12.0, 20.0, 9.0], dtype=np.float32),
             rtol=0.0,
             atol=1.0e-6,
@@ -703,11 +697,11 @@ class TestCableAnisotropicAddRod(unittest.TestCase):
             damping=(0.2, 0.2, 0.2),
         )
 
-        for stock_component, anisotropic_component in zip(stock_torque, anisotropic_torque):
+        for stock_component, anisotropic_component in zip(stock_torque, anisotropic_torque, strict=True):
             self.assertAlmostEqual(stock_component, anisotropic_component, delta=self._ISOTROPIC_EQUIVALENCE_TOL)
 
-        for stock_row, anisotropic_row in zip(stock_hessian, anisotropic_hessian):
-            for stock_value, anisotropic_value in zip(stock_row, anisotropic_row):
+        for stock_row, anisotropic_row in zip(stock_hessian, anisotropic_hessian, strict=True):
+            for stock_value, anisotropic_value in zip(stock_row, anisotropic_row, strict=True):
                 self.assertAlmostEqual(stock_value, anisotropic_value, delta=self._ISOTROPIC_EQUIVALENCE_TOL)
 
     def test_anisotropic_kernel_damping_isolated_per_axis(self):

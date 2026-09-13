@@ -9,6 +9,7 @@ import os
 import warnings
 from pathlib import Path
 from typing import Any, ClassVar
+from urllib.parse import urlparse
 
 import numpy as np
 import warp as wp
@@ -16,7 +17,7 @@ import warp as wp
 import newton
 
 from ..core.types import override
-from ..utils.texture import load_texture, normalize_texture
+from .utils import prepare_viewer_texture, promote_to_clamped_float_array, to_numpy
 from .viewer import ViewerBase, is_jupyter_notebook
 
 
@@ -36,6 +37,7 @@ class ViewerViser(ViewerBase):
     """
 
     _viser_module = None
+    _SH_C0 = 0.28209479177387814
 
     @classmethod
     def _get_viser(cls):
@@ -50,30 +52,14 @@ class ViewerViser(ViewerBase):
         return cls._viser_module
 
     @staticmethod
-    def _to_numpy(x) -> np.ndarray | None:
-        """Convert warp arrays or other array-like objects to numpy arrays."""
-        if x is None:
-            return None
-        if hasattr(x, "numpy"):
-            return x.numpy()
-        return np.asarray(x)
-
-    @staticmethod
-    def _prepare_texture(texture: np.ndarray | str | None) -> np.ndarray | None:
-        """Load and normalize texture data for viser/glTF usage."""
-        return normalize_texture(
-            load_texture(texture),
-            flip_vertical=False,
-            require_channels=True,
-            scale_unit_range=True,
-        )
-
-    @staticmethod
     def _build_trimesh_mesh(points: np.ndarray, indices: np.ndarray, uvs: np.ndarray, texture: np.ndarray):
         """Create a trimesh object with texture visuals (if trimesh is available)."""
         try:
             import trimesh
-        except Exception:
+            from PIL import Image
+            from trimesh.visual.material import PBRMaterial
+            from trimesh.visual.texture import TextureVisuals
+        except ImportError:
             return None
 
         if len(uvs) != len(points):
@@ -82,17 +68,14 @@ class ViewerViser(ViewerBase):
         faces = indices.astype(np.int64)
         mesh = trimesh.Trimesh(vertices=points, faces=faces, process=False)
 
-        try:
-            from PIL import Image
-            from trimesh.visual.texture import TextureVisuals
-
-            image = Image.fromarray(texture)
-            mesh.visual = TextureVisuals(uv=uvs, image=image)
-        except Exception:
-            visual_mod = getattr(trimesh, "visual", None)
-            TextureVisuals = getattr(visual_mod, "TextureVisuals", None) if visual_mod is not None else None
-            if TextureVisuals is not None:
-                mesh.visual = TextureVisuals(uv=uvs, image=texture)
+        # SimpleMaterial tints textures gray and leaves glTF's metallic default enabled.
+        material = PBRMaterial(
+            baseColorTexture=Image.fromarray(texture),
+            baseColorFactor=(255, 255, 255, 255),
+            metallicFactor=0.0,
+            roughnessFactor=1.0,
+        )
+        mesh.visual = TextureVisuals(uv=uvs, material=material)
 
         return mesh
 
@@ -139,6 +122,7 @@ class ViewerViser(ViewerBase):
         self._plot_history_size = plot_history_size
         self._plane_meshes = {}
         self._plane_handles = {}
+        self._plane_geometry_keys = {}  # Cache of (count, widths, lengths, cell_sizes) per plane batch name
 
         super().__init__()
 
@@ -149,6 +133,7 @@ class ViewerViser(ViewerBase):
         self._meshes = {}
         self._instances = {}
         self._scene_handles = {}  # Track viser scene node handles
+        self._gaussian_splats = {}  # Track cached Gaussian splat upload keys, by name
         self._line_segment_counts = {}
         self._line_versions = {}
 
@@ -187,28 +172,59 @@ class ViewerViser(ViewerBase):
     @override
     def clear_model(self):
         """Reset model-dependent state, including scalar plot buffers."""
+        owns = self._is_layer_owned_path
         for plane_name in list(self._plane_handles.keys()):
-            self._remove_plane_handles(plane_name)
-        self._plane_handles.clear()
-        self._plane_meshes.clear()
+            if owns(plane_name):
+                self._remove_plane_handles(plane_name)
+        self._plane_meshes = {name: value for name, value in self._plane_meshes.items() if not owns(name)}
 
-        # Remove plot handles from the GUI.
-        for handle in self._plot_handles.values():
+        for gaussian_name in list(getattr(self, "_gaussian_splats", {}).keys()):
+            if owns(gaussian_name):
+                handle = self._scene_handles.pop(gaussian_name, None)
+                if handle is not None:
+                    try:
+                        handle.remove()
+                    except Exception:
+                        pass
+                self._gaussian_splats.pop(gaussian_name, None)
+
+        for name, handle in list(getattr(self, "_scene_handles", {}).items()):
+            if not owns(name):
+                continue
             try:
                 handle.remove()
             except Exception:
                 pass
-        self._plot_handles.clear()
-        if self._plot_folder is not None:
+            self._scene_handles.pop(name, None)
+            self._instances.pop(name, None)
+            self._meshes.pop(name, None)
+            self._gaussian_splats.pop(name, None)
+            self._line_segment_counts.pop(name, None)
+            self._line_versions.pop(name, None)
+
+        # Remove only scalar plot state owned by the active layer.
+        for name, handle in list(self._plot_handles.items()):
+            if not owns(name):
+                continue
+            try:
+                handle.remove()
+            except Exception:
+                pass
+            self._plot_handles.pop(name, None)
+        if not self._plot_handles and self._plot_folder is not None:
             try:
                 self._plot_folder.remove()
             except Exception:
                 pass
             self._plot_folder = None
-        self._scalar_buffers.clear()
-        self._scalar_accumulators.clear()
-        self._scalar_smoothing.clear()
-        self._scalar_dirty.clear()
+        for name in list(self._scalar_buffers.keys()):
+            if owns(name):
+                self._scalar_buffers.pop(name, None)
+                self._scalar_accumulators.pop(name, None)
+                self._scalar_smoothing.pop(name, None)
+        for name in list(self._scalar_dirty):
+            if owns(name):
+                self._scalar_dirty.discard(name)
 
         super().clear_model()
 
@@ -225,10 +241,23 @@ class ViewerViser(ViewerBase):
         """Call a viser scene method with only supported keyword args."""
         try:
             signature = inspect.signature(method)
-            allowed = {k: v for k, v in kwargs.items() if k in signature.parameters}
-            return method(**allowed)
-        except Exception:
+        except (TypeError, ValueError):
             return method(**kwargs)
+
+        accepts_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+        allowed = kwargs if accepts_kwargs else {k: v for k, v in kwargs.items() if k in signature.parameters}
+        dropped_appearance = [
+            key
+            for key in ("opacity", "batched_opacities", "color", "batched_colors", "material")
+            if kwargs.get(key) is not None and key not in signature.parameters and not accepts_kwargs
+        ]
+        if dropped_appearance:
+            warnings.warn(
+                f"Viser {method.__name__} does not support requested appearance argument(s): "
+                f"{', '.join(dropped_appearance)}.",
+                stacklevel=2,
+            )
+        return method(**allowed)
 
     @property
     def url(self) -> str:
@@ -298,6 +327,86 @@ class ViewerViser(ViewerBase):
             return f"{jupyter_base_url}/proxy/{port}{normalized_path}{query}"
 
         return f"http://{local_host}:{port}{normalized_path}{query}"
+
+    @staticmethod
+    def _get_colab_output() -> Any | None:
+        """Return google.colab.output when Colab iframe display is available."""
+        try:
+            from google.colab import output  # noqa: PLC0415
+        except Exception:
+            return None
+
+        if not hasattr(output, "serve_kernel_port_as_iframe"):
+            return None
+
+        return output
+
+    @classmethod
+    def _display_colab_iframe(
+        cls,
+        port: int,
+        *,
+        path: str = "/",
+        query: str = "",
+        width: int | str = "100%",
+        height: int | str = 400,
+    ) -> bool:
+        """Display a local server port in Colab when the Colab helper is available."""
+        output = cls._get_colab_output()
+        if output is None:
+            return False
+
+        normalized_path = "/" if path in ("", "/") else "/" + path.lstrip("/")
+        normalized_query = ""
+        if query:
+            normalized_query = query if query.startswith("?") else "?" + query
+        iframe_path = f"{normalized_path}{normalized_query}"
+
+        try:
+            output.serve_kernel_port_as_iframe(port, path=iframe_path, width=width, height=height)
+        except TypeError:
+            output.serve_kernel_port_as_iframe(port, path=iframe_path, height=height)
+
+        return True
+
+    @classmethod
+    def _colab_iframe_target_from_url(cls, player_url: str) -> tuple[int, str, str] | None:
+        """Extract a Colab iframe target from an absolute or Jupyter proxy URL."""
+        parsed_url = urlparse(player_url)
+
+        proxy_target = None
+        path_segments = parsed_url.path.split("/")
+        for index, segment in enumerate(path_segments[:-1]):
+            if segment != "proxy":
+                continue
+
+            port_text = path_segments[index + 1]
+            if not port_text.isdecimal():
+                continue
+
+            proxy_port = int(port_text)
+            if proxy_port > 65535:
+                continue
+
+            downstream_segments = path_segments[index + 2 :]
+            if not downstream_segments or downstream_segments == [""]:
+                downstream_path = "/"
+            else:
+                downstream_path = "/" + "/".join(downstream_segments)
+            proxy_target = (proxy_port, downstream_path, parsed_url.query)
+
+        if proxy_target is not None:
+            return proxy_target
+
+        try:
+            parsed_port = parsed_url.port
+        except ValueError:
+            parsed_port = None
+
+        if parsed_port is not None:
+            return parsed_port, parsed_url.path or "/", parsed_url.query
+
+        return None
 
     @classmethod
     def get_viser_client_dir(cls) -> Path:
@@ -505,6 +614,7 @@ class ViewerViser(ViewerBase):
         color: tuple[float, float, float] | None = None,
         roughness: float | None = None,
         metallic: float | None = None,
+        dynamic: bool = False,
         opacity: float | None = None,
         ior: float | None = None,
     ):
@@ -526,17 +636,20 @@ class ViewerViser(ViewerBase):
                 smooth, ``1`` is fully rough.
             metallic: Metallicity in ``[0, 1]``. ``0`` is dielectric, ``1``
                 is metal.
-            opacity: Surface opacity in ``[0, 1]``.
+            dynamic: Whether mesh topology may change between frames.
+            opacity: Optional display opacity in [0, 1].
             ior: Index of refraction for dielectric surfaces.
         """
+        name = self._qualify(name)
+
         assert isinstance(points, wp.array)
         assert isinstance(indices, wp.array)
 
         # Convert to numpy arrays
-        points_np = self._to_numpy(points).astype(np.float32)
-        indices_np = self._to_numpy(indices).astype(np.uint32)
-        uvs_np = self._to_numpy(uvs).astype(np.float32) if uvs is not None else None
-        texture_image = self._prepare_texture(texture)
+        points_np = to_numpy(points).astype(np.float32)
+        indices_np = to_numpy(indices).astype(np.uint32)
+        uvs_np = to_numpy(uvs).astype(np.float32) if uvs is not None else None
+        texture_image = prepare_viewer_texture(texture)
 
         if texture_image is not None and uvs_np is None:
             warnings.warn(f"Mesh {name} has a texture but no UVs; texture will be ignored.", stacklevel=2)
@@ -568,6 +681,7 @@ class ViewerViser(ViewerBase):
             "uvs": uvs_np,
             "texture": texture_image,
             "trimesh": trimesh_mesh,
+            "opacity": opacity,
         }
 
         # Remove existing mesh if present
@@ -576,27 +690,32 @@ class ViewerViser(ViewerBase):
                 self._scene_handles[name].remove()
             except Exception:
                 pass
+            del self._scene_handles[name]
 
         if hidden:
             return
 
         # Add mesh to viser scene
         if trimesh_mesh is not None:
-            handle = self._call_scene_method(
-                self._server.scene.add_mesh_trimesh,
-                name=name,
-                mesh=trimesh_mesh,
-            )
+            mesh_kwargs = {
+                "name": name,
+                "mesh": trimesh_mesh,
+            }
+            if opacity is not None:
+                mesh_kwargs["opacity"] = float(np.clip(opacity, 0.0, 1.0))
+            handle = self._call_scene_method(self._server.scene.add_mesh_trimesh, **mesh_kwargs)
         else:
-            handle = self._call_scene_method(
-                self._server.scene.add_mesh_simple,
-                name=name,
-                vertices=points_np,
-                faces=indices_np,
-                color=(180, 180, 180) if color is None else color,
-                wireframe=False,
-                side="double" if not backface_culling else "front",
-            )
+            mesh_kwargs = {
+                "name": name,
+                "vertices": points_np,
+                "faces": indices_np,
+                "color": (180, 180, 180) if color is None else color,
+                "wireframe": False,
+                "side": "double" if not backface_culling else "front",
+            }
+            if opacity is not None:
+                mesh_kwargs["opacity"] = float(np.clip(opacity, 0.0, 1.0))
+            handle = self._call_scene_method(self._server.scene.add_mesh_simple, **mesh_kwargs)
         self._scene_handles[name] = handle
 
     @staticmethod
@@ -616,8 +735,28 @@ class ViewerViser(ViewerBase):
         quats_wxyz[:, 3] = quats_xyzw[:, 2]
         return quats_wxyz[0] if was_1d else quats_wxyz
 
+    @staticmethod
+    def _quats_xyzw_to_rotmats(quats_xyzw: np.ndarray) -> np.ndarray:
+        """Convert a batch of XYZW quaternions to (N, 3, 3) rotation matrices."""
+        quats_xyzw = np.asarray(quats_xyzw, dtype=np.float32)
+        quats_xyzw = quats_xyzw / np.maximum(np.linalg.norm(quats_xyzw, axis=1, keepdims=True), 1e-12)
+        x, y, z, w = quats_xyzw[:, 0], quats_xyzw[:, 1], quats_xyzw[:, 2], quats_xyzw[:, 3]
+        n = quats_xyzw.shape[0]
+        rot = np.empty((n, 3, 3), dtype=np.float32)
+        rot[:, 0, 0] = 1.0 - 2.0 * (y * y + z * z)
+        rot[:, 0, 1] = 2.0 * (x * y - w * z)
+        rot[:, 0, 2] = 2.0 * (x * z + w * y)
+        rot[:, 1, 0] = 2.0 * (x * y + w * z)
+        rot[:, 1, 1] = 1.0 - 2.0 * (x * x + z * z)
+        rot[:, 1, 2] = 2.0 * (y * z - w * x)
+        rot[:, 2, 0] = 2.0 * (x * z - w * y)
+        rot[:, 2, 1] = 2.0 * (y * z + w * x)
+        rot[:, 2, 2] = 1.0 - 2.0 * (x * x + y * y)
+        return rot
+
     def _remove_plane_handles(self, name: str):
         """Remove any plane-grid handles associated with an instance batch."""
+        self._plane_geometry_keys.pop(name, None)
         handle = self._plane_handles.pop(name, None)
         if handle is None:
             return
@@ -629,42 +768,10 @@ class ViewerViser(ViewerBase):
                 pass
 
     @staticmethod
-    def _build_plane_grid_points(width: float, length: float) -> np.ndarray:
-        """Create a finite grid of line segments in the local XY plane."""
-        width = max(float(width), 0.1)
-        length = max(float(length), 0.1)
-
-        spacing = max(min(width, length) / 10.0, 0.25)
-        spacing = min(spacing, 2.0)
-
-        nx = max(int(np.ceil(width / spacing)), 1)
-        ny = max(int(np.ceil(length / spacing)), 1)
-
-        xs = np.linspace(-width * 0.5, width * 0.5, nx + 1, dtype=np.float32)
-        ys = np.linspace(-length * 0.5, length * 0.5, ny + 1, dtype=np.float32)
-
-        segments = []
-        for x in xs:
-            segments.append([[x, -length * 0.5, 0.0], [x, length * 0.5, 0.0]])
-        for y in ys:
-            segments.append([[-width * 0.5, y, 0.0], [width * 0.5, y, 0.0]])
-
-        return np.asarray(segments, dtype=np.float32)
-
-    @staticmethod
-    def _rotate_points_wxyz(points: np.ndarray, quat_wxyz: np.ndarray) -> np.ndarray:
-        """Rotate points by a unit quaternion stored in WXYZ order."""
-        quat_wxyz = np.asarray(quat_wxyz, dtype=np.float32)
-        norm = np.linalg.norm(quat_wxyz)
-        if norm > 0.0:
-            quat_wxyz = quat_wxyz / norm
-
-        qvec = quat_wxyz[1:4]
-        flat_points = points.reshape(-1, 3)
-        uv = np.cross(qvec, flat_points)
-        uuv = np.cross(qvec, uv)
-        rotated = flat_points + 2.0 * (quat_wxyz[0] * uv + uuv)
-        return rotated.reshape(points.shape).astype(np.float32, copy=False)
+    def _plane_cell_size(width: float, length: float) -> float:
+        """Pick a grid cell size for a plane of the given extents."""
+        spacing = max(min(float(width), float(length)) / 10.0, 0.25)
+        return min(spacing, 2.0)
 
     def _log_plane_instances(
         self,
@@ -674,47 +781,94 @@ class ViewerViser(ViewerBase):
         scales: wp.array[wp.vec3] | None,
         hidden: bool = False,
     ):
-        """Render plane instances as finite line grids instead of opaque meshes."""
-        self._remove_plane_handles(name)
+        """Render plane instances as viser grids.
 
+        Grid handles are cached by name and only recreated when the instance
+        count, extents, or cell sizes change; a pose-only update (the common case for a
+        static ground plane logged every frame) just moves the existing
+        handles instead of tearing them down and rebuilding, which avoids a
+        visible flicker as handles disappear and reappear over the websocket.
+        """
         if hidden or xforms is None:
+            for handle in self._plane_handles.get(name, ()):
+                handle.visible = False
             return
 
-        xforms_np = self._to_numpy(xforms)
+        xforms_np = to_numpy(xforms)
         if xforms_np is None or len(xforms_np) == 0:
+            self._remove_plane_handles(name)
             return
 
         xforms_np = np.asarray(xforms_np, dtype=np.float32)
         positions = xforms_np[:, :3]
         quats_wxyz = self._quats_xyzw_to_wxyz(xforms_np[:, 3:7])
-        scales_np = self._to_numpy(scales) if scales is not None else None
+        scales_np = to_numpy(scales) if scales is not None else None
         if scales_np is not None:
             scales_np = np.asarray(scales_np, dtype=np.float32)
 
-        width = float(plane_info["width"])
-        length = float(plane_info["length"])
-        grid_points = self._build_plane_grid_points(width, length)
+        base_width = float(plane_info["width"])
+        base_length = float(plane_info["length"])
 
-        all_points = []
-        for idx, (position, quat_wxyz) in enumerate(zip(positions, quats_wxyz, strict=False)):
-            instance_points = grid_points
+        widths = []
+        lengths = []
+        cell_sizes = []
+        for idx in range(len(positions)):
+            width = base_width
+            length = base_length
+
+            # TODO: Compute cell size for the scaled width/length directly
+            cell_size = self._plane_cell_size(width, length)
+
             if scales_np is not None:
-                plane_scale = np.array([scales_np[idx][0], scales_np[idx][1], 1.0], dtype=np.float32)
-                instance_points = grid_points * plane_scale
-            instance_points = self._rotate_points_wxyz(instance_points, quat_wxyz) + position
-            all_points.append(instance_points)
+                sx = float(scales_np[idx][0])
+                sy = float(scales_np[idx][1])
+                width *= sx
+                length *= sy
+                cell_size *= max(sx, sy)
 
-        if not all_points:
+            widths.append(width)
+            lengths.append(length)
+            cell_sizes.append(cell_size)
+
+        geometry_key = (len(positions), tuple(widths), tuple(lengths), tuple(cell_sizes))
+        existing = self._plane_handles.get(name)
+
+        if (
+            existing is not None
+            and len(existing) == len(positions)
+            and self._plane_geometry_keys.get(name) == geometry_key
+        ):
+            # Only the pose changed (e.g. a body-attached plane, or the same
+            # static plane logged again this frame) -- move handles in place.
+            for handle, position, quat_wxyz in zip(existing, positions, quats_wxyz, strict=False):
+                handle.position = tuple(float(v) for v in position)
+                handle.wxyz = tuple(float(v) for v in quat_wxyz)
+                handle.visible = True
             return
 
-        handle = self._server.scene.add_line_segments(
-            name=f"{name}/grid",
-            points=np.concatenate(all_points, axis=0),
-            colors=(150, 150, 150),
-            line_width=1.5,
-        )
+        self._remove_plane_handles(name)
 
-        self._plane_handles[name] = handle
+        handles = []
+        for idx, (position, quat_wxyz) in enumerate(zip(positions, quats_wxyz, strict=False)):
+            # The plane's local frame has its normal along +Z, so the grid lies in the local XY plane.
+            handle = self._call_scene_method(
+                self._server.scene.add_grid,
+                name=f"{name}/grid_{idx}",
+                width=widths[idx],
+                height=lengths[idx],
+                plane="xy",
+                cell_color=(150, 150, 150),
+                section_color=(110, 110, 110),
+                cell_size=cell_sizes[idx],
+                section_size=cell_sizes[idx],
+                position=tuple(float(v) for v in position),
+                wxyz=tuple(float(v) for v in quat_wxyz),
+            )
+            handles.append(handle)
+
+        if handles:
+            self._plane_handles[name] = handles
+            self._plane_geometry_keys[name] = geometry_key
 
     @override
     def log_instances(
@@ -726,6 +880,7 @@ class ViewerViser(ViewerBase):
         colors: wp.array[wp.vec3] | None,
         materials: wp.array[wp.vec4] | None,
         hidden: bool = False,
+        opacities: wp.array[wp.float32] | None = None,
     ):
         """
         Log instanced mesh data to viser using efficient batched rendering.
@@ -741,7 +896,11 @@ class ViewerViser(ViewerBase):
             colors: Instance colors.
             materials: Instance materials.
             hidden: Whether the instances are hidden.
+            opacities: Instance opacities.
         """
+        name = self._qualify(name)
+        mesh = self._qualify(mesh)
+
         if mesh in self._plane_meshes:
             self._log_plane_instances(name, self._plane_meshes[mesh], xforms, scales, hidden=hidden)
             return
@@ -756,8 +915,9 @@ class ViewerViser(ViewerBase):
         base_points = mesh_data["points"]
         base_indices = mesh_data["indices"]
         base_uvs = mesh_data.get("uvs")
-        texture_image = self._prepare_texture(mesh_data.get("texture"))
+        texture_image = prepare_viewer_texture(mesh_data.get("texture"))
         trimesh_mesh = mesh_data.get("trimesh")
+        mesh_opacity = mesh_data.get("opacity")
 
         if hidden:
             # Remove existing instances if present
@@ -775,11 +935,16 @@ class ViewerViser(ViewerBase):
         if xforms is None:
             return
 
-        xforms_np = self._to_numpy(xforms)
-        scales_np = self._to_numpy(scales) if scales is not None else None
-        colors_np = self._to_numpy(colors) if colors is not None else None
+        xforms_np = to_numpy(xforms)
+        scales_np = to_numpy(scales) if scales is not None else None
+        colors_np = to_numpy(colors) if colors is not None else None
 
         num_instances = len(xforms_np)
+        opacities_np = promote_to_clamped_float_array(
+            opacities if opacities is not None else mesh_opacity,
+            num_instances,
+            value_name="Opacity",
+        )
 
         # Extract positions from transforms
         # Warp transform format: [x, y, z, qx, qy, qz, qw]
@@ -827,6 +992,15 @@ class ViewerViser(ViewerBase):
                         handle.batched_colors = batched_colors
                         # Cache the colors for future reference
                         self._instances[name]["colors"] = batched_colors
+                    if opacities_np is not None:
+                        if hasattr(handle, "batched_opacities"):
+                            handle.batched_opacities = opacities_np
+                            self._instances[name]["opacities"] = opacities_np
+                        else:
+                            warnings.warn(
+                                f"Viser handle for {name!r} does not support batched opacity updates.",
+                                stacklevel=2,
+                            )
                     return
                 except Exception:
                     # If update fails, recreate the mesh
@@ -852,6 +1026,7 @@ class ViewerViser(ViewerBase):
                 batched_positions=positions,
                 batched_wxyzs=quats_wxyz,
                 batched_scales=batched_scales,
+                batched_opacities=opacities_np,
                 lod="off",
             )
         else:
@@ -864,6 +1039,7 @@ class ViewerViser(ViewerBase):
                 batched_wxyzs=quats_wxyz,
                 batched_scales=batched_scales,
                 batched_colors=batched_colors,
+                batched_opacities=opacities_np,
                 lod="off",
             )
 
@@ -872,6 +1048,7 @@ class ViewerViser(ViewerBase):
             "mesh": mesh,
             "count": num_instances,
             "colors": batched_colors,  # Cache the colors
+            "opacities": opacities_np,
             "use_trimesh": use_trimesh,
         }
 
@@ -1024,6 +1201,7 @@ class ViewerViser(ViewerBase):
             width: Line width.
             hidden: Whether the lines are hidden.
         """
+        name = self._qualify(name)
 
         def remove_existing_line(reset_version: bool = True):
             handle = self._scene_handles.pop(name, None)
@@ -1044,8 +1222,8 @@ class ViewerViser(ViewerBase):
             remove_existing_line()
             return
 
-        starts_np = self._to_numpy(starts)
-        ends_np = self._to_numpy(ends)
+        starts_np = to_numpy(starts)
+        ends_np = to_numpy(ends)
 
         if starts_np is None or ends_np is None or len(starts_np) == 0:
             remove_existing_line()
@@ -1070,7 +1248,7 @@ class ViewerViser(ViewerBase):
         # add_line_segments() also accepts RGB tuples on initial creation.
         color_rgb: np.ndarray = np.array((0, 255, 0), dtype=np.uint8)
         if colors is not None:
-            colors_np = self._to_numpy(colors)
+            colors_np = to_numpy(colors)
             if colors_np is not None:
                 colors_np = np.asarray(colors_np)
                 if colors_np.ndim == 1 and colors_np.shape[0] == 3:
@@ -1133,6 +1311,8 @@ class ViewerViser(ViewerBase):
             geo_src: Optional source geometry for mesh-backed types.
             hidden: Whether the resulting geometry is hidden.
         """
+        name = self._qualify(name)
+
         if geo_type == newton.GeoType.PLANE:
             # Handle "infinite" planes encoded with non-positive scales
             if geo_scale[0] == 0.0 or geo_scale[1] == 0.0:
@@ -1172,12 +1352,15 @@ class ViewerViser(ViewerBase):
             colors: Point colors (can be a wp.array or a numpy array).
             hidden: Whether the points are hidden.
         """
+        name = self._qualify(name)
+
         # Remove existing points if present
         if name in self._scene_handles:
             try:
                 self._scene_handles[name].remove()
             except Exception:
                 pass
+            del self._scene_handles[name]
 
         if hidden:
             return
@@ -1185,7 +1368,7 @@ class ViewerViser(ViewerBase):
         if points is None:
             return
 
-        pts = self._to_numpy(points)
+        pts = to_numpy(points)
         n_points = pts.shape[0]
 
         if n_points == 0:
@@ -1193,7 +1376,7 @@ class ViewerViser(ViewerBase):
 
         # Handle radii (point size)
         if radii is not None:
-            size = self._to_numpy(radii)
+            size = to_numpy(radii)
             if size.ndim == 0 or size.shape == ():
                 point_size = float(size)
             elif len(size) == n_points:
@@ -1205,7 +1388,7 @@ class ViewerViser(ViewerBase):
 
         # Handle colors
         if colors is not None:
-            cols = self._to_numpy(colors)
+            cols = to_numpy(colors)
             if cols.shape == (n_points, 3):
                 # Convert from 0-1 to 0-255
                 colors_val = (cols * 255).astype(np.uint8)
@@ -1225,6 +1408,96 @@ class ViewerViser(ViewerBase):
             point_shape="circle",
         )
         self._scene_handles[name] = handle
+
+    @override
+    def log_gaussian(
+        self,
+        name: str,
+        gaussian: newton.Gaussian | None,
+        xform: wp.transformf | None = None,
+        hidden: bool = False,
+    ):
+        """
+        Log a :class:`newton.Gaussian` splat asset using viser's native Gaussian renderer.
+
+        Note: viser's ``add_gaussian_splats`` is marked experimental upstream and its
+        API may change or be removed in a future viser release.
+
+        Args:
+            name: Unique path/name for the Gaussian splat asset.
+            gaussian: The :class:`newton.Gaussian` asset to visualize, with centers and
+                per-axis scales in meters [m]. ``None`` removes any existing asset at ``name``.
+            xform: Optional world-space transform applied to the splat asset; its
+                translation component is in meters [m].
+            hidden: Whether the splat asset should be hidden.
+        """
+        name = self._qualify(name)
+
+        if gaussian is None or gaussian.count == 0:
+            if name in self._scene_handles:
+                try:
+                    self._scene_handles[name].remove()
+                except Exception:
+                    pass
+                self._scene_handles.pop(name, None)
+            self._gaussian_splats.pop(name, None)
+            return
+
+        if hidden:
+            if name in self._scene_handles:
+                self._scene_handles[name].visible = False
+            return
+
+        cached = self._gaussian_splats.get(name)
+
+        if (
+            cached is None
+            or cached["gaussian"] is not gaussian
+            or cached["count"] != gaussian.count
+            or self._scene_handles.get(name) is not cached["handle"]
+        ):
+            centers = self._to_numpy(gaussian.positions).astype(np.float32)
+            rotations_xyzw = self._to_numpy(gaussian.rotations).astype(np.float32)
+            scales = self._to_numpy(gaussian.scales).astype(np.float32)
+            opacities = self._to_numpy(gaussian.opacities).astype(np.float32).reshape(-1, 1)
+
+            # Local-space covariance per Gaussian: Sigma = R * diag(scale^2) * R^T
+            rot_mats = self._quats_xyzw_to_rotmats(rotations_xyzw)
+            scale_sq = scales * scales
+            covariances = np.einsum("nij,nj,nkj->nik", rot_mats, scale_sq, rot_mats).astype(np.float32)
+
+            sh_coeffs = self._to_numpy(gaussian.sh_coeffs)
+            if sh_coeffs is not None and sh_coeffs.shape[1] >= 3:
+                rgbs = np.clip(self._SH_C0 * sh_coeffs[:, :3] + 0.5, 0.0, 1.0).astype(np.float32)
+            else:
+                rgbs = np.ones((gaussian.count, 3), dtype=np.float32)
+
+            if cached is not None and name in self._scene_handles:
+                try:
+                    self._scene_handles[name].remove()
+                except Exception:
+                    pass
+
+            handle = self._call_scene_method(
+                self._server.scene.add_gaussian_splats,
+                name=name,
+                centers=centers,
+                covariances=covariances,
+                rgbs=rgbs,
+                opacities=opacities,
+            )
+            self._scene_handles[name] = handle
+            self._gaussian_splats[name] = {"gaussian": gaussian, "count": gaussian.count, "handle": handle}
+
+        handle = self._scene_handles[name]
+        handle.visible = True
+        if xform is not None:
+            xform_np = np.asarray(xform, dtype=np.float32)
+            handle.position = xform_np[:3]
+            handle.wxyz = self._quats_xyzw_to_wxyz(xform_np[3:7])
+        else:
+            handle.position = (0.0, 0.0, 0.0)
+            handle.wxyz = (1.0, 0.0, 0.0, 0.0)
 
     @override
     def log_array(self, name: str, array: wp.array[Any] | np.ndarray):
@@ -1262,6 +1535,7 @@ class ViewerViser(ViewerBase):
         """
         if smoothing < 1:
             raise ValueError("smoothing must be >= 1")
+        name = self._qualify(name)
         val = float(value.item() if hasattr(value, "item") else value)
         buf = self._scalar_buffers.get(name)
         if buf is None:
@@ -1317,6 +1591,9 @@ class ViewerViser(ViewerBase):
         from .viewer import is_sphinx_build  # noqa: PLC0415
 
         if self._record_to_viser is None:
+            if self._display_colab_iframe(self._port, width=width, height=height):
+                return None
+
             # No recording - display the live server via IFrame
             return display(IFrame(src=self.url, width=width, height=height))
 
@@ -1368,6 +1645,18 @@ class ViewerViser(ViewerBase):
                 self._record_to_viser,
                 camera_request=self._camera_request,
             )
+            colab_target = self._colab_iframe_target_from_url(player_url)
+            if colab_target is not None:
+                colab_port, colab_path, colab_query = colab_target
+                if self._display_colab_iframe(
+                    colab_port,
+                    path=colab_path,
+                    query=colab_query,
+                    width=width,
+                    height=height,
+                ):
+                    return None
+
             return display(IFrame(src=player_url, width=width, height=height))
 
     def _ipython_display_(self):

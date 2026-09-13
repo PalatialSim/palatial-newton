@@ -276,6 +276,7 @@ class TestImageLoggerDeviceWarnings(_ImageLoggerFixture):
 
 class TestImageLoggerCleanup(_ImageLoggerFixture):
     def test_free_entry_warns_on_gl_failure(self):
+        """Verify cleanup warnings include GL deletion failures."""
         self.logger.log("cam0", np.zeros((8, 8), dtype=np.uint8))
 
         def _boom(*args):
@@ -287,6 +288,117 @@ class TestImageLoggerCleanup(_ImageLoggerFixture):
             self.logger.clear()
         messages = [str(w.message) for w in caught]
         self.assertTrue(any("GL cleanup failed" in m for m in messages), messages)
+
+    def test_clear_releases_fullscreen_entries(self):
+        """Verify clear releases docked and fullscreen image resources."""
+        self.logger.log("docked", np.zeros((8, 8), dtype=np.uint8))
+        self.logger.log("main", np.zeros((8, 8, 3), dtype=np.uint8), fullscreen=True)
+
+        self.assertIn("docked", self.logger._images)
+        self.assertIn("main", self.logger._fullscreen_images)
+
+        self.logger.clear()
+
+        self.assertEqual(self.logger._images, {})
+        self.assertEqual(self.logger._fullscreen_images, {})
+        self.assertIsNone(self.logger._selected)
+        self.assertEqual(len(self.fake_gl.deleted_textures), 2)
+
+    def test_clear_matching_releases_fullscreen_entries(self):
+        """Verify clear_matching cleans fullscreen textures for matching layers."""
+        self.logger.log("/layers/a/color", np.zeros((8, 8), dtype=np.uint8), fullscreen=True)
+        self.logger.log("/layers/b/color", np.zeros((8, 8), dtype=np.uint8), fullscreen=True)
+
+        self.logger.clear_matching(lambda name: name.startswith("/layers/a/"))
+
+        self.assertNotIn("/layers/a/color", self.logger._fullscreen_images)
+        self.assertIn("/layers/b/color", self.logger._fullscreen_images)
+        self.assertEqual(len(self.fake_gl.deleted_textures), 1)
+
+
+class _FakeRenderer:
+    def __init__(self):
+        self.render_calls = []
+        self.render_texture_calls = []
+        self.present_count = 0
+        self.update_count = 0
+
+    def update(self):
+        self.update_count += 1
+
+    def has_exit(self):
+        return False
+
+    def render(self, *args):
+        self.render_calls.append(args)
+
+    def render_texture(self, *args):
+        self.render_texture_calls.append(args)
+
+    def present(self):
+        self.present_count += 1
+
+
+class _FakeFullscreenImageLogger:
+    def __init__(self, texture):
+        self.texture = texture
+        self.get_texture_calls = []
+
+    def get_texture(self, name, *, fullscreen=False):
+        self.get_texture_calls.append((name, fullscreen))
+        return self.texture
+
+
+class TestViewerGLFullscreenMainImage(unittest.TestCase):
+    def _make_viewer(self, texture):
+        """Create a ViewerGL shell with just enough state for _update."""
+        from newton._src.viewer import viewer_gl  # noqa: PLC0415
+
+        viewer = viewer_gl.ViewerGL.__new__(viewer_gl.ViewerGL)
+        viewer.renderer = _FakeRenderer()
+        viewer._image_logger = _FakeFullscreenImageLogger(texture)
+        viewer._main_image_name = None
+        viewer._last_time = 0.0
+        viewer.wind = None
+        viewer.camera = object()
+        viewer.objects = {"mesh": object()}
+        viewer.lines = {}
+        viewer.wireframe_shapes = {}
+        viewer.arrows = {}
+        viewer.gui = None
+        return viewer
+
+    def test_fullscreen_selection_resets_and_next_frame_renders_scene(self):
+        """Verify fullscreen images are current-frame only."""
+        from newton._src.viewer import viewer_gl  # noqa: PLC0415
+
+        viewer = self._make_viewer(texture=(17, 64, 48))
+        viewer._main_image_name = "color"
+
+        with mock.patch.object(viewer_gl.ViewerGL, "_update_camera", autospec=True):
+            viewer_gl.ViewerGL._update(viewer)
+            viewer_gl.ViewerGL._update(viewer)
+
+        self.assertEqual(viewer.renderer.render_texture_calls, [(17, 64, 48)])
+        self.assertEqual(len(viewer.renderer.render_calls), 1)
+        self.assertEqual(viewer.renderer.present_count, 2)
+        self.assertIsNone(viewer._main_image_name)
+        self.assertEqual(viewer._image_logger.get_texture_calls, [("color", True)])
+
+    def test_missing_fullscreen_texture_renders_empty_texture(self):
+        """Verify missing fullscreen textures avoid stale 3D rendering."""
+        from newton._src.viewer import viewer_gl  # noqa: PLC0415
+
+        viewer = self._make_viewer(texture=None)
+        viewer._main_image_name = "color"
+
+        with mock.patch.object(viewer_gl.ViewerGL, "_update_camera", autospec=True):
+            viewer_gl.ViewerGL._update(viewer)
+
+        self.assertEqual(viewer.renderer.render_texture_calls, [(None, 0, 0)])
+        self.assertEqual(viewer.renderer.render_calls, [])
+        self.assertEqual(viewer.renderer.present_count, 1)
+        self.assertIsNone(viewer._main_image_name)
 
 
 @unittest.skipUnless(wp.is_cuda_available(), "GPU-path test requires CUDA")
@@ -364,6 +476,81 @@ class TestViewerGLClearModelClearsImageLogger(unittest.TestCase):
             # entry into a camera example.
             viewer.log_image("color", np.zeros((4, 4), dtype=np.uint8))
             self.assertEqual(logger._selected, "color")
+        finally:
+            viewer.close()
+
+
+class TestViewerGLInitialization(unittest.TestCase):
+    def test_headless_init_handles_initial_clear_model(self):
+        """ViewerBase.__init__ calls ViewerGL.clear_model before GL setup."""
+
+        class _FakeWindow:
+            scale = 1.0
+
+            def get_framebuffer_size(self):
+                return (640, 480)
+
+            def get_size(self):
+                return (640, 480)
+
+        class _FakeRenderer:
+            def __init__(self, *args, **kwargs):
+                self.window = _FakeWindow()
+                self.closed = False
+
+            def set_title(self, title):
+                self.title = title
+
+            def register_key_press(self, callback):
+                pass
+
+            def register_key_release(self, callback):
+                pass
+
+            def register_mouse_press(self, callback):
+                pass
+
+            def register_mouse_release(self, callback):
+                pass
+
+            def register_mouse_drag(self, callback):
+                pass
+
+            def register_mouse_scroll(self, callback):
+                pass
+
+            def register_resize(self, callback):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        class _FakeImageLogger:
+            def __init__(self, device, sidebar_width_px=0.0, dpi_scale=1.0):
+                self.device = device
+
+            def clear_matching(self, owns):
+                pass
+
+            def clear(self):
+                pass
+
+        from newton._src.viewer import viewer_gl  # noqa: PLC0415
+
+        with (
+            mock.patch.object(viewer_gl, "RendererGL", _FakeRenderer),
+            mock.patch.object(viewer_gl, "ImageLogger", _FakeImageLogger),
+            mock.patch.object(viewer_gl, "Camera"),
+        ):
+            viewer = viewer_gl.ViewerGL(headless=True)
+
+        try:
+            viewer.log_scalar("metric", 1.0)
+            self.assertIn("metric", viewer._plot_logger._scalar_buffers)
+
+            viewer.clear_model()
+
+            self.assertNotIn("metric", viewer._plot_logger._scalar_buffers)
         finally:
             viewer.close()
 

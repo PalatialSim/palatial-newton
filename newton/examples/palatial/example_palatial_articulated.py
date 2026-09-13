@@ -23,32 +23,44 @@ from __future__ import annotations
 
 import argparse
 import math
+import os as _os
 import sys
+import traceback
 
 # Newton stack must import before any pxr.Usd usage in the same process.
-import warp as wp  # noqa: F401
-import newton
+import warp as wp
 
+import newton
 from newton.palatial import load
 
-
 JOINT_TYPE_NAMES = {
-    0: "PRISMATIC", 1: "REVOLUTE", 2: "BALL",
-    3: "FIXED", 4: "FREE", 5: "DISTANCE", 6: "D6",
+    0: "PRISMATIC",
+    1: "REVOLUTE",
+    2: "BALL",
+    3: "FIXED",
+    4: "FREE",
+    5: "DISTANCE",
+    6: "D6",
 }
 
 
 class Example:
-    def __init__(self, viewer, usd_path: str, *, substeps: int | None = None,
-                 device: str | None = None,
-                 drive_joint: int | None = None,
-                 drive_amplitude: float = 0.7,
-                 drive_frequency: float = 0.5,
-                 joint_target_ke: float | None = None,
-                 joint_target_kd: float | None = None,
-                 rotate_x_deg: float = 0.0,
-                 rotate_y_deg: float = 0.0,
-                 rotate_z_deg: float = 0.0):
+    def __init__(
+        self,
+        viewer,
+        usd_path: str,
+        *,
+        substeps: int | None = None,
+        device: str | None = None,
+        drive_joint: int | None = None,
+        drive_amplitude: float = 0.7,
+        drive_frequency: float = 0.5,
+        joint_target_ke: float | None = None,
+        joint_target_kd: float | None = None,
+        rotate_x_deg: float = 0.0,
+        rotate_y_deg: float = 0.0,
+        rotate_z_deg: float = 0.0,
+    ):
         self.viewer = viewer
 
         # Articulated assets always anchor their root via a FIXED joint to
@@ -62,14 +74,14 @@ class Example:
         self.control = bundle.control
 
         if int(self.model.particle_count) > 0:
-            raise RuntimeError("This example is for rigid articulated assets only "
-                               "(asset has cloth particles).")
+            raise RuntimeError("This example is for rigid articulated assets only (asset has cloth particles).")
 
         # Sim timing comes from the bundle (newton:timeStepsPerSecond).
         self.fps = bundle.fps
         self.frame_dt = 1.0 / float(self.fps)
-        self.sim_substeps = max(1, int(substeps) if substeps is not None
-                                else int(bundle.solver_params.get("substeps", 1)))
+        self.sim_substeps = max(
+            1, int(substeps) if substeps is not None else int(bundle.solver_params.get("substeps", 1))
+        )
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.sim_time = 0.0
 
@@ -132,19 +144,16 @@ class Example:
             def _axis_quat(axis, deg):
                 a = math.radians(deg) * 0.5
                 s, c = math.sin(a), math.cos(a)
-                return (s if axis == 0 else 0.0,
-                        s if axis == 1 else 0.0,
-                        s if axis == 2 else 0.0,
-                        c)
+                return (s if axis == 0 else 0.0, s if axis == 1 else 0.0, s if axis == 2 else 0.0, c)
 
             def _qmul(a, b):
                 ax, ay, az, aw = a
                 bx, by, bz, bw = b
                 return (
-                    aw*bx + ax*bw + ay*bz - az*by,
-                    aw*by - ax*bz + ay*bw + az*bx,
-                    aw*bz + ax*by - ay*bx + az*bw,
-                    aw*bw - ax*bx - ay*by - az*bz,
+                    aw * bx + ax * bw + ay * bz - az * by,
+                    aw * by - ax * bz + ay * bw + az * bx,
+                    aw * bz + ax * by - ay * bx + az * bw,
+                    aw * bw - ax * bx - ay * by - az * bz,
                 )
 
             qrot = (0.0, 0.0, 0.0, 1.0)
@@ -167,14 +176,13 @@ class Example:
                 if t != fixed_t and t != free_t:
                     continue
                 px, py, pz = float(xp[i, 0]), float(xp[i, 1]), float(xp[i, 2])
-                qx, qy, qz, qw = (float(xp[i, 3]), float(xp[i, 4]),
-                                  float(xp[i, 5]), float(xp[i, 6]))
+                qx, qy, qz, qw = (float(xp[i, 3]), float(xp[i, 4]), float(xp[i, 5]), float(xp[i, 6]))
                 # rotate translation by qrot
                 vx, vy, vz, vw = qrot
                 # quat-rotate point: q * (0,p) * conj(q)
-                tx = (1 - 2*(vy*vy + vz*vz))*px + 2*(vx*vy - vz*vw)*py + 2*(vx*vz + vy*vw)*pz
-                ty = 2*(vx*vy + vz*vw)*px + (1 - 2*(vx*vx + vz*vz))*py + 2*(vy*vz - vx*vw)*pz
-                tz = 2*(vx*vz - vy*vw)*px + 2*(vy*vz + vx*vw)*py + (1 - 2*(vx*vx + vy*vy))*pz
+                tx = (1 - 2 * (vy * vy + vz * vz)) * px + 2 * (vx * vy - vz * vw) * py + 2 * (vx * vz + vy * vw) * pz
+                ty = 2 * (vx * vy + vz * vw) * px + (1 - 2 * (vx * vx + vz * vz)) * py + 2 * (vy * vz - vx * vw) * pz
+                tz = 2 * (vx * vz - vy * vw) * px + 2 * (vy * vz + vx * vw) * py + (1 - 2 * (vx * vx + vy * vy)) * pz
                 nq = _qmul(qrot, (qx, qy, qz, qw))
                 xp[i, 0], xp[i, 1], xp[i, 2] = tx, ty, tz
                 xp[i, 3], xp[i, 4], xp[i, 5], xp[i, 6] = nq
@@ -182,17 +190,19 @@ class Example:
             if n_rot:
                 self.model.joint_X_p.assign(xp)
                 model_dirty = True
-                print(f"  rotate: x={rotate_x_deg} y={rotate_y_deg} z={rotate_z_deg} deg "
-                      f"(applied to {n_rot} world-anchor joint(s))")
+                print(
+                    f"  rotate: x={rotate_x_deg} y={rotate_y_deg} z={rotate_z_deg} deg "
+                    f"(applied to {n_rot} world-anchor joint(s))"
+                )
             else:
-                print(f"  rotate: no world-anchor joint found — rotation not applied")
+                print("  rotate: no world-anchor joint found — rotation not applied")
 
         # Rebuild solver if any baked-at-construction model attribute was
         # mutated (PD gains, etc.). fix_base is handled at builder time so
         # no anchor is needed here — the FREE root joint never exists.
         if model_dirty:
             self.solver = type(self.solver)(self.model)
-            print(f"  rebuilt solver after model edits")
+            print("  rebuilt solver after model edits")
 
         # Sync body_q with joint_q so non-MuJoCo solvers (XPBD/Featherstone) don't snap.
         newton.eval_fk(self.model, self.state_0.joint_q, self.state_0.joint_qd, self.state_0)
@@ -261,42 +271,66 @@ def main(argv=None) -> int:
     p.add_argument("--steps", type=int, default=600)
     p.add_argument("--substeps", type=int, default=None)
     p.add_argument("--device", default=None)
-    p.add_argument("--drive-joint", type=int, default=None,
-                   help="Joint index to drive (default: first revolute/prismatic). -1 disables.")
-    p.add_argument("--drive-amplitude", type=float, default=0.7,
-                   help="Sine amplitude in radians (revolute) or meters (prismatic). 0 disables.")
+    p.add_argument(
+        "--drive-joint",
+        type=int,
+        default=None,
+        help="Joint index to drive (default: first revolute/prismatic). -1 disables.",
+    )
+    p.add_argument(
+        "--drive-amplitude",
+        type=float,
+        default=0.7,
+        help="Sine amplitude in radians (revolute) or meters (prismatic). 0 disables.",
+    )
     p.add_argument("--drive-frequency", type=float, default=0.5, help="Sine frequency in Hz")
     p.add_argument("--joint-target-ke", type=float, default=None)
     p.add_argument("--joint-target-kd", type=float, default=None)
     p.add_argument("--rotate-x", type=float, default=0.0, help="Rotate asset around X (degrees)")
     p.add_argument("--rotate-y", type=float, default=0.0, help="Rotate asset around Y (degrees)")
     p.add_argument("--rotate-z", type=float, default=0.0, help="Rotate asset around Z (degrees)")
-    p.add_argument("--record-mp4", default=None,
-                   help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
-                        "and pipes frames to ffmpeg with a front-facing camera.")
-    p.add_argument("--mp4-fps", type=int, default=60,
-                   help="Output mp4 framerate (default 60)")
-    p.add_argument("--use-usd-viewer", action="store_true",
-                   help="Record sim to a USD file (textured playback for usdview).")
-    p.add_argument("--usd-out", type=str, default=None,
-                   help="Output USD path. Default: <input>.replay.usda next to the asset.")
-    p.add_argument("--usd-fps", type=int, default=60,
-                   help="Recording FPS for the USD viewer (default 60).")
-    p.add_argument("--usd-num-frames", type=int, default=None,
-                   help="Frame cap for the USD recording. Default: matches --steps.")
-    p.add_argument("--usd-up-axis", type=str, default="Z", choices=("X", "Y", "Z"),
-                   help="USD up axis for the recording (default Z, matches converter).")
-    p.add_argument("--usd-textured", action="store_true",
-                   help="After recording, also produce a textured replay USDA that\n"
-                        "references the source IsaacSim asset (with materials/textures)\n"
-                        "and overrides body transforms from the recording. Open this\n"
-                        "in usdview / Composer for true PBR playback.")
-    p.add_argument("--usd-source-asset", type=str, default=None,
-                   help="Path to the source IsaacSim_asset_*.usd to reference for\n"
-                        "--usd-textured. Default: auto-detect next to the converter input.")
+    p.add_argument(
+        "--record-mp4",
+        default=None,
+        help="Output mp4 path. Uses ViewerGL (headless unless --gui) "
+        "and pipes frames to ffmpeg with a front-facing camera.",
+    )
+    p.add_argument("--mp4-fps", type=int, default=60, help="Output mp4 framerate (default 60)")
+    p.add_argument(
+        "--use-usd-viewer", action="store_true", help="Record sim to a USD file (textured playback for usdview)."
+    )
+    p.add_argument(
+        "--usd-out", type=str, default=None, help="Output USD path. Default: <input>.replay.usda next to the asset."
+    )
+    p.add_argument("--usd-fps", type=int, default=60, help="Recording FPS for the USD viewer (default 60).")
+    p.add_argument(
+        "--usd-num-frames", type=int, default=None, help="Frame cap for the USD recording. Default: matches --steps."
+    )
+    p.add_argument(
+        "--usd-up-axis",
+        type=str,
+        default="Z",
+        choices=("X", "Y", "Z"),
+        help="USD up axis for the recording (default Z, matches converter).",
+    )
+    p.add_argument(
+        "--usd-textured",
+        action="store_true",
+        help="After recording, also produce a textured replay USDA that\n"
+        "references the source IsaacSim asset (with materials/textures)\n"
+        "and overrides body transforms from the recording. Open this\n"
+        "in usdview / Composer for true PBR playback.",
+    )
+    p.add_argument(
+        "--usd-source-asset",
+        type=str,
+        default=None,
+        help="Path to the source IsaacSim_asset_*.usd to reference for\n"
+        "--usd-textured. Default: auto-detect next to the converter input.",
+    )
     args = p.parse_args(argv)
 
-    from newton import viewer as v
+    from newton import viewer as v  # noqa: PLC0415 - defer feature initialization
 
     # Build the recorder if requested.
     rec_viewer = None
@@ -305,16 +339,14 @@ def main(argv=None) -> int:
         usd_out = args.usd_out
         if usd_out is None:
             base = args.usd
-            for sfx in (".newton.usda", ".newton.usdc", ".newton.usd",
-                        ".usda", ".usdc", ".usd"):
+            for sfx in (".newton.usda", ".newton.usdc", ".newton.usd", ".usda", ".usdc", ".usd"):
                 if base.endswith(sfx):
                     base = base[: -len(sfx)]
                     break
             usd_out = base + ".replay.usda"
         num_frames = args.usd_num_frames if args.usd_num_frames is not None else args.steps
         print(f"[viewer] ViewerUSD -> {usd_out}  fps={args.usd_fps}  num_frames={num_frames}  up={args.usd_up_axis}")
-        rec_viewer = v.ViewerUSD(usd_out, fps=args.usd_fps, up_axis=args.usd_up_axis,
-                                 num_frames=num_frames)
+        rec_viewer = v.ViewerUSD(usd_out, fps=args.usd_fps, up_axis=args.usd_up_axis, num_frames=num_frames)
 
     # Build the live viewer. With --record-mp4 we need a GL framebuffer
     # (headless unless --gui); otherwise GL window for --gui, else Null.
@@ -336,8 +368,10 @@ def main(argv=None) -> int:
         viewer = live_viewer
 
     ex = Example(
-        viewer, args.usd,
-        substeps=args.substeps, device=args.device,
+        viewer,
+        args.usd,
+        substeps=args.substeps,
+        device=args.device,
         drive_joint=args.drive_joint,
         drive_amplitude=args.drive_amplitude,
         drive_frequency=args.drive_frequency,
@@ -362,7 +396,6 @@ def main(argv=None) -> int:
     # ---- Front-facing camera for mp4 recording (ViewerGL only) ----
     cam_target = live_viewer if isinstance(live_viewer, v.ViewerGL) else None
     if args.record_mp4 and cam_target is not None and hasattr(cam_target, "set_camera"):
-        import numpy as _np
         bq = ex.state_0.body_q.numpy()[:, 0:3]
         cx = float(bq[:, 0].mean())
         cy = float(bq[:, 1].mean())
@@ -378,19 +411,37 @@ def main(argv=None) -> int:
     # ---- mp4 recorder (ffmpeg subprocess) ----
     ffmpeg_proc = None
     if args.record_mp4:
-        import subprocess, shutil
+        import shutil  # noqa: PLC0415 - defer feature initialization
+        import subprocess  # noqa: PLC0415 - defer feature initialization
+
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
         ex.render()
         frame = cam_target.get_frame() if cam_target is not None else live_viewer.get_frame()
         h, w, _ = frame.shape
         cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "rgb24",
-            "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
-            "-i", "-",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-crf", "20", "-preset", "fast",
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{w}x{h}",
+            "-r",
+            str(args.mp4_fps),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "20",
+            "-preset",
+            "fast",
             args.record_mp4,
         ]
         ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
@@ -438,7 +489,6 @@ def main(argv=None) -> int:
             )
             print(f"[textured] {tex_out}")
         except Exception as e:
-            import traceback
             traceback.print_exc()
             print(f"[textured] FAILED: {e}")
 
@@ -498,14 +548,18 @@ class _FanoutViewer:
         # GL exposes attribute; USD exposes method.
         live_ir = getattr(self._live, "is_running", True)
         if callable(live_ir):
-            try: live_ok = bool(live_ir())
-            except Exception: live_ok = True
+            try:
+                live_ok = bool(live_ir())
+            except Exception:
+                live_ok = True
         else:
             live_ok = bool(live_ir)
         rec_ir = getattr(self._rec, "is_running", True)
         if callable(rec_ir):
-            try: rec_ok = bool(rec_ir())
-            except Exception: rec_ok = True
+            try:
+                rec_ok = bool(rec_ir())
+            except Exception:
+                rec_ok = True
         else:
             rec_ok = bool(rec_ir)
         return live_ok and rec_ok
@@ -514,9 +568,11 @@ class _FanoutViewer:
         live_attr = getattr(self._live, name, None)
         rec_attr = getattr(self._rec, name, None)
         if callable(live_attr) and callable(rec_attr):
+
             def _both(*a, **kw):
                 self._live and live_attr(*a, **kw)
                 self._rec and rec_attr(*a, **kw)
+
             return _both
         if callable(live_attr):
             return live_attr
@@ -529,9 +585,9 @@ class _FanoutViewer:
         raise AttributeError(name)
 
 
-def _write_textured_replay(converter_input: str, recording_path: str,
-                           source_asset: str | None,
-                           fps: int, up_axis: str, bundle) -> str:
+def _write_textured_replay(
+    converter_input: str, recording_path: str, source_asset: str | None, fps: int, up_axis: str, bundle
+) -> str:
     """Produce a textured replay USDA next to the recording.
 
     Mechanic: create a new layer that references the source IsaacSim_asset_*.usd
@@ -540,8 +596,8 @@ def _write_textured_replay(converter_input: str, recording_path: str,
     transforms recorded by ViewerUSD on /root/model/shapes/shape_<i>/instance_0.
     Open the resulting file in usdview / Composer for textured playback.
     """
-    import os as _os
-    from pxr import Usd, UsdGeom, Gf
+
+    from pxr import Gf, Usd, UsdGeom  # noqa: PLC0415 - defer feature initialization
 
     # Resolve source asset path.
     if source_asset is None:
@@ -565,21 +621,16 @@ def _write_textured_replay(converter_input: str, recording_path: str,
     # the old attribute name for forward/backward compatibility.
     model = bundle.model
     shape_body = model.shape_body.numpy()
-    body_keys = list(
-        getattr(model, "body_label", None)
-        or getattr(model, "body_key", None)
-        or []
-    )
+    body_keys = list(getattr(model, "body_label", None) or getattr(model, "body_key", None) or [])
     if not body_keys:
-        raise RuntimeError(
-            "model has no body_label/body_key array; cannot map shapes back to source prims."
-        )
+        raise RuntimeError("model has no body_label/body_key array; cannot map shapes back to source prims.")
 
     # Build the output stage: defaultPrim is /World referenced from the source.
     out_path = _os.path.splitext(recording_path)[0] + ".textured.usda"
     out_stage = Usd.Stage.CreateNew(out_path)
-    UsdGeom.SetStageUpAxis(out_stage, {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y,
-                                       "Z": UsdGeom.Tokens.z}[up_axis.upper()])
+    UsdGeom.SetStageUpAxis(
+        out_stage, {"X": UsdGeom.Tokens.x, "Y": UsdGeom.Tokens.y, "Z": UsdGeom.Tokens.z}[up_axis.upper()]
+    )
     UsdGeom.SetStageMetersPerUnit(out_stage, 1.0)
     out_stage.SetFramesPerSecond(float(fps))
     out_stage.SetTimeCodesPerSecond(float(fps))
@@ -630,8 +681,7 @@ def _write_textured_replay(converter_input: str, recording_path: str,
         for ts in r_samples:
             q = rec_r.Get(ts)
             if q is not None:
-                op_r.Set(Gf.Quatf(q.GetReal(), q.GetImaginary()[0],
-                                  q.GetImaginary()[1], q.GetImaginary()[2]), ts)
+                op_r.Set(Gf.Quatf(q.GetReal(), q.GetImaginary()[0], q.GetImaginary()[1], q.GetImaginary()[2]), ts)
         n_authored += 1
 
     out_stage.GetRootLayer().Save()

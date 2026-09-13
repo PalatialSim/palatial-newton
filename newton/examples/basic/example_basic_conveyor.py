@@ -182,6 +182,7 @@ class Example:
         )
 
         belt_cfg = newton.ModelBuilder.ShapeConfig(
+            density=0.0,  # mass and inertia are authored explicitly on the belt body below
             mu=1.2,
             ke=1.0e5,  # vbd only
             kd=0.0,  # vbd only
@@ -189,14 +190,14 @@ class Example:
         )
         rail_cfg = newton.ModelBuilder.ShapeConfig(
             mu=0.8,
-            ke=1.0e5,  # vbd only
+            ke=1.0e7,  # vbd only
             kd=0.0,  # vbd only
             collision_group=RAIL_COLLISION_GROUP,
         )
         bag_cfg = newton.ModelBuilder.ShapeConfig(
             mu=1.0,
-            ke=1.0e5,  # vbd only
-            kd=0.0,  # vbd only
+            ke=1.0e7,  # vbd only
+            kd=1.0e4,  # vbd only
             restitution=0.0,
         )
 
@@ -234,8 +235,24 @@ class Example:
             metallic=0.9,
         )
 
+        # Annular-ring inertia about the belt's COM (ring axis along Z).
+        belt_mass = 15.0
+        belt_radii_sum_sq = belt_inner_radius**2 + belt_outer_radius**2
+        belt_i_transverse = belt_mass / 12.0 * (3.0 * belt_radii_sum_sq + (2.0 * BELT_HALF_THICKNESS) ** 2)
+        belt_i_axial = 0.5 * belt_mass * belt_radii_sum_sq
         self.belt_body = builder.add_link(
-            mass=15.0,
+            mass=belt_mass,
+            inertia=wp.mat33(
+                belt_i_transverse,
+                0.0,
+                0.0,
+                0.0,
+                belt_i_transverse,
+                0.0,
+                0.0,
+                0.0,
+                belt_i_axial,
+            ),
             is_kinematic=True,
             label="conveyor_belt",
         )
@@ -327,14 +344,20 @@ class Example:
 
         solver_type = getattr(args, "solver", "xpbd") if args is not None else "xpbd"
         if solver_type == "vbd":
-            self.solver = newton.solvers.SolverVBD(self.model, iterations=5, rigid_body_contact_buffer_size=512)
+            self.solver = newton.solvers.SolverVBD(
+                self.model,
+                iterations=1,
+                rigid_compliant_alm=True,
+                rigid_body_contact_buffer_size=512,
+            )
         else:
             self.solver = newton.solvers.SolverXPBD(self.model)
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
         self.control = self.model.control()
-        self.contacts = self.model.contacts()
+        self.collision_pipeline = newton.CollisionPipeline(self.model)
+        self.contacts = self.collision_pipeline.contacts()
 
         # Ensure body state is initialized from model joint buffers.
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
@@ -350,12 +373,9 @@ class Example:
         self.capture()
 
     def capture(self):
-        if wp.get_device().is_cuda:
-            with wp.ScopedCapture() as capture:
-                self.simulate()
-            self.graph = capture.graph
-        else:
-            self.graph = None
+        with wp.ScopedCapture() as capture:
+            self.simulate()
+        self.graph = capture.graph
 
     def simulate(self):
         for _ in range(self.sim_substeps):
@@ -384,7 +404,7 @@ class Example:
                 body_flag_filter=newton.BodyFlags.KINEMATIC,
             )
 
-            self.model.collide(self.state_0, self.contacts)
+            self.collision_pipeline.collide(self.state_0, self.contacts)
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
 

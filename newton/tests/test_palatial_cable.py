@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-import newton  # noqa: F401
 import numpy as np
 import warp as wp
 
+import newton
+import newton.viewer as viewer
 from newton.examples.palatial.cable_presets import (
     get_anisotropic_cable_preset,
     list_anisotropic_cable_presets,
 )
-import newton.viewer as viewer
 from newton.examples.palatial.example_palatial_cable import Example, _resolve_input_usd
 from newton.examples.palatial.generate_palatial_cable_usd import author_cable_usd
 from newton.palatial import (

@@ -6,15 +6,19 @@
 from __future__ import annotations
 
 from math import isfinite
+from typing import TYPE_CHECKING
 
 import warp as wp
-from pxr import Gf
+
+if TYPE_CHECKING:
+    from pxr import Gf
 
 from .types import ExtractedPrim, Point3
 
 
 def transform_point(matrix: Gf.Matrix4d, point: object) -> Point3:
     """Transform a point-like value with a USD matrix."""
+    from pxr import Gf
 
     transformed = matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2])))
     return (float(transformed[0]), float(transformed[1]), float(transformed[2]))

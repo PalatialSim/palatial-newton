@@ -4,16 +4,19 @@ Authoring lives in the converter package (palatial-sim-gen-isaac). This
 module is read-only: it locates the cloth mesh and pulls back density /
 drop-height markers so the generic loader can route to add_cloth_mesh.
 """
+
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    pass
 
 # `import newton` registers the bundled USD plugins via
 # newton/_src/usd/__init__.py. Must precede any pxr.Usd usage.
 import newton  # noqa: F401
-
-from pxr import Usd, UsdGeom
-
-import numpy as np
-
 
 # Legacy marker token written by older converters under `newton:bodyType`.
 CLOTH_BODY_TOKEN = "cloth"
@@ -21,6 +24,8 @@ CLOTH_BODY_TOKEN = "cloth"
 
 def find_cloth_prim_path(usd_path: str) -> str | None:
     """Return the prim path of the first mesh tagged newton:bodyType=cloth."""
+    from pxr import Usd
+
     stage = Usd.Stage.Open(usd_path)
     for prim in stage.Traverse():
         attr = prim.GetAttribute("newton:bodyType")
@@ -31,14 +36,18 @@ def find_cloth_prim_path(usd_path: str) -> str | None:
 
 def read_cloth_params(usd_path: str) -> dict:
     """Read density / drop_height from the converted USD if present."""
+    from pxr import Usd
+
     out = {}
     stage = Usd.Stage.Open(usd_path)
     for prim in stage.Traverse():
         if prim.GetAttribute("newton:bodyType") and prim.GetAttribute("newton:bodyType").Get() == CLOTH_BODY_TOKEN:
             d = prim.GetAttribute("newton:cloth:density")
             h = prim.GetAttribute("newton:cloth:dropHeight")
-            if d and d.HasAuthoredValue(): out["density"] = float(d.Get())
-            if h and h.HasAuthoredValue(): out["drop_height"] = float(h.Get())
+            if d and d.HasAuthoredValue():
+                out["density"] = float(d.Get())
+            if h and h.HasAuthoredValue():
+                out["drop_height"] = float(h.Get())
             break
     return out
 
@@ -51,6 +60,8 @@ def _extract_first_mesh(usd_path: str):
       * recentred so XY is at the origin and the lowest point sits at z=0
         (so the loader's drop_height is the absolute spawn height).
     Triangulates fans for non-triangle faces."""
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         raise RuntimeError(f"Cannot open USD: {usd_path}")

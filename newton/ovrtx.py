@@ -229,7 +229,7 @@ class OVRTXConfig:
 def ovrtx_available(*, verbose: bool = False) -> bool:
     """Return whether the optional native OVRTX runtime imports successfully."""
     try:
-        import ovrtx  # noqa: F401, PLC0415
+        import ovrtx  # noqa: F401
         import ovstage  # noqa: F401, PLC0415
     except ImportError as error:
         if verbose:
@@ -527,7 +527,7 @@ class OVRTXStage:
             raise RuntimeError("OVRTX stage sessions cannot be reopened after close")
 
         try:
-            import ovrtx  # noqa: PLC0415 - optional GPU runtime
+            import ovrtx
             import ovstage  # noqa: PLC0415 - optional GPU runtime
         except ImportError as error:
             raise ImportError(

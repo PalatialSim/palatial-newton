@@ -18,29 +18,29 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import sys
 
-# Newton/Warp must be imported before pxr in the same process.
-import warp as wp
 import numpy as np
 
-import newton
-from newton import ParticleFlags
+# Newton/Warp must be imported before pxr in the same process.
+import warp as wp
 
+from newton import ParticleFlags
 from newton.palatial import load
 
 
 @wp.kernel
 def initialize_rotation(
-    vertex_indices_to_rot: wp.array(dtype=wp.int32),
-    pos: wp.array(dtype=wp.vec3),
-    rot_centers: wp.array(dtype=wp.vec3),
-    rot_axes: wp.array(dtype=wp.vec3),
-    t: wp.array(dtype=float),
+    vertex_indices_to_rot: wp.array[wp.int32],
+    pos: wp.array[wp.vec3],
+    rot_centers: wp.array[wp.vec3],
+    rot_axes: wp.array[wp.vec3],
+    t: wp.array[float],
     # output
-    roots: wp.array(dtype=wp.vec3),
-    roots_to_ps: wp.array(dtype=wp.vec3),
+    roots: wp.array[wp.vec3],
+    roots_to_ps: wp.array[wp.vec3],
 ):
     tid = wp.tid()
     v_index = vertex_indices_to_rot[tid]
@@ -62,17 +62,17 @@ def initialize_rotation(
 
 @wp.kernel
 def apply_rotation(
-    vertex_indices_to_rot: wp.array(dtype=wp.int32),
-    rot_axes: wp.array(dtype=wp.vec3),
-    roots: wp.array(dtype=wp.vec3),
-    roots_to_ps: wp.array(dtype=wp.vec3),
-    t: wp.array(dtype=float),
+    vertex_indices_to_rot: wp.array[wp.int32],
+    rot_axes: wp.array[wp.vec3],
+    roots: wp.array[wp.vec3],
+    roots_to_ps: wp.array[wp.vec3],
+    t: wp.array[float],
     angular_velocity: float,
     dt: float,
     end_time: float,
     # output
-    pos_0: wp.array(dtype=wp.vec3),
-    pos_1: wp.array(dtype=wp.vec3),
+    pos_0: wp.array[wp.vec3],
+    pos_1: wp.array[wp.vec3],
 ):
     cur_t = t[0]
     if cur_t > end_time:
@@ -92,9 +92,15 @@ def apply_rotation(
     one_c = 1.0 - c
 
     R = wp.mat33(
-        c + ux * ux * one_c,        ux * uy * one_c - uz * s,   ux * uz * one_c + uy * s,
-        uy * ux * one_c + uz * s,   c + uy * uy * one_c,        uy * uz * one_c - ux * s,
-        uz * ux * one_c - uy * s,   uz * uy * one_c + ux * s,   c + uz * uz * one_c,
+        c + ux * ux * one_c,
+        ux * uy * one_c - uz * s,
+        ux * uz * one_c + uy * s,
+        uy * ux * one_c + uz * s,
+        c + uy * uy * one_c,
+        uy * uz * one_c - ux * s,
+        uz * ux * one_c - uy * s,
+        uz * uy * one_c + ux * s,
+        c + uz * uz * one_c,
     )
 
     root = roots[tid]
@@ -108,8 +114,7 @@ def apply_rotation(
         t[0] = cur_t + dt
 
 
-def _select_edge_indices(particle_q_np: np.ndarray, axis: int,
-                         edge_thickness: float) -> tuple[np.ndarray, np.ndarray]:
+def _select_edge_indices(particle_q_np: np.ndarray, axis: int, edge_thickness: float) -> tuple[np.ndarray, np.ndarray]:
     """Return (low_side_idx, high_side_idx) — particles within `edge_thickness`
     of the bounding-box min/max along `axis`."""
     coords = particle_q_np[:, axis]
@@ -120,34 +125,37 @@ def _select_edge_indices(particle_q_np: np.ndarray, axis: int,
 
 
 class Example:
-    def __init__(self, viewer, usd_path: str, *,
-                 substeps: int | None = None,
-                 twist_axis: int = 1,
-                 angular_velocity: float = math.pi / 3,
-                 end_time: float = 10.0,
-                 edge_thickness: float = 0.02,
-                 disable_gravity: bool = True,
-                 device: str | None = None,
-                 drop_height: float = 0.0,
-                 cloth_particle_radius: float = 0.008,
-                 soft_contact_ke: float = 100.0,
-                 soft_contact_kd: float = 2e-3,
-                 soft_contact_mu: float = 1.0,
-                 soft_contact_max: int = 1_000_000,
-                 cloth_body_contact_margin: float = 0.01,
-                 bending_ke: float = 1e-4,
-                 bending_kd: float = 1e-3,
-                 vbd_particle_edge_contact_buffer_size: int = 64,
-                 vbd_particle_collision_detection_interval: int = -1,
-                 vbd_rigid_contact_k_start: float | None = None,
-                 drop_frames: int = 0):
+    def __init__(
+        self,
+        viewer,
+        usd_path: str,
+        *,
+        substeps: int | None = None,
+        twist_axis: int = 1,
+        angular_velocity: float = math.pi / 3,
+        end_time: float = 10.0,
+        edge_thickness: float = 0.02,
+        disable_gravity: bool = True,
+        device: str | None = None,
+        drop_height: float = 0.0,
+        cloth_particle_radius: float = 0.008,
+        soft_contact_ke: float = 100.0,
+        soft_contact_kd: float = 2e-3,
+        soft_contact_mu: float = 1.0,
+        soft_contact_max: int = 1_000_000,
+        cloth_body_contact_margin: float = 0.01,
+        bending_ke: float = 1e-4,
+        bending_kd: float = 1e-3,
+        vbd_particle_edge_contact_buffer_size: int = 64,
+        vbd_particle_collision_detection_interval: int = -1,
+        vbd_rigid_contact_k_start: float | None = None,
+        drop_frames: int = 0,
+    ):
         self.viewer = viewer
 
         bundle = load(usd_path, device=device)
         if bundle.body_type != "cloth":
-            raise RuntimeError(
-                f"example_load_twist needs a cloth USDA, got body_type={bundle.body_type!r}"
-            )
+            raise RuntimeError(f"example_load_twist needs a cloth USDA, got body_type={bundle.body_type!r}")
         self.bundle = bundle
         self.model = bundle.model
         self.solver = bundle.solver
@@ -162,16 +170,13 @@ class Example:
             self._gravity_original = g.numpy().copy()
         else:
             self._gravity_original = None
-        self._gravity_zeros = (
-            np.zeros_like(self._gravity_original)
-            if self._gravity_original is not None else None
-        )
+        self._gravity_zeros = np.zeros_like(self._gravity_original) if self._gravity_original is not None else None
         self._disable_gravity_after_drop = bool(disable_gravity)
 
         # Twist phase starts immediately if no drop is requested.
         self.drop_frames = int(max(0, drop_frames))
         self.frame_idx = 0
-        self.twisting = (self.drop_frames == 0)
+        self.twisting = self.drop_frames == 0
 
         # Apply initial gravity. During drop phase gravity must be ON regardless
         # of --gravity (otherwise nothing falls).
@@ -196,17 +201,14 @@ class Example:
         self.model.bending_kd = bending_kd
         n_p = int(self.model.particle_count)
         if n_p > 0:
-            self.model.particle_radius.assign(
-                np.full(n_p, cloth_particle_radius, dtype=np.float32)
-            )
+            self.model.particle_radius.assign(np.full(n_p, cloth_particle_radius, dtype=np.float32))
 
         # VBD-only knobs (no-op for other solvers).
         if type(self.solver).__name__ == "SolverVBD":
             self.solver.particle_edge_contact_buffer_size = vbd_particle_edge_contact_buffer_size
             self.solver.particle_collision_detection_interval = vbd_particle_collision_detection_interval
             self.solver.rigid_contact_k_start = (
-                soft_contact_ke if vbd_rigid_contact_k_start is None
-                else vbd_rigid_contact_k_start
+                soft_contact_ke if vbd_rigid_contact_k_start is None else vbd_rigid_contact_k_start
             )
 
         # Frame timing from the USDA.
@@ -230,8 +232,7 @@ class Example:
         low_idx, high_idx = _select_edge_indices(pq, twist_axis, edge_thickness)
         if len(low_idx) == 0 or len(high_idx) == 0:
             raise RuntimeError(
-                f"Empty edge selection (axis={twist_axis}, thickness={edge_thickness}). "
-                f"Try a larger --edge-thickness."
+                f"Empty edge selection (axis={twist_axis}, thickness={edge_thickness}). Try a larger --edge-thickness."
             )
 
         rot_indices = np.concatenate([low_idx, high_idx]).astype(np.int32)
@@ -241,7 +242,7 @@ class Example:
         axis_vec[twist_axis] = 1.0
         rot_axes = np.empty((rot_indices.shape[0], 3), dtype=np.float32)
         rot_axes[: len(low_idx)] = -axis_vec
-        rot_axes[len(low_idx):] = axis_vec
+        rot_axes[len(low_idx) :] = axis_vec
 
         # Rotation centers: per-side centroid projected onto the twist axis
         # passing through the cloth midpoint along the perpendicular plane.
@@ -250,7 +251,7 @@ class Example:
         high_center = pq[high_idx].mean(axis=0)
         rot_centers = np.empty((rot_indices.shape[0], 3), dtype=np.float32)
         rot_centers[: len(low_idx)] = low_center
-        rot_centers[len(low_idx):] = high_center
+        rot_centers[len(low_idx) :] = high_center
 
         # Deactivate the pinned particles (kernel writes positions directly).
         flags = self.model.particle_flags.numpy()
@@ -268,8 +269,7 @@ class Example:
         wp.launch(
             kernel=initialize_rotation,
             dim=self.rot_point_indices.shape[0],
-            inputs=[self.rot_point_indices, self.state_0.particle_q,
-                    self.rot_centers, self.rot_axes, self.t],
+            inputs=[self.rot_point_indices, self.state_0.particle_q, self.rot_centers, self.rot_axes, self.t],
             outputs=[self.roots, self.roots_to_ps],
         )
 
@@ -303,8 +303,7 @@ class Example:
         wp.launch(
             kernel=initialize_rotation,
             dim=self.rot_point_indices.shape[0],
-            inputs=[self.rot_point_indices, self.state_0.particle_q,
-                    self.rot_centers, self.rot_axes, self.t],
+            inputs=[self.rot_point_indices, self.state_0.particle_q, self.rot_centers, self.rot_axes, self.t],
             outputs=[self.roots, self.roots_to_ps],
         )
         if self._disable_gravity_after_drop:
@@ -325,14 +324,20 @@ class Example:
                 wp.launch(
                     kernel=apply_rotation,
                     dim=self.rot_point_indices.shape[0],
-                    inputs=[self.rot_point_indices, self.rot_axes,
-                            self.roots, self.roots_to_ps, self.t,
-                            self.angular_velocity, self.sim_dt, self.end_time],
+                    inputs=[
+                        self.rot_point_indices,
+                        self.rot_axes,
+                        self.roots,
+                        self.roots_to_ps,
+                        self.t,
+                        self.angular_velocity,
+                        self.sim_dt,
+                        self.end_time,
+                    ],
                     outputs=[self.state_0.particle_q, self.state_1.particle_q],
                 )
 
-            self.solver.step(self.state_0, self.state_1, self.control,
-                             self.contacts, self.sim_dt)
+            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def step(self):
@@ -352,46 +357,61 @@ class Example:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="example_load_twist")
     p.add_argument("usd", help="Path to a converted *.newton.usda (cloth body type)")
-    p.add_argument("--steps", type=int, default=600,
-                   help="Frames to simulate when not in GUI mode")
-    p.add_argument("--substeps", type=int, default=None,
-                   help="Override newton:solver:substeps from the USDA")
-    p.add_argument("--gui", action="store_true",
-                   help="Open ViewerGL and run until the window is closed")
-    p.add_argument("--device", default=None,
-                   help="Warp device, e.g. 'cuda:0' or 'cpu'")
-    p.add_argument("--twist-axis", choices=["x", "y", "z"], default="y",
-                   help="World axis along which to pick the two opposite edges")
-    p.add_argument("--angular-velocity", type=float, default=math.pi / 3,
-                   help="Twist angular velocity (rad/s)")
-    p.add_argument("--end-time", type=float, default=10.0,
-                   help="Stop twisting after this many seconds (cloth keeps relaxing)")
-    p.add_argument("--edge-thickness", type=float, default=0.02,
-                   help="Thickness (m) of the bounding-box slab used to pick each edge")
-    p.add_argument("--gravity", action="store_true",
-                   help="Keep gravity on during twist phase (default off, like example_cloth_twist). "
-                        "Gravity is always ON during the drop phase.")
-    p.add_argument("--drop-height", type=float, default=0.0,
-                   help="Lift particles by this many meters in z before sim starts")
-    p.add_argument("--drop-frames", type=int, default=0,
-                   help="Frames to drop under gravity (with edges pinned) before twisting. "
-                        "0 = start twisting immediately (default).")
-    p.add_argument("--record-mp4", default=None,
-                   help="Path to output .mp4. Uses ViewerGL (headless unless --gui) "
-                        "and pipes frames to ffmpeg.")
-    p.add_argument("--mp4-fps", type=int, default=60,
-                   help="Output mp4 framerate (default 60)")
-    p.add_argument("--top-view", action="store_true",
-                   help="Place camera straight above the cloth looking down")
+    p.add_argument("--steps", type=int, default=600, help="Frames to simulate when not in GUI mode")
+    p.add_argument("--substeps", type=int, default=None, help="Override newton:solver:substeps from the USDA")
+    p.add_argument("--gui", action="store_true", help="Open ViewerGL and run until the window is closed")
+    p.add_argument("--device", default=None, help="Warp device, e.g. 'cuda:0' or 'cpu'")
+    p.add_argument(
+        "--twist-axis",
+        choices=["x", "y", "z"],
+        default="y",
+        help="World axis along which to pick the two opposite edges",
+    )
+    p.add_argument("--angular-velocity", type=float, default=math.pi / 3, help="Twist angular velocity (rad/s)")
+    p.add_argument(
+        "--end-time", type=float, default=10.0, help="Stop twisting after this many seconds (cloth keeps relaxing)"
+    )
+    p.add_argument(
+        "--edge-thickness",
+        type=float,
+        default=0.02,
+        help="Thickness (m) of the bounding-box slab used to pick each edge",
+    )
+    p.add_argument(
+        "--gravity",
+        action="store_true",
+        help="Keep gravity on during twist phase (default off, like example_cloth_twist). "
+        "Gravity is always ON during the drop phase.",
+    )
+    p.add_argument(
+        "--drop-height", type=float, default=0.0, help="Lift particles by this many meters in z before sim starts"
+    )
+    p.add_argument(
+        "--drop-frames",
+        type=int,
+        default=0,
+        help="Frames to drop under gravity (with edges pinned) before twisting. "
+        "0 = start twisting immediately (default).",
+    )
+    p.add_argument(
+        "--record-mp4",
+        default=None,
+        help="Path to output .mp4. Uses ViewerGL (headless unless --gui) and pipes frames to ffmpeg.",
+    )
+    p.add_argument("--mp4-fps", type=int, default=60, help="Output mp4 framerate (default 60)")
+    p.add_argument("--top-view", action="store_true", help="Place camera straight above the cloth looking down")
 
     # Optional physics JSON: overrides --cloth-particle-radius from
     # solver.vbd_particle_self_contact_radius and --bending-ke from
     # cloth.bend_stiffness when present.
-    p.add_argument("--physics-json", default=None,
-                   help="Path to a physics JSON. If given, "
-                        "solver.vbd_particle_self_contact_radius overrides "
-                        "--cloth-particle-radius and cloth.bend_stiffness "
-                        "overrides --bending-ke.")
+    p.add_argument(
+        "--physics-json",
+        default=None,
+        help="Path to a physics JSON. If given, "
+        "solver.vbd_particle_self_contact_radius overrides "
+        "--cloth-particle-radius and cloth.bend_stiffness "
+        "overrides --bending-ke.",
+    )
 
     # Cloth tuning (same defaults as example_load_converted).
     p.add_argument("--cloth-particle-radius", type=float, default=0.008)
@@ -406,14 +426,14 @@ def main(argv=None) -> int:
     # VBD-only knobs.
     p.add_argument("--vbd-particle-edge-contact-buffer-size", type=int, default=64)
     p.add_argument("--vbd-particle-collision-detection-interval", type=int, default=-1)
-    p.add_argument("--vbd-rigid-contact-k-start", type=float, default=None,
-                   help="Defaults to --soft-contact-ke when omitted")
+    p.add_argument(
+        "--vbd-rigid-contact-k-start", type=float, default=None, help="Defaults to --soft-contact-ke when omitted"
+    )
 
     args = p.parse_args(argv)
 
     # Apply physics-json overrides for cloth-particle-radius and bending-ke.
     if args.physics_json:
-        import json
         with open(args.physics_json) as _f:
             _phys = json.load(_f)
         _r = _phys.get("solver", {}).get("vbd_particle_self_contact_radius")
@@ -430,7 +450,8 @@ def main(argv=None) -> int:
 
     axis = {"x": 0, "y": 1, "z": 2}[args.twist_axis]
 
-    from newton import viewer as v
+    from newton import viewer as v  # noqa: PLC0415 - defer feature initialization
+
     if args.record_mp4:
         # ViewerGL renders to a framebuffer we can read back via get_frame().
         viewer = v.ViewerGL(headless=not args.gui)
@@ -440,7 +461,8 @@ def main(argv=None) -> int:
         viewer = v.ViewerNull()
 
     ex = Example(
-        viewer, args.usd,
+        viewer,
+        args.usd,
         substeps=args.substeps,
         twist_axis=axis,
         angular_velocity=args.angular_velocity,
@@ -478,7 +500,9 @@ def main(argv=None) -> int:
     # ---- mp4 recorder (ffmpeg subprocess) ----
     ffmpeg_proc = None
     if args.record_mp4:
-        import subprocess, shutil
+        import shutil  # noqa: PLC0415 - defer feature initialization
+        import subprocess  # noqa: PLC0415 - defer feature initialization
+
         if shutil.which("ffmpeg") is None:
             raise RuntimeError("ffmpeg not on PATH; cannot record mp4")
         # Render one frame so the framebuffer size is known.
@@ -486,12 +510,28 @@ def main(argv=None) -> int:
         frame = ex.viewer.get_frame()
         h, w, _ = frame.shape
         cmd = [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "rawvideo", "-pix_fmt", "rgb24",
-            "-s", f"{w}x{h}", "-r", str(args.mp4_fps),
-            "-i", "-",
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-crf", "20", "-preset", "fast",
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-s",
+            f"{w}x{h}",
+            "-r",
+            str(args.mp4_fps),
+            "-i",
+            "-",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-crf",
+            "20",
+            "-preset",
+            "fast",
             args.record_mp4,
         ]
         ffmpeg_proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)

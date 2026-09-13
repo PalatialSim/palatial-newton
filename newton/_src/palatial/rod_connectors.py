@@ -5,18 +5,20 @@
 
 from __future__ import annotations
 
+import math
+import re
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+import warp as wp
+
+if TYPE_CHECKING:
+    from pxr import Usd, UsdGeom
+
 # `import newton` registers the bundled USD plugins via
 # newton/_src/usd/__init__.py. Must precede any pxr.Usd usage.
 import newton
-
-from dataclasses import dataclass
-import math
-import re
-from typing import Any
-
-import numpy as np
-from pxr import Usd, UsdGeom
-import warp as wp
 
 from .usd_utils import (
     has_api_schema,
@@ -209,6 +211,8 @@ def _read_rigid_body_points(
     prefer_colliders: bool,
 ) -> np.ndarray:
     """Read representative rigid-body points in Newton world coordinates."""
+    from pxr import UsdGeom
+
     point_sets: list[np.ndarray] = []
 
     if prefer_colliders:
@@ -514,7 +518,7 @@ def filter_body_self_collisions(builder: Any, body_indices: list[int]) -> None:
         shape_indices.extend(int(shape_idx) for shape_idx in builder.body_shapes.get(int(body_idx), ()))
 
     for i, shape_a in enumerate(shape_indices):
-        for shape_b in shape_indices[i + 1:]:
+        for shape_b in shape_indices[i + 1 :]:
             builder.add_shape_collision_filter_pair(shape_a, shape_b)
 
 
@@ -551,12 +555,7 @@ def _shape_local_points(builder: Any, shape_idx: int) -> np.ndarray:
     else:
         hx, hy, hz = float(scale[0]), float(scale[1]), float(scale[2])
         scaled = np.asarray(
-            [
-                (sx * hx, sy * hy, sz * hz)
-                for sx in (-1.0, 1.0)
-                for sy in (-1.0, 1.0)
-                for sz in (-1.0, 1.0)
-            ],
+            [(sx * hx, sy * hy, sz * hz) for sx in (-1.0, 1.0) for sy in (-1.0, 1.0) for sz in (-1.0, 1.0)],
             dtype=np.float64,
         )
 
@@ -641,8 +640,7 @@ def hide_oversized_connector_visuals(builder: Any, body_indices: list[int]) -> N
         collider_shape_indices = [
             shape_idx
             for shape_idx in shape_indices
-            if "/Colliders" in str(builder.shape_label[shape_idx])
-            or "/Collider" in str(builder.shape_label[shape_idx])
+            if "/Colliders" in str(builder.shape_label[shape_idx]) or "/Collider" in str(builder.shape_label[shape_idx])
         ]
         if not collider_shape_indices:
             continue
@@ -686,6 +684,8 @@ def plan_rod_rigid_imports(
     quaternions: list[wp.quat],
 ) -> tuple[list[_RodAttachmentComponent], set[str], set[str], set[str], set[str]]:
     """Split rigid USD content into rod-attached connector components and leftovers."""
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return [], set(), set(), set(), set()
@@ -753,9 +753,7 @@ def plan_rod_rigid_imports(
             if points_world.size > 0:
                 component_points.append(points_world)
         merged_points = (
-            np.concatenate(component_points, axis=0)
-            if component_points
-            else np.empty((0, 3), dtype=np.float64)
+            np.concatenate(component_points, axis=0) if component_points else np.empty((0, 3), dtype=np.float64)
         )
         root_prim = stage.GetPrimAtPath(root_path)
         root_world = _rigid_transform_to_newton(
@@ -863,8 +861,7 @@ def attach_rod_connector_component(
         (
             joint_idx
             for joint_idx in new_joint_indices
-            if int(builder.joint_child[joint_idx]) == int(root_body)
-            and int(builder.joint_parent[joint_idx]) == -1
+            if int(builder.joint_child[joint_idx]) == int(root_body) and int(builder.joint_parent[joint_idx]) == -1
         ),
         None,
     )

@@ -491,14 +491,14 @@ builder.add_rod(
     radius=radius,
     stretch_stiffness=...,
     stretch_damping=...,
-    bend_stiffness=...,          # existing isotropic arg remains supported
-    bend_damping=...,            # existing isotropic arg remains supported
-    bend_y_stiffness=...,        # new intermediate arg
-    bend_y_damping=...,          # new intermediate arg
-    bend_z_stiffness=...,        # new intermediate arg
-    bend_z_damping=...,          # new intermediate arg
-    torsion_stiffness=...,       # new intermediate arg
-    torsion_damping=...,         # new intermediate arg
+    bend_stiffness=...,  # existing isotropic arg remains supported
+    bend_damping=...,  # existing isotropic arg remains supported
+    bend_y_stiffness=...,  # new intermediate arg
+    bend_y_damping=...,  # new intermediate arg
+    bend_z_stiffness=...,  # new intermediate arg
+    bend_z_damping=...,  # new intermediate arg
+    torsion_stiffness=...,  # new intermediate arg
+    torsion_damping=...,  # new intermediate arg
     closed=...,
     label=...,
 )
@@ -527,8 +527,7 @@ Radius handling for the stock phase:
 Suggested skeleton:
 
 ```python
-def _build_cable(usd_path: str, *, device: str | None = None,
-                 solver_name: str | None = None) -> Any:
+def _build_cable(usd_path: str, *, device: str | None = None, solver_name: str | None = None) -> Any:
     from .cable import extract_cable_points, read_cable_params
 
     p = read_cable_params(usd_path)
@@ -544,11 +543,7 @@ def _build_cable(usd_path: str, *, device: str | None = None,
 
     edge_q = newton.utils.create_parallel_transport_cable_quaternions(points)
 
-    radius = (
-        float(p["radius"])
-        if p["radius"] is not None
-        else 0.5 * float(p["thickness"])
-    )
+    radius = float(p["radius"]) if p["radius"] is not None else 0.5 * float(p["thickness"])
 
     stretch_stiffness = float(p["stretchStiffness"])
     stretch_damping = float(p["stretchDamping"])

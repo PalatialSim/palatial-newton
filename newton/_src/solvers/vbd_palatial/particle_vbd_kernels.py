@@ -10,8 +10,4 @@ for _name in dir(_particle_vbd_kernels):
         continue
     globals()[_name] = getattr(_particle_vbd_kernels, _name)
 
-__all__ = [
-    name
-    for name in dir(_particle_vbd_kernels)
-    if not name.startswith("__")
-]
+__all__ = [name for name in dir(_particle_vbd_kernels) if not name.startswith("__")]

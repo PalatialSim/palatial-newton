@@ -37,11 +37,13 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import warp as wp
-from pxr import Gf, Usd, UsdPhysics  # noqa: TID253
+
+if TYPE_CHECKING:
+    from pxr import Usd
 
 # `import newton` registers the newton_usd_schemas plugin (NewtonSceneAPI,
 # NewtonXpbdSceneAPI, ...) AND the bundled schema-extension plugin
@@ -267,13 +269,12 @@ def _detect_body_type(stage: Usd.Stage) -> str:
 
 def _has_movable_rigid_joint(usd_path: str) -> bool:
     """Whether the rigid asset needs collisions between articulated bodies."""
+    from pxr import Usd, UsdPhysics
+
     stage = Usd.Stage.Open(usd_path)
     if stage is None:
         return False
-    return any(
-        prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint)
-        for prim in stage.Traverse()
-    )
+    return any(prim.IsA(UsdPhysics.Joint) and not prim.IsA(UsdPhysics.FixedJoint) for prim in stage.Traverse())
 
 
 def _build_rigid(
@@ -535,9 +536,11 @@ def _build_cloth(
 
 def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
     """Build a cable model from NewtonRodAPI metadata and a BasisCurves centerline."""
-    from newton import utils as newton_utils
+    from pxr import Gf
 
-    from .cable import (
+    from newton import utils as newton_utils  # noqa: PLC0415 - defer feature initialization
+
+    from .cable import (  # noqa: PLC0415 - defer feature initialization
         create_cable_quaternions,
         extract_cable_points,
         find_cable_prim_path,
@@ -624,7 +627,7 @@ def _build_cable(usd_path: str, *, device: str | None = None) -> Any:
 
 def _build_cable_assembly(usd_path: str, *, device: str | None = None) -> Any:
     """Build a cable assembly model from a v1 Power assembly source USDA."""
-    from .cable_assembly import build_power_cable_assembly_model
+    from .cable_assembly import build_power_cable_assembly_model  # noqa: PLC0415 - defer feature initialization
 
     return build_power_cable_assembly_model(usd_path, device=device)
 
@@ -838,8 +841,14 @@ def _build_rod(
             cfg=rod_cfg,
             stretch_stiffness=float(params["axialStiffness"]),
             stretch_damping=float(params["axialDamping"]),
-            bend_stiffness=float(params["bendStiffness"]),
-            bend_damping=float(params["bendDamping"]),
+            # Preserve the authored cable frame and Rayleigh damping convention.
+            # Upstream rods use a different frame and four modal coefficients.
+            bend_y_stiffness=float(params["bendStiffness"]),
+            bend_y_damping=float(params["bendDamping"]),
+            bend_z_stiffness=float(params["bendStiffness"]),
+            bend_z_damping=float(params["bendDamping"]),
+            torsion_stiffness=float(params["bendStiffness"]),
+            torsion_damping=float(params["bendDamping"]),
             closed=bool(params["closed"]),
             label=label,
         )
@@ -959,6 +968,8 @@ def load(
     rod_tube_radial_segments: rod-only; number of radial segments used for the
     swept tube when ``rod_textured_tube`` is enabled.
     """
+    from pxr import Usd
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         raise RuntimeError(f"Cannot open USD: {usd_path}")

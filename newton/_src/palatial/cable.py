@@ -1,19 +1,22 @@
 """Read-side helpers for NewtonRodAPI rod or cable assets."""
+
 from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
+
+import warp as wp
+
+if TYPE_CHECKING:
+    from pxr import Gf, Usd, UsdGeom
 
 # `import newton` registers the bundled USD plugins via
 # newton/_src/usd/__init__.py. Must precede any pxr.Usd usage in the same
 # process.
-import newton  # noqa: F401
+import newton
 
 from . import _resolvers  # noqa: F401  (kept for parity with shell.py init)
-
-import math
-from collections.abc import Sequence
-
-import warp as wp
-from pxr import Gf, Usd, UsdGeom, UsdShade
-
 
 DEFAULTS = {
     "frameDefinition": "parallelTransport",
@@ -107,6 +110,8 @@ def _has_rod_intent(prim: Usd.Prim) -> bool:
 
 def find_cable_prim_path(usd_path: str) -> str | None:
     """Return the prim path of the first rod or cable root on the stage."""
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return None
@@ -136,6 +141,8 @@ def find_cable_prim_path(usd_path: str) -> str | None:
 
 def find_cable_centerline_prim_path(usd_path: str) -> str | None:
     """Return the prim path of the first rod or cable BasisCurves centerline."""
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return None
@@ -160,6 +167,8 @@ def _get_world_transform_matrix(
     xform_cache: UsdGeom.XformCache | None = None,
 ) -> Gf.Matrix4d:
     """Return the prim's local-to-world transform matrix."""
+    from pxr import Usd, UsdGeom
+
     xformable = UsdGeom.Xformable(prim)
     if xform_cache is None:
         return xformable.ComputeLocalToWorldTransform(Usd.TimeCode.Default())
@@ -168,12 +177,16 @@ def _get_world_transform_matrix(
 
 def _transform_point(matrix: Gf.Matrix4d, point: object) -> wp.vec3:
     """Transform a point-like value with a USD matrix."""
+    from pxr import Gf
+
     transformed = matrix.Transform(Gf.Vec3d(float(point[0]), float(point[1]), float(point[2])))
     return wp.vec3(float(transformed[0]), float(transformed[1]), float(transformed[2]))
 
 
 def _bound_cable_material_prims(prim: Usd.Prim) -> list[Usd.Prim]:
     """Return bound Material prims that carry NewtonRodMaterialAPI."""
+    from pxr import UsdShade
+
     if not prim or not prim.IsValid():
         return []
 
@@ -204,6 +217,8 @@ def _bound_cable_material_prims(prim: Usd.Prim) -> list[Usd.Prim]:
 
 def read_cable_params(usd_path: str) -> dict[str, object]:
     """Resolve rod or cable params to a normalized dict."""
+    from pxr import Usd
+
     out: dict[str, object] = dict(DEFAULTS)
     stage = Usd.Stage.Open(usd_path)
     if not stage:
@@ -388,6 +403,8 @@ def read_cable_params(usd_path: str) -> dict[str, object]:
 
 def get_cable_reference_transform_matrix(usd_path: str) -> Gf.Matrix4d:
     """Return the world transform matrix that should place cable geometry."""
+    from pxr import Gf, Usd
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return Gf.Matrix4d(1.0)
@@ -412,6 +429,8 @@ def extract_cable_points(usd_path: str, *, world_space: bool = False) -> list[wp
             transform before returning points. Otherwise return authored
             local-space points.
     """
+    from pxr import Usd, UsdGeom
+
     stage = Usd.Stage.Open(usd_path)
     if not stage:
         return []
