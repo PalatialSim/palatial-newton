@@ -1,0 +1,1 @@
+Added an optional forward-only spring force gather mode to `SolverSemiImplicit`. It reuses structural incidence across identical world topologies and preserves independently editable spring materials.

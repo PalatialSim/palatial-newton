@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import math
+from typing import Literal
 
 import warp as wp
 
@@ -29,6 +30,7 @@ from .kernels_particle import (
     eval_tetrahedra_forces,
     eval_triangle_forces,
 )
+from .spring_gather import SpringForceGather
 
 
 class SolverSemiImplicit(SolverBase, CouplingInterface):
@@ -84,6 +86,7 @@ class SolverSemiImplicit(SolverBase, CouplingInterface):
         joint_mimic_ke: float = 1.0e2,
         joint_mimic_kd: float = 1.0,
         enable_tri_contact: bool = True,
+        spring_force_mode: Literal["atomic", "gather"] = "atomic",
         deterministic: wp.DeterministicMode | None = None,
     ):
         """
@@ -100,12 +103,20 @@ class SolverSemiImplicit(SolverBase, CouplingInterface):
                 N·s/m for linear follower coordinates and N·m·s/rad for angular follower coordinates.
                 Defaults to 1.0.
             enable_tri_contact: Enable triangle contact. Defaults to True.
+            spring_force_mode: Spring force assembly. ``"atomic"`` preserves the
+                default differentiable path. ``"gather"`` uses a forward-only,
+                two-pass sum and shares incidence for identical world topology.
+                Material values remain independently editable per spring. The
+                model's spring topology must remain fixed after construction.
             deterministic: Opt-in determinism for this solver's atomic-emitting
                 kernel modules. Pass a :class:`warp.DeterministicMode`, or
                 ``None`` (default) to inherit the current
                 ``wp.config.deterministic`` mode.
         """
+        if spring_force_mode not in ("atomic", "gather"):
+            raise ValueError("spring_force_mode must be 'atomic' or 'gather'")
         super().__init__(model=model)
+        self._spring_gather = SpringForceGather(model) if spring_force_mode == "gather" and model.spring_count else None
         effective_deterministic = deterministic if deterministic is not None else wp.config.deterministic
         deterministic_modules = []
         if model.joint_count > 0:
@@ -187,7 +198,10 @@ class SolverSemiImplicit(SolverBase, CouplingInterface):
                 body_f_work = wp.clone(body_f)
 
             # damped springs
-            eval_spring_forces(model, state_in, particle_f)
+            if self._spring_gather is None:
+                eval_spring_forces(model, state_in, particle_f)
+            else:
+                self._spring_gather.evaluate(model, state_in, particle_f)
 
             # triangle elastic and lift/drag forces
             eval_triangle_forces(model, state_in, control, particle_f)
