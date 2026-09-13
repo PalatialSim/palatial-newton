@@ -218,7 +218,7 @@ class SolverSemiImplicit(SolverBase, CouplingInterface):
             if model.particle_count > 1 and model.particle_grid is not None:
                 search_radius = model.particle_max_radius * 2.0 + model.particle_cohesion
                 with wp.ScopedDevice(model.device):
-                    model.particle_grid.build(state_in.particle_q, radius=search_radius)
+                    model.particle_grid.build(state_in.particle_q, radius=search_radius, groups=model.particle_world)
             eval_particle_contact_forces(model, state_in, particle_f)
 
             # triangle/triangle contacts
