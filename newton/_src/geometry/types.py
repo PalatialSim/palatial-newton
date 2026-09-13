@@ -2665,6 +2665,9 @@ class Gaussian:
         opacities: wp.array[wp.float32]
         sh_coeffs: wp.array2d[wp.float32]
         bvh_id: wp.uint64
+        bvh_is_grouped: wp.bool
+        bvh_group_root: wp.int32
+        bvh_point_offset: wp.int32
         min_response: wp.float32
         sorting_mode: wp.int32
 

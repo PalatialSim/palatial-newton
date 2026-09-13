@@ -154,15 +154,19 @@ def create_shade_function(config: RenderContext.Config, state: RenderContext.Sta
             for i in range(wp.static(config.gaussians_max_num_hits)):
                 hit_distances[i] = max_distance - min_distance
 
+            root = wp.int32(-1)
+            if gaussian_data.bvh_is_grouped:
+                root = gaussian_data.bvh_group_root
             query = wp.bvh_query_ray(
-                gaussian_data.bvh_id, ray_origin_local + ray_direction_local * min_distance, ray_direction_local
+                gaussian_data.bvh_id, ray_origin_local + ray_direction_local * min_distance, ray_direction_local, root
             )
 
             while wp.bvh_query_next(query, hit_index, hit_distances[-1]):
+                point_index = hit_index - gaussian_data.bvh_point_offset
                 hit_alpha, hit_distance = ray_gsplat_hit_response(
-                    gaussian_data.transforms[hit_index],
-                    gaussian_data.scales[hit_index],
-                    gaussian_data.opacities[hit_index],
+                    gaussian_data.transforms[point_index],
+                    gaussian_data.scales[point_index],
+                    gaussian_data.opacities[point_index],
                     gaussian_data.min_response,
                     gaussian_data.sorting_mode,
                     ray_origin_local,
@@ -182,7 +186,7 @@ def create_shade_function(config: RenderContext.Config, state: RenderContext.Sta
                                 hit_indices[hh] = hit_indices[hh - 1]
                                 hit_alphas[hh] = hit_alphas[hh - 1]
                             hit_distances[h] = hit_distance
-                            hit_indices[h] = hit_index
+                            hit_indices[h] = point_index
                             hit_alphas[h] = hit_alpha
                             break
 

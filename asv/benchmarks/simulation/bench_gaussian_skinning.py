@@ -106,6 +106,7 @@ def main():
             "worlds": worlds,
             "points_per_world": args.points,
             "influences": 4,
+            "bvh_layout": "grouped",
             "setup_seconds": setup_seconds,
             "update_ms_samples": samples,
             "instance_updates_per_second": worlds * 1000.0 / float(np.median(samples)),

@@ -79,6 +79,14 @@ def _update_shape_bounds(
         bounds[shape_ids[instance], 1] = upper
 
 
+@wp.kernel(enable_backward=False)
+def _assign_group_roots(data: wp.array[Gaussian.Data]):
+    instance = wp.tid()
+    view = data[instance]
+    view.bvh_group_root = wp.bvh_get_group_root(view.bvh_id, instance)
+    data[instance] = view
+
+
 class GaussianSkinning:
     """Deform repeated Gaussian shapes while sharing their appearance arrays.
 
@@ -187,11 +195,15 @@ class GaussianSkinning:
                 self._views.append(view)
             self._data = wp.array(self._views, dtype=Gaussian.Data)
             self._refit_bounds()
+            groups = wp.array(np.repeat(np.arange(self.instance_count, dtype=np.int32), point_count), dtype=wp.int32)
+            bvh = wp.Bvh(self._lowers.flatten(), self._uppers.flatten(), groups=groups)
+            self._bvhs.append(bvh)
             for instance, view in enumerate(self._views):
-                bvh = wp.Bvh(self._lowers[instance], self._uppers[instance])
                 view.bvh_id = bvh.id
-                self._bvhs.append(bvh)
+                view.bvh_is_grouped = True
+                view.bvh_point_offset = instance * point_count
             self._data.assign(self._views)
+            wp.launch(_assign_group_roots, dim=self.instance_count, inputs=[self._data])
             old_count = model.gaussians_count
             table = wp.empty(old_count + self.instance_count, dtype=Gaussian.Data)
             wp.copy(table, model.gaussians_data, count=old_count)
@@ -201,9 +213,8 @@ class GaussianSkinning:
             model.shape_source_ptr.assign(pointers)
             model.gaussians_data = table
             model.gaussians_count = table.shape[0]
-            model._gaussian_keep_alive.extend(zip(self._views, self._bvhs, strict=True))
+            model._gaussian_keep_alive.extend((view, bvh) for view in self._views)
             model._gaussian_deformation_shapes.update(ids.tolist())
-            model._gaussian_deformations.append(self)
 
     def _refit_bounds(self) -> None:
         wp.launch(
