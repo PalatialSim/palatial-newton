@@ -110,6 +110,17 @@ def test_skinning_deformed_bounds_remain_visible(test, device):
     image = depth.numpy()
     test.assertGreater(np.count_nonzero(image[0] > 0.0), 0)
     test.assertEqual(np.count_nonzero(image[1] > 0.0), 0)
+    # Query a nonzero group and point offset, then release the adapter. The
+    # model must retain every array referenced by the sensor's device records.
+    nodes[0, :, 0] = 0.0
+    nodes[1, :, 0] = 3.0
+    skinning.update(wp.array(nodes, dtype=wp.transform, device=device), state)
+    del skinning
+    gc.collect()
+    sensor.update(state, cameras, rays, depth_image=depth)
+    image = depth.numpy()
+    test.assertEqual(np.count_nonzero(image[0] > 0.0), 0)
+    test.assertGreater(np.count_nonzero(image[1] > 0.0), 0)
 
 
 def test_skinning_cuda_graph(test, device):
