@@ -13592,9 +13592,11 @@ class ModelBuilder:
                         mesh_keep_alive.append(geo.mesh)
                     elif isinstance(geo, Gaussian):
                         finalized_geos[geo_hash] = len(gaussians)
-                        gaussians.append(
-                            geo.finalize(device=device, bvh_constructor=self.default_bvh_cfg.gaussian_constructor)
+                        gaussian_data = geo.finalize(
+                            device=device, bvh_constructor=self.default_bvh_cfg.gaussian_constructor
                         )
+                        gaussians.append(gaussian_data)
+                        m._gaussian_keep_alive.append((gaussian_data, geo.bvh))
                     else:
                         finalized_geos[geo_hash] = geo.finalize()
 

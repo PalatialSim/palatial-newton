@@ -24,6 +24,7 @@ from ._src.geometry import (
 )
 from ._src.geometry.contact_match import MATCH_BROKEN as _MATCH_BROKEN
 from ._src.geometry.contact_match import MATCH_NOT_FOUND as _MATCH_NOT_FOUND
+from ._src.geometry.gaussian_skinning import GaussianSkinning
 from ._src.geometry.inertia import compute_inertia_shape, transform_inertia
 from ._src.geometry.kernels import sdf_box, sdf_capsule, sdf_cone, sdf_cylinder, sdf_mesh, sdf_plane, sdf_sphere
 from ._src.geometry.narrow_phase import NarrowPhase
@@ -35,6 +36,7 @@ __all__ = [
     "BroadPhaseAllPairs",
     "BroadPhaseExplicit",
     "BroadPhaseSAP",
+    "GaussianSkinning",
     "HydroelasticSDF",
     "NarrowPhase",
     "OpenPBRMaterial",

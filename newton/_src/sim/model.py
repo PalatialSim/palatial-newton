@@ -736,6 +736,10 @@ class Model:
         """
 
         # Gaussians
+        self._gaussian_keep_alive: list[tuple[object, wp.Bvh]] = []
+        self._gaussian_deformations: list[object] = []
+        self._gaussian_deformation_shapes: set[int] = set()
+        self._gaussian_render_context_initialized = False
         self.gaussians_count = 0
         """Number of gaussians."""
         self.gaussians_data = None

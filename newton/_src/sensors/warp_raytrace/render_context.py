@@ -24,6 +24,7 @@ class RenderContext:
     class State:
         """Mutable flags tracking which render outputs are active."""
 
+        # Shape-hit capacity per BVH group, not the number of unique assets.
         num_gaussians: int = 0
         has_particles: bool = False
         render_color: bool = False
@@ -153,6 +154,7 @@ class RenderContext:
 
         self.shape_colors = model.shape_color
         self.gaussians_data = model.gaussians_data
+        model._gaussian_render_context_initialized = True
 
         self.__load_texture_and_mesh_data(model, load_textures)
 
@@ -479,6 +481,13 @@ class RenderContext:
         self.__gaussians_data = gaussians_data
         if gaussians_data is None:
             self.state.num_gaussians = 0
+        elif self.shape_render_type is not None and self.shape_world_index is not None:
+            gaussian_shapes = self.shape_render_type.numpy() == int(GeoType.GAUSSIAN)
+            groups = self.shape_world_index.numpy()[gaussian_shapes] + 1
+            # The ray tracer processes the local and global groups separately,
+            # clearing its hit list between groups. Repeated shapes sharing an
+            # asset still need independent slots.
+            self.state.num_gaussians = int(np.bincount(groups, minlength=1).max())
         else:
             self.state.num_gaussians = gaussians_data.shape[0]
 

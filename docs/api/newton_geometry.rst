@@ -16,6 +16,7 @@ newton.geometry
    BroadPhaseAllPairs
    BroadPhaseExplicit
    BroadPhaseSAP
+   GaussianSkinning
    HydroelasticSDF
    NarrowPhase
    OpenPBRMaterial

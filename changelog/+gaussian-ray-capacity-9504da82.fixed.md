@@ -1,0 +1,1 @@
+Size Gaussian ray-hit storage by the largest shape group instead of the number of unique Gaussian assets, preserving repeated shape hits while avoiding batch-wide scratch growth. Retain finalized Gaussian buffers and BVHs on their owning model when source assets are reused.
