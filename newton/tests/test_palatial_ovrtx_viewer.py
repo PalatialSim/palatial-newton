@@ -26,6 +26,34 @@ except ImportError:
 
 class TestPalatialOVRTXViewer(unittest.TestCase):
     @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
+    def test_instances_are_visible_at_native_stage_population(self):
+        builder = newton.ModelBuilder()
+        builder.add_shape_box(-1, hx=0.2, hy=0.2, hz=0.2)
+        model = builder.finalize(device="cpu")
+        for visible in (True, False):
+            with self.subTest(visible=visible), tempfile.TemporaryDirectory() as temp_dir:
+                viewer = ViewerOVRTX(str(Path(temp_dir) / "scene.usda"), num_frames=1)
+                self.addCleanup(viewer.close)
+                viewer.show_visual = visible
+                viewer.show_collision = False
+                expected = UsdGeom.Tokens.inherited if visible else UsdGeom.Tokens.invisible
+
+                def check_population_visibility(viewer=viewer, expected=expected):
+                    self.assertTrue(viewer._instance_paths)
+                    for paths in viewer._instance_paths.values():
+                        for path in paths:
+                            imageable = UsdGeom.Imageable(viewer.stage.GetPrimAtPath(path))
+                            self.assertEqual(imageable.ComputeVisibility(), expected)
+                    for mesh in viewer._meshes.values():
+                        self.assertEqual(mesh.ComputeVisibility(), UsdGeom.Tokens.invisible)
+
+                with patch("newton._src.viewer.viewer_ovrtx.OVRTXStage") as session:
+                    session.return_value.open.side_effect = check_population_visibility
+                    viewer.set_model(model)
+                    session.return_value.open.assert_called_once()
+                viewer.close()
+
+    @unittest.skipIf(Usd is None, "USD Python bindings are not installed")
     def test_ovrtx_composes_static_sublayers_after_clearing_reused_output(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

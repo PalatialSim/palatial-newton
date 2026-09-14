@@ -203,6 +203,13 @@ class ViewerOVRTX(ViewerUSD):
                 shapes.materials,
                 hidden=not visible,
             )
+            # OVStage populates at the default time. ViewerUSD's time samples
+            # do not override a referenced prototype's default invisibility.
+            group = UsdGeom.Imageable(self.stage.GetPrimAtPath(self._get_path(shapes.name)))
+            group.GetVisibilityAttr().Set(UsdGeom.Tokens.inherited if visible else UsdGeom.Tokens.invisible)
+            for path in self._instance_paths[shapes.name]:
+                instance = UsdGeom.Imageable(self.stage.GetPrimAtPath(path))
+                instance.GetVisibilityAttr().Set(UsdGeom.Tokens.inherited)
 
         self._author_render_stage()
         self.stage.GetRootLayer().Save()
