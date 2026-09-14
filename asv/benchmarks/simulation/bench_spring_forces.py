@@ -71,6 +71,8 @@ def main():
 
             evaluate()
             forces = state.particle_f.numpy()
+            if not np.all(np.isfinite(forces)):
+                raise AssertionError("Spring force assembly produced non-finite values")
             if reference is None:
                 reference = forces
             relative_l2_error = float(np.linalg.norm(forces - reference) / max(np.linalg.norm(reference), 1.0e-30))
