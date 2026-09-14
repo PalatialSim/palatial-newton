@@ -39,6 +39,8 @@ def eval_particle_contact(
     particle_v: wp.array[wp.vec3],
     particle_radius: wp.array[float],
     particle_flags: wp.array[wp.int32],
+    particle_world: wp.array[wp.int32],
+    world_count: int,
     k_contact: float,
     k_damp: float,
     k_friction: float,
@@ -64,22 +66,31 @@ def eval_particle_contact(
 
     f = wp.vec3(0.0)
 
-    # particle contact
-    query = wp.hash_grid_query(grid, x, radius + max_radius + k_cohesion)
-    index = int(0)
+    # A regular particle sees its own world and global particles. A global
+    # particle sees all groups, preserving the global-world contact contract.
+    world = particle_world[i]
+    query_count = int(2)
+    if world == -1:
+        query_count = world_count + 1
+    for group_index in range(query_count):
+        group = group_index - 1
+        if world >= 0 and group_index == 1:
+            group = world
+        query = wp.hash_grid_query(grid, x, radius + max_radius + k_cohesion, group)
+        index = int(0)
 
-    while wp.hash_grid_query_next(query, index):
-        if (particle_flags[index] & ParticleFlags.ACTIVE) != 0 and index != i:
-            # compute distance to point
-            n = x - particle_x[index]
-            d = wp.length(n)
-            err = d - radius - particle_radius[index]
+        while wp.hash_grid_query_next(query, index):
+            if (particle_flags[index] & ParticleFlags.ACTIVE) != 0 and index != i:
+                # compute distance to point
+                n = x - particle_x[index]
+                d = wp.length(n)
+                err = d - radius - particle_radius[index]
 
-            if err <= k_cohesion:
-                n = n / d
-                vrel = v - particle_v[index]
+                if err <= k_cohesion:
+                    n = n / d
+                    vrel = v - particle_v[index]
 
-                f += particle_force(n, vrel, err, k_contact, k_damp, k_friction, k_mu)
+                    f += particle_force(n, vrel, err, k_contact, k_damp, k_friction, k_mu)
 
     particle_f[i] += f
 
@@ -567,6 +578,8 @@ def eval_particle_contact_forces(model: Model, state: State, particle_f: wp.arra
                 state.particle_qd,
                 model.particle_radius,
                 model.particle_flags,
+                model.particle_world,
+                model.world_count,
                 model.particle_ke,
                 model.particle_kd,
                 model.particle_kf,

@@ -2665,6 +2665,9 @@ class Gaussian:
         opacities: wp.array[wp.float32]
         sh_coeffs: wp.array2d[wp.float32]
         bvh_id: wp.uint64
+        bvh_is_grouped: wp.bool
+        bvh_group_root: wp.int32
+        bvh_point_offset: wp.int32
         min_response: wp.float32
         sorting_mode: wp.int32
 
@@ -2929,7 +2932,8 @@ class Gaussian:
         Reads positions (``x/y/z``), rotations (``rot_0..3``), scales
         (``scale_0..2``, stored as log-scale), opacities (logit-space),
         and SH coefficients (``f_dc_*``, ``f_rest_*``). Converts log-scale
-        and logit-opacity to linear values.
+        and logit-opacity to linear values. A lone ``scale_0`` represents an
+        isotropic Gaussian and is expanded equally along all three axes.
 
         Args:
             filename: Path to a ``.ply`` file in standard 3DGS format.
@@ -2981,8 +2985,12 @@ class Gaussian:
         if "scale_0" in point_attrs:
             missing_scale = "PLY Gaussian point cloud is missing one or more scale attributes"
             scale_0 = _require_point_attr("scale_0", missing_scale)
-            scale_1 = _require_point_attr("scale_1", missing_scale)
-            scale_2 = _require_point_attr("scale_2", missing_scale)
+            if "scale_1" not in point_attrs and "scale_2" not in point_attrs:
+                scale_1 = scale_0
+                scale_2 = scale_0
+            else:
+                scale_1 = _require_point_attr("scale_1", missing_scale)
+                scale_2 = _require_point_attr("scale_2", missing_scale)
 
             log_scales = np.stack([scale_0, scale_1, scale_2], axis=1).astype(np.float32)
             scales = np.exp(log_scales)

@@ -6,6 +6,15 @@ import warp as wp
 from ...sim import Control, Model, State
 
 
+@wp.func
+def spring_force(displacement: wp.vec3, relative_velocity: wp.vec3, rest: float, stiffness: float, damping: float):
+    length = wp.length(displacement)
+    direction = displacement * (1.0 / length)
+    extension = length - rest
+    extension_rate = wp.dot(direction, relative_velocity)
+    return direction * (stiffness * extension + damping * extension_rate)
+
+
 @wp.kernel
 def eval_spring(
     x: wp.array[wp.vec3],
@@ -37,17 +46,7 @@ def eval_spring(
     xij = xi - xj
     vij = vi - vj
 
-    l = wp.length(xij)
-    l_inv = 1.0 / l
-
-    # normalized spring direction
-    dir = xij * l_inv
-
-    c = l - rest
-    dcdt = wp.dot(dir, vij)
-
-    # damping based on relative velocity
-    fs = dir * (ke * c + kd * dcdt)
+    fs = spring_force(xij, vij, rest, ke, kd)
 
     wp.atomic_sub(f, i, fs)
     wp.atomic_add(f, j, fs)
