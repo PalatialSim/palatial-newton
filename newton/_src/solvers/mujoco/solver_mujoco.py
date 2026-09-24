@@ -5175,6 +5175,37 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
         )
 
         eval_fk(model, state.joint_q, state.joint_qd, state)
+        if len(self._standalone_fk_start):
+            # These native world roots have coordinates but belong to no Newton
+            # articulation. Reuse FK without changing the authored topology.
+            wp.launch(
+                eval_articulation_fk,
+                dim=len(self._standalone_fk_start),
+                inputs=[
+                    self._standalone_fk_start,
+                    self._standalone_fk_end,
+                    len(self._standalone_fk_start),
+                    None,
+                    None,
+                    self._standalone_fk_membership,
+                    state.joint_q,
+                    state.joint_qd,
+                    model.joint_q_start,
+                    model.joint_qd_start,
+                    model.joint_type,
+                    model.joint_parent,
+                    model.joint_child,
+                    model.joint_X_p,
+                    model.joint_X_c,
+                    model.joint_axis,
+                    model.joint_dof_dim,
+                    model.body_com,
+                    model.body_flags,
+                    int(BodyFlags.ALL),
+                ],
+                outputs=[state.body_q, state.body_qd],
+                device=model.device,
+            )
 
         # Update rigid force fields on state.
         if state.body_qdd is not None or state.body_parent_f is not None:
@@ -7385,6 +7416,15 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
                 )
         self.mj_q_start = wp.array(mj_q_start_np, dtype=wp.int32, device=model.device)
         self.mj_qd_start = wp.array(mj_qd_start_np, dtype=wp.int32, device=model.device)
+        mapped_coordinates = np.tile(mj_q_start_np, model.joint_count // max(n_template_joints, 1))
+        standalone_roots = np.flatnonzero(
+            (joint_articulation == -1) & (joint_parent == -1) & (mapped_coordinates >= 0)
+        ).astype(np.int32)
+        standalone_membership = joint_articulation.copy()
+        standalone_membership[standalone_roots] = 0
+        self._standalone_fk_start = wp.array(standalone_roots, dtype=wp.int32, device=model.device)
+        self._standalone_fk_end = wp.array(standalone_roots + 1, dtype=wp.int32, device=model.device)
+        self._standalone_fk_membership = wp.array(standalone_membership, dtype=wp.int32, device=model.device)
         if self.enable_sleeping:
             qpos_treeid_np = np.full(self.mj_model.nq, -1, dtype=np.int32)
             for jointid in range(self.mj_model.njnt):
