@@ -1,0 +1,1 @@
+Preserve shell mesh inertia and compile non-contact visual meshes with surface inertia when exporting MuJoCo models, avoiding volume errors for thin decorative geometry without changing authored rigid-body mass properties.

@@ -74,6 +74,7 @@ Single-call pipeline: opens the USD, determines body type, builds the model, con
 | `rod_tube_radial_segments` | Radial subdivision count for that tube. |
 | `solver_param_overrides` | Extra solver params layered over the scene's. |
 | `on_model` | Callback fired on the model before solver construction. Last chance to tweak. |
+| `on_builder` | Callback fired after ground creation and before asset import. Add static validation fixtures consistently for rigid bodies, rods, and cloth without editing the source USD. |
 
 ### Solver selection
 

@@ -1,0 +1,1 @@
+Honor authored USD mesh collision approximation in the Palatial rigid loader and fail explicitly when approximation fails, instead of silently replacing hollow colliders with solid hulls or boxes. Prepared deliveries bake decomposition once into explicit convex pieces before simulation.

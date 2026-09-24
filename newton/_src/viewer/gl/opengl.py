@@ -209,6 +209,7 @@ class MeshGL:
         self.indices = None
         self.normals = None  # scratch buffer used during normal recomputation
         self.texture_id = None
+        self._texture_file_key = None
         self.opacity = 1.0
 
         # Set up vertex attributes in the packed format the shaders expect
@@ -391,6 +392,19 @@ class MeshGL:
 
     def update_texture(self, texture=None):
         gl = RendererGL.gl
+        file_key = None
+        if isinstance(texture, (str, os.PathLike)):
+            try:
+                path = os.path.abspath(os.fspath(texture))
+                stat = os.stat(path)
+                file_key = (path, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            except OSError:
+                pass
+        # Deforming a mesh does not change its file-backed texture. Arrays still
+        # upload on every call so in-place edits retain their existing behavior.
+        if file_key is not None and file_key == self._texture_file_key and self.texture_id is not None:
+            return
+        self._texture_file_key = None
         texture_image = None
         if texture is not None:
             from ...utils.texture import load_texture  # noqa: PLC0415
@@ -417,6 +431,7 @@ class MeshGL:
         if not texture_id:
             return
         self.texture_id = texture_id
+        self._texture_file_key = file_key
 
     def render(self):
         if not self.hidden:
@@ -435,7 +450,7 @@ class MeshGL:
 
             # Set per-mesh albedo and material (global state, not per-VAO).
             gl.glVertexAttrib3f(7, *self.color)
-            gl.glVertexAttrib4f(8, *self.material)
+            gl.glVertexAttrib4f(8, *self.material[:3], float(self.texture_id is not None))
 
             gl.glBindVertexArray(self.vao)
             gl.glVertexAttrib1f(9, self.opacity)

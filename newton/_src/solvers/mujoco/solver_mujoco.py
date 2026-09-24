@@ -5791,6 +5791,7 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
         # CPU-backed Warp array, for which ``numpy()`` may return a writable view.
         shape_size = model.shape_scale.numpy().copy()
         shape_flags = model.shape_flags.numpy()
+        shape_is_solid = model.shape_is_solid.numpy()
         shape_collision_group = model.shape_collision_group.numpy()
         shape_world = model.shape_world.numpy()
         shape_mu = model.shape_material_mu.numpy()
@@ -6357,6 +6358,14 @@ class SolverMuJoCo(SolverBase, CouplingInterface):
                         uservert=vertices.flatten(),
                         userface=indices.flatten(),
                         maxhullvert=maxhullvert,
+                        # Thin visual details have no physical volume. Preserve
+                        # authored shell inertia and avoid inferring volume for
+                        # non-contact meshes; body inertias remain explicit.
+                        inertia=(
+                            mujoco.mjtMeshInertia.mjMESH_INERTIA_SHELL
+                            if not shape_is_solid[shape] or not uses_mujoco_contacts
+                            else mujoco.mjtMeshInertia.mjMESH_INERTIA_LEGACY
+                        ),
                     )
                     geom_params["meshname"] = name
                 geom_params["pos"] = tf.p

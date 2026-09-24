@@ -544,6 +544,7 @@ class ViewerBase(ABC):
 
         # Shape instance batches (shape hash -> ShapeInstances)
         layer._shape_instances = {}
+        layer._shape_color_snapshot = None
         layer._triangle_appearance_groups: (
             list[tuple[str, wp.array[wp.int32], tuple[float, float, float], float]] | None
         ) = None
@@ -1119,9 +1120,8 @@ class ViewerBase(ABC):
     def _sync_shape_colors_from_model(self):
         """Propagate model-owned shape colors into viewer batches.
 
-        Always launches a GPU kernel to repack colors from model order into
-        viewer batch order.  This is cheaper than a D2H transfer + host-side
-        comparison every frame.
+        Compare one model-wide transfer before marking batches dirty. Unchanged
+        colors otherwise trigger a separate device transfer for every mesh batch.
         """
         if (
             self.model is None
@@ -1130,6 +1130,11 @@ class ViewerBase(ABC):
             or self._slot_to_shape_wp is None
         ):
             return
+
+        colors = self.model.shape_color.numpy()
+        if not self.model_changed and np.array_equal(colors, self._shape_color_snapshot):
+            return
+        self._shape_color_snapshot = colors.copy()
 
         wp.launch(
             kernel=repack_shape_colors,

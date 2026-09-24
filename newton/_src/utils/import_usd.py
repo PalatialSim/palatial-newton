@@ -3080,6 +3080,15 @@ def parse_usd(
                             art_bodies.append(b)
                             path_body_map[body_data[child]["label"]] = b
 
+                    # Bodies connected only by excluded joints are absent from the
+                    # articulation tree, but still own shapes and joint endpoints.
+                    for body_path, body_id in body_ids.items():
+                        if body_id not in inserted_bodies:
+                            b = path_body_map.get(body_path)
+                            if b is None:
+                                b = add_body(**body_data[body_id])
+                            art_bodies.append(b)
+
                 first_joint_parent = joint_edges[sorted_joints[0]][0]
                 if first_joint_parent != -1:
                     # the mechanism is floating since there is no joint connecting it to the world
@@ -4486,9 +4495,14 @@ def parse_usd(
         bodies_to_articulate = new_bodies
 
     if bodies_to_articulate:
+        # Loop constraints do not give their child an articulation-tree path.
+        joint_children = {
+            child
+            for i, child in enumerate(builder.joint_child)
+            if builder.joint_articulation[i] >= 0 or builder.joint_parent[i] == -1
+        }
         if parent_body != -1:
             # When parent_body is specified, manually add joints to floating bodies with correct parent
-            joint_children = set(builder.joint_child)
             for body_id in bodies_to_articulate:
                 if body_id in joint_children:
                     continue  # Already has a joint
@@ -4511,7 +4525,6 @@ def parse_usd(
                     articulation_label=None,
                 )
         else:
-            joint_children = set(builder.joint_child)
             for body_id in bodies_to_articulate:
                 if body_id in joint_children:
                     continue

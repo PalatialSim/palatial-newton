@@ -5,6 +5,7 @@ import newton
 from pxr import Usd, UsdGeom
 
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Callable
 import numpy as np
 import warp as wp
@@ -164,11 +165,14 @@ def _detect_body_type(stage: Usd.Stage) -> str:
 
 def _build_rigid(usd_path: str, *, device: str | None = None,
                  fix_base: bool = False,
-                 solver_name: str | None = None) -> Any:
+                 solver_name: str | None = None,
+                 on_builder: Callable[[Any], None] | None = None) -> Any:
     """Build a rigid model via Newton's USD parser."""
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
+        if on_builder is not None:
+            on_builder(builder)
         bodies_before = len(builder.body_mass)
 
         if fix_base:
@@ -179,6 +183,8 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
                                parent=-1, label=None, **kw):
                 counter[0] += 1
                 k = label or kw.pop("key", None) or f"fixed_base_{counter[0]}"
+                if parent == -1 and parent_xform is None:
+                    parent_xform = builder.body_q[child]
                 jid = builder.add_joint_fixed(
                     parent=parent, child=child,
                     parent_xform=parent_xform,
@@ -189,7 +195,11 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
             builder.add_joint_free = _free_to_fixed
             builder.add_free_joints_to_floating_bodies = lambda *a, **kw: None
 
-        builder.add_usd(usd_path, skip_mesh_approximation=True)
+        # Honor authored hollow/concave collision geometry. A failed remesh must
+        # not fall back to a solid hull or bounding box and silently fill cavities.
+        # Production preparation bakes decomposition once into explicit hulls.
+        builder.approximate_meshes = partial(builder.approximate_meshes, raise_on_failure=True)
+        builder.add_usd(usd_path, skip_mesh_approximation=False)
 
         _untint_textured_shapes(builder)
 
@@ -202,6 +212,7 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
                 if builder.body_mass[b] <= 0:
                     continue
                 j = builder.add_joint_fixed(parent=-1, child=b,
+                                            parent_xform=builder.body_q[b],
                                             label=f"fixed_base_orphan_{b}")
                 builder.add_articulation([j], label=f"articulation_orphan_{b}")
 
@@ -216,7 +227,8 @@ def _build_rigid(usd_path: str, *, device: str | None = None,
 
 def _build_cloth(usd_path: str, *, device: str | None = None,
                  solver_name: str | None = None,
-                 table: dict | None = None) -> Any:
+                 table: dict | None = None,
+                 on_builder: Callable[[Any], None] | None = None) -> Any:
     """Build a cloth model from params + mesh data baked into the USD."""
     import inspect as _ins
     from .cloth import _extract_first_mesh, find_cloth_prim_path
@@ -233,6 +245,8 @@ def _build_cloth(usd_path: str, *, device: str | None = None,
     with wp.ScopedDevice(device) if device else wp.ScopedDevice(wp.get_preferred_device()):
         builder = newton.ModelBuilder()
         builder.add_ground_plane()
+        if on_builder is not None:
+            on_builder(builder)
 
         table_pos: tuple[float, float, float] | None = None
         table_size: tuple[float, float, float] | None = None
@@ -492,6 +506,7 @@ def _build_rod(
     device: str | None = None,
     textured_tube: bool = False,
     tube_radial_segments: int = 12,
+    on_builder: Callable[[Any], None] | None = None,
 ) -> _RodBuildResult:
     """Build an isotropic rod model from a ``NewtonRodAPI``-authored USDA."""
     from .rod import read_rod_params
@@ -534,6 +549,8 @@ def _build_rod(
         builder = newton.ModelBuilder()
         builder.rigid_gap = max(float(params["radius"]) * 0.25, 1.0e-4)
         builder.add_ground_plane()
+        if on_builder is not None:
+            on_builder(builder)
         rod_cfg = newton.ModelBuilder.ShapeConfig(density=float(params["effectiveDensity"]))
         rod_bodies, _ = builder.add_rod(
             positions=positions,
@@ -634,12 +651,17 @@ def load(usd_path: str, *, solver_override: str | None = None,
          rod_textured_tube: bool = False,
          rod_tube_radial_segments: int = 12,
          solver_param_overrides: dict | None = None,
+         on_builder: Callable[[Any], None] | None = None,
          on_model: Callable[[Any], None] | None = None) -> NewtonBundle:
     """Read a converted USD and return a ready-to-step :class:`NewtonBundle`.
 
     See ``docs/palatial_package.md`` for parameter semantics.
 
     Args:
+        on_builder: Invoked once with the :class:`~newton.ModelBuilder`
+            after the ground is added and before the asset is imported.
+            Use this to add static test fixtures, such as a ramp, consistently
+            for rigid, cloth, and rod assets. The source USD is not modified.
         solver_param_overrides: Extra kwargs forwarded to the solver
             constructor. Keys accept either USDA camelCase or solver
             snake_case; caller-supplied values win over scene- and
@@ -722,19 +744,21 @@ def load(usd_path: str, *, solver_override: str | None = None,
 
     rod_initial_body_q = None
     if body_type == "cloth":
-        model = _build_cloth(usd_path, device=device, solver_name=solver_name, table=table)
+        model = _build_cloth(usd_path, device=device, solver_name=solver_name, table=table,
+                             on_builder=on_builder)
     elif body_type == "rod":
         rod_result = _build_rod(
             usd_path,
             device=device,
             textured_tube=rod_textured_tube,
             tube_radial_segments=rod_tube_radial_segments,
+            on_builder=on_builder,
         )
         model = rod_result.model
         rod_initial_body_q = rod_result.initial_body_q
     else:
         model = _build_rigid(usd_path, device=device, fix_base=fix_base,
-                             solver_name=solver_name)
+                             solver_name=solver_name, on_builder=on_builder)
 
     # Caller-supplied overrides win over scene/shell-level USDA attrs.
     # Pop both the alias form and the literal form so an override under
