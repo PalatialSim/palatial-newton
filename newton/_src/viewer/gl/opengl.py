@@ -1143,6 +1143,8 @@ class RendererGL:
         self.draw_sky = True
         self.draw_fps = True
         self.draw_shadows = True
+        self.fog_enabled = True  # Preserve distance fog unless explicitly disabled for inspection.
+        self.unlit_colors = False  # Flat instance colors for visibility inspection; preserve alpha/depth.
         self.draw_wireframe = False
         self.wireframe_line_width = 1.5  # pixels
         self.line_width = 1.5  # pixels, for all log_lines batches
@@ -2157,6 +2159,8 @@ class RendererGL:
             viewport_size=(self._screen_width, self._screen_height),
             view_pos=self.camera.pos,
             fog_color=self.sky_lower,
+            fog_enabled=self.fog_enabled,
+            unlit_colors=self.unlit_colors,
             up_axis=self.camera.up_axis,
             sun_direction=self._sun_direction,
             enable_shadows=self.draw_shadows,

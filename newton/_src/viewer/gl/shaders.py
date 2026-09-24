@@ -139,6 +139,8 @@ uniform float env_intensity;
 uniform sampler2D albedo_map;
 
 uniform vec3 fogColor;
+uniform bool fog_enabled;
+uniform bool unlit_colors;
 uniform int up_axis;
 
 uniform mat4 light_space_matrix;
@@ -427,7 +429,7 @@ void main()
     float dist = length(camera_to_fragment);
     float fog_start = 20.0;
     float fog_end   = 200.0;
-    float fog_factor = clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+    float fog_factor = fog_enabled ? clamp((dist - fog_start) / (fog_end - fog_start), 0.0, 1.0) : 0.0;
     color = mix(color, pow(fogColor, vec3(2.2)), fog_factor);
 
     // ACES filmic tone mapping
@@ -438,6 +440,8 @@ void main()
 
     // gamma correction (sRGB)
     color = pow(color, vec3(1.0 / 2.2));
+    if (unlit_colors)
+        color = ObjectColor;
 
 #ifdef ENABLE_TRANSPARENCY
     float alpha = clamp(Opacity, 0.0, 1.0);
@@ -647,6 +651,8 @@ class ShaderShape(ShaderGL):
             self.loc_env_map = self._get_uniform_location("env_map")
             self.loc_env_intensity = self._get_uniform_location("env_intensity")
             self.loc_fog_color = self._get_uniform_location("fogColor")
+            self.loc_fog_enabled = self._get_uniform_location("fog_enabled")
+            self.loc_unlit_colors = self._get_uniform_location("unlit_colors")
             self.loc_up_axis = self._get_uniform_location("up_axis")
             self.loc_sun_direction = self._get_uniform_location("sun_direction")
             self.loc_light_color = self._get_uniform_location("light_color")
@@ -701,10 +707,16 @@ class ShaderShape(ShaderGL):
         shadow_extents: float = 10.0,
         exposure: float = 1.6,
         oit_depth_reference: float = 1.0,
+        fog_enabled: bool = True,
+        unlit_colors: bool = False,
     ):
         """Update all shader uniforms.
 
         Args:
+            fog_enabled: Apply the viewer's distance fog. Disable for inspection
+                when physical scene size should not affect material appearance.
+            unlit_colors: Output instance colors without lighting or textures,
+                preserving the existing alpha and depth behavior.
             oit_depth_reference: Reference distance [m] to the transparent
                 content, used to normalize the weighted-OIT depth weight.
                 Ignored unless this shader was built with transparency enabled.
@@ -740,6 +752,8 @@ class ShaderShape(ShaderGL):
 
             # Fog and rendering options
             self._gl.glUniform3f(self.loc_fog_color, *fog_color)
+            self._gl.glUniform1i(self.loc_fog_enabled, int(fog_enabled))
+            self._gl.glUniform1i(self.loc_unlit_colors, int(unlit_colors))
             self._gl.glUniform1i(self.loc_up_axis, up_axis)
 
             # Shadows
