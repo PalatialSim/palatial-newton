@@ -62,6 +62,23 @@ def _define_triangle_mesh(stage, path="/Triangle"):
 class TestUsdMeshHelpers(unittest.TestCase):
     """Tests for loading Newton meshes from USD source variants."""
 
+    def test_invalid_polygon_import_identifies_mesh_and_face(self):
+        """Identify the authored mesh and face when public USD import rejects a polygon."""
+        from pxr import Usd, UsdGeom
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.usda"
+            stage = Usd.Stage.CreateNew(str(path))
+            mesh = UsdGeom.Mesh.Define(stage, "/Asset/Broken")
+            mesh.CreatePointsAttr(
+                [(0, 0, 0), (1, 0, 0), (2, 1, 0), (2, 2, 0), (1, 3, 0), (0, 3, 0), (-1, 2, 0), (-1, 1, 0)]
+            )
+            mesh.CreateFaceVertexCountsAttr([3, 8])
+            mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3, 4, 2, 7, 6, 1, 5, 0])
+            stage.GetRootLayer().Save()
+            with self.assertRaisesRegex(ValueError, r"USD mesh /Asset/Broken, face 1 \(zero-based\)"):
+                newton.ModelBuilder().add_usd(str(path))
+
     def test_concave_usd_native_import_preserves_corner_attributes(self):
         """Import concave USD files into native models without overlapping triangles or lost corner data."""
         from pxr import Gf, Sdf, Usd, UsdGeom

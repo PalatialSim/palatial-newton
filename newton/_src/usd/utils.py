@@ -1052,7 +1052,10 @@ def _triangulate_face_corners(
                     remaining.pop(index)
                     break
                 else:
-                    raise ValueError("Cannot tessellate USD polygon: degenerate or self-intersecting boundary")
+                    raise ValueError(
+                        f"Cannot tessellate USD mesh {mesh_path}, face {face_id} (zero-based): "
+                        "degenerate or self-intersecting boundary"
+                    )
             triangles.append(remaining)
             start = triangle_offsets[face_id]
             corners[start : start + count - 2] = np.asarray(triangles) + offsets[face_id]
