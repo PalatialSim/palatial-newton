@@ -996,24 +996,56 @@ def _split_corners_into_vertices(
     return new_points, new_indices, new_normals, new_uvs
 
 
-def _triangulate_face_varying_indices(counts: Sequence[int], flip_winding: bool) -> np.ndarray:
-    """Return flattened corner indices for fan-triangulated face-varying data."""
-    counts_i32 = np.asarray(counts, dtype=np.int32)
-    num_tris = int(np.sum(counts_i32 - 2))
-    if num_tris <= 0:
-        return np.zeros((0,), dtype=np.int32)
+def _triangulate_face_corners(points: np.ndarray, counts: Sequence[int], indices: np.ndarray) -> np.ndarray:
+    """Tessellate simple polygons while retaining source corner indices for UVs and normals.
 
-    tri_face_ids = np.repeat(np.arange(len(counts_i32), dtype=np.int32), counts_i32 - 2)
-    tri_local_ids = np.concatenate([np.arange(n - 2, dtype=np.int32) for n in counts_i32])
-    face_bases = np.concatenate([[0], np.cumsum(counts_i32[:-1], dtype=np.int32)])
-
-    corner_faces = np.empty((num_tris, 3), dtype=np.int32)
-    corner_faces[:, 0] = face_bases[tri_face_ids]
-    corner_faces[:, 1] = face_bases[tri_face_ids] + tri_local_ids + 1
-    corner_faces[:, 2] = face_bases[tri_face_ids] + tri_local_ids + 2
-    if flip_winding:
-        corner_faces = corner_faces[:, ::-1]
-    return corner_faces.reshape(-1)
+    Convex faces keep the existing fan order. Concave faces use ear clipping in
+    the dominant plane; normalized coordinates make the tolerance scale independent.
+    """
+    corners = fan_triangulate_faces(np.asarray(counts), np.arange(len(indices), dtype=np.int32))
+    corner_offset = triangle_offset = 0
+    for count in counts:
+        if count > 3:
+            polygon = points[indices[corner_offset : corner_offset + count]].astype(np.float64)
+            polygon -= polygon.mean(axis=0)
+            normal = np.cross(polygon, np.roll(polygon, -1, axis=0)).sum(axis=0)
+            projected = np.delete(polygon, np.argmax(np.abs(normal)), axis=1)
+            scale = np.ptp(projected, axis=0).max()
+            if scale > 0:
+                projected /= scale
+                edges = np.roll(projected, -1, axis=0) - projected
+                turns = edges[:, 0] * np.roll(edges[:, 1], -1) - edges[:, 1] * np.roll(edges[:, 0], -1)
+                tolerance = 1e-12
+                if np.any(turns < -tolerance) and np.any(turns > tolerance):
+                    area = np.sum(
+                        projected[:, 0] * np.roll(projected[:, 1], -1) - projected[:, 1] * np.roll(projected[:, 0], -1)
+                    )
+                    orientation = np.sign(area)
+                    remaining = list(range(count))
+                    triangles = []
+                    while len(remaining) > 3:
+                        for index, current in enumerate(remaining):
+                            previous, following = remaining[index - 1], remaining[(index + 1) % len(remaining)]
+                            triangle = projected[[previous, current, following]]
+                            sides = np.roll(triangle, -1, axis=0) - triangle
+                            turn = sides[0, 0] * sides[1, 1] - sides[0, 1] * sides[1, 0]
+                            if orientation * turn <= tolerance:
+                                continue
+                            others = [corner for corner in remaining if corner not in (previous, current, following)]
+                            delta = projected[others, None, :] - triangle
+                            cross = sides[:, 0] * delta[:, :, 1] - sides[:, 1] * delta[:, :, 0]
+                            if np.any(np.all(orientation * cross >= -tolerance, axis=1)):
+                                continue
+                            triangles.append([previous, current, following])
+                            remaining.pop(index)
+                            break
+                        else:
+                            raise ValueError("Cannot tessellate USD polygon: degenerate or self-intersecting boundary")
+                    triangles.append(remaining)
+                    corners[triangle_offset : triangle_offset + count - 2] = np.asarray(triangles) + corner_offset
+        corner_offset += count
+        triangle_offset += count - 2
+    return corners
 
 
 def _is_usd_url(source: str) -> bool:
@@ -1715,7 +1747,8 @@ def get_mesh(
             else:
                 raise ValueError(f"Invalid face_varying_normal_conversion: {face_varying_normal_conversion}")
 
-    faces = fan_triangulate_faces(counts, indices)
+    corner_faces = _triangulate_face_corners(points, counts, indices)
+    faces = indices[corner_faces]
 
     flip_winding = False
     orientation_attr = mesh.GetOrientationAttr()
@@ -1725,6 +1758,7 @@ def get_mesh(
             flip_winding = True
     if flip_winding:
         faces = faces[:, ::-1]
+        corner_faces = corner_faces[:, ::-1]
 
     uv_indices = None
     if uvs is not None:
@@ -1741,7 +1775,7 @@ def get_mesh(
                 )
                 uvs = None
             else:
-                corner_flat = _triangulate_face_varying_indices(counts, flip_winding)
+                corner_flat = corner_faces.reshape(-1)
                 if not preserve_facevarying_uvs:
                     points_original = points
                     points = points_original[indices[corner_flat]]

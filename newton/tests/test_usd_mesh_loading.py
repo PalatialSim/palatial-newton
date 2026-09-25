@@ -62,6 +62,74 @@ def _define_triangle_mesh(stage, path="/Triangle"):
 class TestUsdMeshHelpers(unittest.TestCase):
     """Tests for loading Newton meshes from USD source variants."""
 
+    def test_concave_usd_native_import_preserves_corner_attributes(self):
+        """Import concave USD files into native models without overlapping triangles or lost corner data."""
+        from pxr import Gf, Sdf, Usd, UsdGeom
+
+        # A valid concave outline, with a collinear corner as in authored key tops.
+        outline = np.array([(3, 2, 0), (2, 2, 0), (2, 1, 0), (0, 1, 0), (0, 0, 0), (2, 0, 0), (3, 0, 0)])
+        with tempfile.TemporaryDirectory() as directory:
+            for face_normals in (False, True):
+                for preserve_uvs in (False, True):
+                    for left_handed in (False, True):
+                        with self.subTest(normals=face_normals, preserve_uvs=preserve_uvs, left_handed=left_handed):
+                            path = Path(directory) / f"concave-{face_normals}-{preserve_uvs}-{left_handed}.usda"
+                            stage = Usd.Stage.CreateNew(str(path))
+                            UsdGeom.SetStageMetersPerUnit(stage, 1.0)
+                            UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
+                            shape = UsdGeom.Mesh.Define(stage, "/Mesh")
+                            shape.CreatePointsAttr([Gf.Vec3f(*map(float, point)) for point in outline])
+                            shape.CreateFaceVertexCountsAttr([len(outline)])
+                            shape.CreateFaceVertexIndicesAttr(list(range(len(outline))))
+                            if left_handed:
+                                shape.CreateOrientationAttr("leftHanded")
+                            if face_normals:
+                                shape.CreateNormalsAttr([Gf.Vec3f(0, 0, 1)] * len(outline))
+                                shape.SetNormalsInterpolation("faceVarying")
+                            uv = UsdGeom.PrimvarsAPI(shape).CreatePrimvar(
+                                "st", Sdf.ValueTypeNames.TexCoord2fArray, "faceVarying"
+                            )
+                            uv.Set([Gf.Vec2f(float(p[0]) / 3, float(p[1]) / 2) for p in outline])
+                            convex = UsdGeom.Mesh.Define(stage, "/Convex")
+                            convex.CreatePointsAttr([(0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)])
+                            convex.CreateFaceVertexCountsAttr([4])
+                            convex.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+                            stage.GetRootLayer().Save()
+                            imported_stage = Usd.Stage.Open(str(path))
+                            convex_mesh = newton.usd.get_mesh(
+                                imported_stage.GetPrimAtPath("/Convex"), compute_inertia=False
+                            )
+                            assert_np_equal(convex_mesh.indices, np.array([0, 1, 2, 0, 2, 3]))
+                            mesh, corners = newton.usd.get_mesh(
+                                imported_stage.GetPrimAtPath("/Mesh"),
+                                load_uvs=True,
+                                load_normals=True,
+                                preserve_facevarying_uvs=preserve_uvs,
+                                return_uv_indices=True,
+                                compute_inertia=False,
+                            )
+                            vertices = np.asarray(mesh.vertices)
+                            indices = np.asarray(mesh.indices).reshape(-1, 3)
+                            triangles = vertices[indices]
+                            areas = (
+                                np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])[:, 2] / 2
+                            )
+                            self.assertTrue(np.all(areas < 0) if left_handed else np.all(areas > 0))
+                            self.assertAlmostEqual(float(abs(areas).sum()), 4.0)
+                            # UVs encode source position, so any mismapped polygon corner fails.
+                            assert_np_equal(
+                                np.asarray(mesh.uvs)[corners],
+                                vertices[indices.reshape(-1), :2] / np.array([3, 2], dtype=np.float32),
+                            )
+                            if face_normals:
+                                assert_np_equal(np.asarray(mesh.normals), np.tile([0, 0, 1], (len(vertices), 1)))
+                            builder = newton.ModelBuilder()
+                            builder.add_usd(str(path))
+                            model = builder.finalize(device="cpu")
+                            self.assertEqual(model.shape_count, 2)
+                            stage = None
+                            path.unlink()
+
     def test_get_mesh_accepts_usd_file_with_reference(self):
         """Load a mesh from a USD file containing a referenced asset."""
         with tempfile.TemporaryDirectory() as tmpdir:
