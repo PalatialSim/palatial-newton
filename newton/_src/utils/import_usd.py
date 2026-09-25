@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import collections
-import copy
 import datetime
 import hashlib
 import inspect
@@ -64,11 +63,11 @@ from .import_usd_deformable_attachments import (
 from .import_usd_deformable_cable import _deformable_import_cable, _deformable_import_cable_graphs
 from .import_usd_deformable_cloth import _deformable_import_cloth
 from .import_usd_deformable_utils import (
-    _LOADABLE_VISUAL_TYPE_NAMES_LOWER,
     _DeformableImportContext,
     _scout_deformable_prims,
 )
 from .import_usd_deformable_volume import _deformable_import_volume
+from .import_usd_visuals import _is_uniform_scale, _UsdVisualImporter
 
 logger = logging.getLogger("newton")
 
@@ -192,17 +191,6 @@ def _resolve_usd_cache_path(target_folder_name: str, relative_path: str) -> str:
     if os.path.normcase(common_path) != os.path.normcase(target_root):
         raise ValueError(f"USD reference path escapes the target folder: {relative_path}")
     return candidate
-
-
-def _is_uniform_scale(scale, rel_tol: float = 1.0e-6) -> bool:
-    """Whether the three components of a scale vector agree to within ``rel_tol``.
-
-    Scales reach the importer through single-precision transform decomposition, so an
-    exactly uniform scale routinely comes back with components a few ULP apart. An exact
-    ``==`` comparison reports those as non-uniform.
-    """
-    lo, hi = min(scale), max(scale)
-    return hi - lo <= rel_tol * max(abs(lo), abs(hi))
 
 
 def _warn_mirrored_body_transform(usd_prim, key: str, xform_cache) -> None:
@@ -752,10 +740,6 @@ def parse_usd(
     path_cable_segments: dict[str, dict[int, tuple[int, float]]] = {}
     # DOF offset within a merged D6 joint for each original prim path (only populated for merged joints)
     merged_dof_offset: dict[str, int] = {}
-    # cache for resolved material properties (keyed by prim path)
-    material_props_cache: dict[str, dict[str, Any]] = {}
-    # cache for mesh data loaded from USD prims
-    mesh_cache: dict[tuple[str, bool, bool], Mesh] = {}
     # cache for TetMesh data loaded from USD prims
     tetmesh_cache: dict[str, TetMesh] = {}
 
@@ -763,55 +747,11 @@ def parse_usd(
     max_solver_iters = None
     particle_scene_prim = None
 
-    visual_shape_cfg = ModelBuilder.ShapeConfig(
-        density=0.0,
-        has_shape_collision=False,
-        has_particle_collision=False,
-    )
-
     # Create a cache for world transforms to avoid recomputing them for each prim.
     xform_cache = UsdGeom.XformCache(Usd.TimeCode.Default())
-    traverse_instance_proxies = Usd.TraverseInstanceProxies()
-
-    def _is_enabled_collider(prim: Usd.Prim) -> bool:
-        if collider := UsdPhysics.CollisionAPI(prim):
-            return collider.GetCollisionEnabledAttr().Get()
-        return False
-
-    def _xform_to_mat44(xform: wp.transform) -> wp.mat44:
-        return wp.transform_compose(xform.p, xform.q, wp.vec3(1.0))
-
-    def _get_material_props_cached(prim: Usd.Prim) -> dict[str, Any]:
-        """Get material properties with caching to avoid repeated traversal."""
-        prim_path = str(prim.GetPath())
-        if prim_path not in material_props_cache:
-            material_props_cache[prim_path] = usd.resolve_material_properties_for_prim(prim)
-        return material_props_cache[prim_path]
-
-    def _get_mesh_cached(prim: Usd.Prim, *, load_uvs: bool = False, load_normals: bool = False) -> Mesh:
-        """Load and cache mesh data to avoid repeated expensive USD mesh extraction."""
-        prim_path = str(prim.GetPath())
-        key = (prim_path, load_uvs, load_normals)
-        if key in mesh_cache:
-            return mesh_cache[key]
-
-        # A mesh loaded with more data is a superset of simpler representations.
-        for cached_key in [
-            (prim_path, True, True),
-            (prim_path, load_uvs, True),
-            (prim_path, True, load_normals),
-        ]:
-            if cached_key != key and cached_key in mesh_cache:
-                return mesh_cache[cached_key]
-
-        mesh = usd.get_mesh(
-            prim,
-            load_uvs=load_uvs,
-            load_normals=load_normals,
-            load_visual_materials=False,
-        )
-        mesh_cache[key] = mesh
-        return mesh
+    visuals = _UsdVisualImporter(builder, stage, ignore_paths=ignore_paths, load_sites=load_sites, verbose=verbose)
+    visuals.path_shape_map = path_shape_map
+    visuals.path_shape_scale = path_shape_scale
 
     def _has_api_schema(prim: Usd.Prim, schema_name: str) -> bool:
         return bool(prim and prim.IsValid() and usd.has_applied_api_schema(prim, schema_name))
@@ -898,7 +838,7 @@ def parse_usd(
                 it.PruneChildren()
                 continue
             if prim.HasAPI(UsdPhysics.CollisionAPI):
-                if UsdPhysics.MassAPI(prim) and not _is_enabled_collider(prim):
+                if UsdPhysics.MassAPI(prim) and not visuals._is_enabled_collider(prim):
                     # OpenUSD reads authored mass after the callback, so a zero callback
                     # cannot exclude a disabled collider with MassAPI.
                     return True
@@ -1057,236 +997,6 @@ def parse_usd(
 
         return body0_info, body1_info
 
-    def _apply_visual_material(mesh: Mesh, material_props: dict[str, Any]) -> None:
-        """Apply one resolved USD visual material to its owning mesh."""
-        texture = material_props.get("texture")
-        if texture is not None:
-            mesh.texture = texture
-        if mesh.texture is not None:
-            # Textures provide albedo; do not tint them with the shape palette.
-            mesh.color = (1.0, 1.0, 1.0)
-        elif material_props.get("color") is not None:
-            mesh.color = material_props["color"]
-
-        for key in ("opacity", "roughness", "metallic", "texture_transform"):
-            value = material_props.get(key)
-            if value is not None:
-                setattr(mesh, key, value)
-
-    def _get_mesh_with_visual_material(prim: Usd.Prim, *, path_name: str) -> Mesh:
-        """Load a renderable mesh without changing physics mass properties."""
-        material_props = _get_material_props_cached(prim)
-        texture = material_props.get("texture")
-        physics_mesh = _get_mesh_cached(prim)
-        if texture is not None:
-            render_mesh = _get_mesh_cached(prim, load_uvs=True)
-            # Texture UV expansion is render-only. Preserve the collision mesh's
-            # mass/inertia so visibility changes do not perturb simulation.
-            mesh = Mesh(
-                render_mesh.vertices,
-                render_mesh.indices,
-                normals=render_mesh.normals,
-                uvs=render_mesh.uvs,
-                compute_inertia=False,
-                is_solid=physics_mesh.is_solid,
-                maxhullvert=physics_mesh.maxhullvert,
-                sdf=physics_mesh.sdf,
-            )
-            mesh.mass = physics_mesh.mass
-            mesh.com = physics_mesh.com
-            mesh.inertia = physics_mesh.inertia
-            mesh.has_inertia = physics_mesh.has_inertia
-        else:
-            mesh = physics_mesh.copy(recompute_inertia=False)
-        _apply_visual_material(mesh, material_props)
-        if mesh.texture is not None and mesh.uvs is None:
-            logger.info("Mesh %s has a texture but no UV coordinates; texture sampling is disabled.", path_name)
-        return mesh
-
-    def _get_face_material_subsets(prim: Usd.Prim) -> list[Usd.Prim]:
-        """Return face-based material subsets authored directly under a mesh prim."""
-        subsets = []
-        for child in prim.GetChildren():
-            try:
-                is_subset = child.IsA(UsdGeom.Subset)
-            except Exception:
-                is_subset = False
-            if not is_subset:
-                continue
-
-            subset = UsdGeom.Subset(child)
-            element_type = subset.GetElementTypeAttr().Get()
-            if element_type != UsdGeom.Tokens.face:
-                continue
-            family_name = subset.GetFamilyNameAttr().Get()
-            if family_name and family_name != "materialBind":
-                continue
-            indices = subset.GetIndicesAttr().Get()
-            if not indices:
-                continue
-            subsets.append(child)
-        return subsets
-
-    def _get_subset_uvs(prim: Usd.Prim, used_vertices: np.ndarray, expected_count: int) -> np.ndarray | None:
-        """Return UVs for a material subset when a matching primvar is authored."""
-        max_used_vertex = int(np.max(used_vertices, initial=-1))
-        full_mesh_uvs = None
-        for primvar in UsdGeom.PrimvarsAPI(prim).GetPrimvars():
-            name = primvar.GetBaseName()
-            if not name.startswith("st"):
-                continue
-            values = primvar.Get()
-            if values is None:
-                continue
-            uvs = np.asarray(values, dtype=np.float32)
-            if primvar.IsIndexed():
-                indices = primvar.GetIndices()
-                if indices is None:
-                    continue
-                indices = np.asarray(indices, dtype=np.int32)
-                if len(indices) == expected_count:
-                    uvs = uvs[indices]
-                    if len(uvs) == expected_count:
-                        return uvs
-                    continue
-                if len(indices) > max_used_vertex:
-                    uvs = uvs[indices]
-                else:
-                    continue
-            if len(uvs) == expected_count:
-                return uvs
-            if full_mesh_uvs is None and len(uvs) > max_used_vertex:
-                full_mesh_uvs = uvs[used_vertices]
-        return full_mesh_uvs
-
-    def _make_visual_submesh(
-        mesh: Mesh,
-        triangle_indices: np.ndarray,
-        material_props: dict[str, Any],
-        *,
-        prim: Usd.Prim,
-        path_name: str,
-    ) -> Mesh | None:
-        """Create a render-only mesh slice for the selected triangle rows."""
-        if len(triangle_indices) == 0:
-            return None
-
-        triangles = mesh.indices.reshape(-1, 3)[triangle_indices]
-        used_vertices = np.unique(triangles)
-        vertex_remap = np.full(len(mesh.vertices), -1, dtype=np.int32)
-        vertex_remap[used_vertices] = np.arange(len(used_vertices), dtype=np.int32)
-
-        normals = None
-        if mesh.normals is not None and len(mesh.normals) == len(mesh.vertices):
-            normals = mesh.normals[used_vertices]
-
-        uvs = None
-        if mesh.uvs is not None and len(mesh.uvs) == len(mesh.vertices):
-            uvs = mesh.uvs[used_vertices]
-        elif material_props.get("texture") is not None:
-            uvs = _get_subset_uvs(prim, used_vertices, len(used_vertices))
-
-        submesh = Mesh(
-            mesh.vertices[used_vertices],
-            vertex_remap[triangles].reshape(-1),
-            normals=normals,
-            uvs=uvs,
-            compute_inertia=False,
-            is_solid=mesh.is_solid,
-            maxhullvert=mesh.maxhullvert,
-        )
-
-        _apply_visual_material(submesh, material_props)
-        if submesh.texture is not None and submesh.uvs is None:
-            logger.info(
-                "Mesh material subset %s has a texture but no UV coordinates; texture sampling is disabled.",
-                path_name,
-            )
-        return submesh
-
-    def _get_visual_material_subset_meshes(prim: Usd.Prim) -> list[tuple[str, Mesh]]:
-        """Load one render mesh per USD material subset when subsets are authored."""
-        subsets = _get_face_material_subsets(prim)
-        if not subsets:
-            return []
-
-        mesh_schema = UsdGeom.Mesh(prim)
-        face_counts = mesh_schema.GetFaceVertexCountsAttr().Get()
-        if face_counts is None:
-            return []
-        face_counts = np.asarray(face_counts, dtype=np.int32)
-        if len(face_counts) == 0 or np.any(face_counts < 3):
-            return []
-
-        subset_props = [(str(subset.GetPath()), usd.resolve_material_properties_for_prim(subset)) for subset in subsets]
-        # Load UVs (and matching authored normals) so each submesh slices real
-        # per-corner texture coordinates instead of recovering per-vertex UVs,
-        # which scrambles faceVarying UV sets. UV loading unwelds vertices while
-        # preserving triangle order, so the per-face subset selection still aligns.
-        mesh = _get_mesh_cached(prim, load_uvs=True, load_normals=True)
-        triangle_face_indices = np.repeat(np.arange(len(face_counts), dtype=np.int32), face_counts - 2)
-        covered_faces = np.zeros(len(face_counts), dtype=bool)
-
-        submeshes = []
-        for subset_path, material_props in subset_props:
-            # Split on authored binding structure, not on whether the bound material's properties
-            # resolve: a subset that binds a material Newton does not recognize still becomes its
-            # own (unshaded) submesh, so import topology never depends on material vocabulary.
-            # The gate is "a binding authored on the subset itself" — direct or collection-based,
-            # with or without MaterialBindingAPI applied. ComputeBoundMaterial is deliberately not
-            # used here: every subset inherits the parent mesh's binding through it, so full
-            # resolution would split unbound subsets, and an ancestor rebind with
-            # strongerThanDescendants would make topology depend on rebinding again. Subsets with
-            # no authored binding fall through to the uncovered-faces fallback below, which
-            # applies the parent mesh material.
-            subset = UsdGeom.Subset(stage.GetPrimAtPath(subset_path))
-            has_authored_binding = any(
-                rel.GetName().startswith("material:binding") and rel.GetTargets()
-                for rel in subset.GetPrim().GetRelationships()
-            )
-            if not has_authored_binding:
-                continue
-            subset_indices = np.asarray(subset.GetIndicesAttr().Get(), dtype=np.int32)
-            valid = (subset_indices >= 0) & (subset_indices < len(face_counts))
-            if not np.all(valid):
-                logger.info(
-                    "Mesh material subset %s: face indices outside the mesh face range; "
-                    "out-of-range indices will be ignored.",
-                    subset_path,
-                )
-                subset_indices = subset_indices[valid]
-            if len(subset_indices) == 0:
-                continue
-
-            face_mask = np.zeros(len(face_counts), dtype=bool)
-            face_mask[subset_indices] = True
-            triangle_indices = np.nonzero(face_mask[triangle_face_indices])[0]
-            submesh = _make_visual_submesh(mesh, triangle_indices, material_props, prim=prim, path_name=subset_path)
-            if submesh is None:
-                continue
-            covered_faces[subset_indices] = True
-            submeshes.append((subset_path, submesh))
-
-        if not submeshes:
-            return []
-
-        uncovered_faces = np.nonzero(~covered_faces)[0]
-        if len(uncovered_faces) > 0:
-            face_mask = np.zeros(len(face_counts), dtype=bool)
-            face_mask[uncovered_faces] = True
-            triangle_indices = np.nonzero(face_mask[triangle_face_indices])[0]
-            fallback_mesh = _make_visual_submesh(
-                mesh,
-                triangle_indices,
-                _get_material_props_cached(prim),
-                prim=prim,
-                path_name=str(prim.GetPath()),
-            )
-            if fallback_mesh is not None:
-                submeshes.insert(0, (str(prim.GetPath()), fallback_mesh))
-
-        return submeshes
-
     def _get_tetmesh_cached(prim: Usd.Prim) -> TetMesh:
         """Load and cache TetMesh data to avoid repeated USD extraction."""
         prim_path = str(prim.GetPath())
@@ -1315,324 +1025,9 @@ def parse_usd(
             )
         return tetmesh_cache[prim_path]
 
-    def _get_axial_visual_dimensions(
-        prim: Usd.Prim, scale: wp.vec3, axis: Axis, default_radius: float, default_height: float
-    ) -> tuple[float, float]:
-        """Return scaled (radius, half_height); radius uses the largest perpendicular scale to match UsdPhysics."""
-        radius = usd.get_float(prim, "radius", default_radius)
-        half_height = usd.get_float(prim, "height", default_height) / 2
-        axis_index = int(axis)
-        radius_scale = max(scale[index] for index in range(3) if index != axis_index)
-        return radius * radius_scale, half_height * scale[axis_index]
-
-    def _get_planar_visual_dimensions(prim: Usd.Prim, scale: wp.vec3, axis: Axis) -> tuple[float, float]:
-        """Return scaled (width, length); UsdGeomPlane aligns width to Z for X-axis planes and length to Z for Y-axis planes."""
-        width_scale = scale[2] if axis == Axis.X else scale[0]
-        length_scale = scale[2] if axis == Axis.Y else scale[1]
-        width = usd.get_float(prim, "width", 0.0) * width_scale
-        length = usd.get_float(prim, "length", 0.0) * length_scale
-        return width, length
-
     def _has_visual_material_properties(material_props: dict[str, Any]) -> bool:
         # Require PBR-like material cues to avoid promoting generic displayColor-only colliders.
         return any(material_props.get(key) is not None for key in ("texture", "roughness", "metallic"))
-
-    def _is_effectively_visible(prim: Usd.Prim) -> bool:
-        """Return whether ``prim`` is effectively visible in USD.
-
-        A prim is effectively visible only when it is a :class:`UsdGeom.Imageable`
-        whose inherited visibility is not ``invisible``. Non-imageable prims are
-        not renderable in USD, so they are treated as not effectively visible.
-        """
-        imageable = UsdGeom.Imageable(prim)
-        if not imageable:
-            return False
-        return imageable.ComputeVisibility() != UsdGeom.Tokens.invisible
-
-    def _is_viewport_drawn(prim: Usd.Prim) -> bool:
-        """Return whether a prim is drawn under viewport semantics.
-
-        USD viewports draw the ``default`` and ``proxy`` purposes and hide ``guide`` and
-        ``render``; the allowlist also keeps any future purpose hidden until explicitly
-        handled. This is what decides whether a collider is drawn: ``guide`` is the
-        conventional purpose for authored collision geometry (e.g. the MuJoCo USD
-        exporter), and such a prim is not viewport geometry. ``force_show_colliders``
-        is the explicit override for inspecting it anyway.
-        """
-        if not _is_effectively_visible(prim):
-            return False
-        return UsdGeom.Imageable(prim).ComputePurpose() in (UsdGeom.Tokens.default_, UsdGeom.Tokens.proxy)
-
-    bodies_with_visual_shapes: set[int] = set()
-
-    def _get_prim_world_mat(prim, articulation_root_xform, incoming_world_xform):
-        prim_world_mat = usd.get_transform_matrix(prim, local=False, xform_cache=xform_cache)
-        if articulation_root_xform is not None:
-            rebase_mat = _xform_to_mat44(wp.transform_inverse(articulation_root_xform))
-            prim_world_mat = rebase_mat @ prim_world_mat
-        if incoming_world_xform is not None:
-            # Apply the incoming world transform in model space (static shapes or when using body_xform).
-            incoming_mat = _xform_to_mat44(incoming_world_xform)
-            prim_world_mat = incoming_mat @ prim_world_mat
-        return prim_world_mat
-
-    def _load_visual_shape_children(
-        parent_body_id: int,
-        prim: Usd.Prim,
-        body_xform: wp.transform | None,
-        articulation_root_xform: wp.transform | None,
-        allow_visual_shapes: bool,
-    ):
-        for child in prim.GetFilteredChildren(traverse_instance_proxies):
-            _load_visual_shapes_impl(parent_body_id, child, body_xform, articulation_root_xform, allow_visual_shapes)
-
-    def _load_visual_shapes_impl(
-        parent_body_id: int,
-        prim: Usd.Prim,
-        body_xform: wp.transform | None = None,
-        articulation_root_xform: wp.transform | None = None,
-        allow_visual_shapes: bool = True,
-        recurse: bool = True,
-    ):
-        """Load visual shapes and sites for a prim subtree.
-
-        Args:
-            parent_body_id: ModelBuilder body id to attach shapes to. Use -1 for
-                static shapes that are not bound to any rigid body.
-            prim: USD prim to inspect for visual geometry and recurse into.
-            body_xform: Rigid body transform actually used by the builder.
-                This matches any physics-authored pose, scene-level transforms,
-                and incoming transforms that were applied when the body was created.
-            articulation_root_xform: The articulation root's world-space transform,
-                passed when override_root_xform=True. Strips the root's original
-                pose from visual prim transforms to match the rebased body transforms.
-            allow_visual_shapes: Whether non-site geometry may be loaded from this subtree.
-            recurse: Whether to inspect child prims after processing ``prim``.
-        """
-        if prim.HasAPI(UsdPhysics.RigidBodyAPI):
-            return
-        path_name = str(prim.GetPath())
-        if any(re.match(path, path_name) for path in ignore_paths):
-            return
-        if _is_enabled_collider(prim):
-            if recurse:
-                _load_visual_shape_children(parent_body_id, prim, body_xform, articulation_root_xform, False)
-            return
-
-        type_name = str(prim.GetTypeName()).lower()
-        if type_name.endswith("joint"):
-            return
-
-        is_site = usd.has_applied_api_schema(prim, "NewtonSiteAPI") or usd.has_applied_api_schema(prim, "MjcSiteAPI")
-        if is_site and not load_sites:
-            return
-        if not is_site and not allow_visual_shapes:
-            if recurse:
-                _load_visual_shape_children(
-                    parent_body_id, prim, body_xform, articulation_root_xform, allow_visual_shapes
-                )
-            return
-        if type_name not in _LOADABLE_VISUAL_TYPE_NAMES_LOWER:
-            # Skip the transform/material work below for prims that cannot produce a shape.
-            if (
-                len(type_name) > 0
-                and type_name not in {"geomsubset", "material", "scope", "shader", "xform", "tetmesh"}
-                and path_name not in path_shape_map
-                and verbose
-            ):
-                print(f"Warning: Unsupported geometry type {type_name} at {path_name} while loading visual shapes.")
-            if recurse:
-                _load_visual_shape_children(
-                    parent_body_id, prim, body_xform, articulation_root_xform, allow_visual_shapes
-                )
-            return
-
-        prim_world_mat = _get_prim_world_mat(
-            prim,
-            articulation_root_xform,
-            incoming_world_xform if (parent_body_id == -1 or body_xform is not None) else None,
-        )
-        if body_xform is not None:
-            # Use the body transform used by the builder to avoid USD/physics pose mismatches.
-            body_world_mat = _xform_to_mat44(body_xform)
-            rel_mat = wp.inverse(body_world_mat) @ prim_world_mat
-        else:
-            rel_mat = prim_world_mat
-
-        xform_pos, xform_rot, scale = wp.transform_decompose(rel_mat)
-        xform = wp.transform(xform_pos, xform_rot)
-
-        shape_id = -1
-
-        visual_shape_cfg_for_prim = copy.copy(visual_shape_cfg)
-        visual_shape_cfg_for_prim.is_visible = is_site or _is_viewport_drawn(prim)
-        material_props = _get_material_props_cached(prim)
-        shape_color = material_props.get("color")
-        shape_visual_kwargs = {}
-        if material_props.get("opacity") is not None:
-            shape_visual_kwargs["opacity"] = material_props["opacity"]
-        # A textured mesh resolves no scalar color on purpose, so the texture is not tinted;
-        # the mesh path gives it white. Geometry that never receives the texture still wants
-        # the neutral, otherwise it falls through to a palette color.
-        carries_texture = material_props.get("texture") is not None and type_name == "mesh"
-        if shape_color is None and not carries_texture and visual_shape_cfg_for_prim.is_visible:
-            shape_color = _UNMATERIALED_VISUAL_COLOR
-
-        if path_name not in path_shape_map:
-            if type_name == "cube":
-                size = usd.get_float(prim, "size", 2.0)
-                side_lengths = scale * size
-                shape_id = builder.add_shape_box(
-                    parent_body_id,
-                    xform=xform,
-                    hx=side_lengths[0] / 2,
-                    hy=side_lengths[1] / 2,
-                    hz=side_lengths[2] / 2,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    as_site=is_site,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "sphere":
-                if not _is_uniform_scale(scale):
-                    print(f"Warning: Non-uniform scaling of spheres is not supported, at {path_name}.")
-                radius = usd.get_float(prim, "radius", 1.0) * max(scale)
-                shape_id = builder.add_shape_sphere(
-                    parent_body_id,
-                    xform=xform,
-                    radius=radius,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    as_site=is_site,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "plane":
-                axis = usd.get_gprim_axis(prim)
-                width, length = _get_planar_visual_dimensions(prim, scale, axis)
-                # Apply axis rotation to transform
-                xform = wp.transform(xform.p, xform.q * quat_between_axes(Axis.Z, axis))
-                shape_id = builder.add_shape_plane(
-                    body=parent_body_id,
-                    xform=xform,
-                    width=width,
-                    length=length,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "capsule":
-                axis = usd.get_gprim_axis(prim)
-                radius, half_height = _get_axial_visual_dimensions(
-                    prim, scale, axis, default_radius=0.5, default_height=1.0
-                )
-                # Apply axis rotation to transform
-                xform = wp.transform(xform.p, xform.q * quat_between_axes(Axis.Z, axis))
-                shape_id = builder.add_shape_capsule(
-                    parent_body_id,
-                    xform=xform,
-                    radius=radius,
-                    half_height=half_height,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    as_site=is_site,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "cylinder":
-                axis = usd.get_gprim_axis(prim)
-                radius, half_height = _get_axial_visual_dimensions(
-                    prim, scale, axis, default_radius=1.0, default_height=2.0
-                )
-                # Apply axis rotation to transform
-                xform = wp.transform(xform.p, xform.q * quat_between_axes(Axis.Z, axis))
-                shape_id = builder.add_shape_cylinder(
-                    parent_body_id,
-                    xform=xform,
-                    radius=radius,
-                    half_height=half_height,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    as_site=is_site,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "cone":
-                axis = usd.get_gprim_axis(prim)
-                radius, half_height = _get_axial_visual_dimensions(
-                    prim, scale, axis, default_radius=1.0, default_height=2.0
-                )
-                # Apply axis rotation to transform
-                xform = wp.transform(xform.p, xform.q * quat_between_axes(Axis.Z, axis))
-                shape_id = builder.add_shape_cone(
-                    parent_body_id,
-                    xform=xform,
-                    radius=radius,
-                    half_height=half_height,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    as_site=is_site,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            elif type_name == "mesh":
-                subset_meshes = _get_visual_material_subset_meshes(prim)
-                if subset_meshes:
-                    for subset_path, subset_mesh in subset_meshes:
-                        subset_shape_id = builder.add_shape_mesh(
-                            parent_body_id,
-                            xform=xform,
-                            scale=scale,
-                            mesh=subset_mesh,
-                            cfg=visual_shape_cfg_for_prim,
-                            color=None,
-                            label=subset_path,
-                        )
-                        path_shape_map[subset_path] = subset_shape_id
-                        path_shape_scale[subset_path] = scale
-                        if shape_id < 0:
-                            shape_id = subset_shape_id
-                        if verbose:
-                            print(
-                                f"Added visual shape {subset_path} ({type_name} material subset) "
-                                f"with id {subset_shape_id}."
-                            )
-                else:
-                    mesh = _get_mesh_with_visual_material(prim, path_name=path_name)
-                    shape_id = builder.add_shape_mesh(
-                        parent_body_id,
-                        xform=xform,
-                        scale=scale,
-                        mesh=mesh,
-                        cfg=visual_shape_cfg_for_prim,
-                        color=shape_color,
-                        label=path_name,
-                        **shape_visual_kwargs,
-                    )
-            elif type_name == "particlefield3dgaussiansplat":
-                gaussian = usd.get_gaussian(prim)
-                shape_id = builder.add_shape_gaussian(
-                    parent_body_id,
-                    gaussian=gaussian,
-                    xform=xform,
-                    scale=scale,
-                    cfg=visual_shape_cfg_for_prim,
-                    color=shape_color,
-                    label=path_name,
-                    **shape_visual_kwargs,
-                )
-            if shape_id >= 0:
-                path_shape_map[path_name] = shape_id
-                path_shape_scale[path_name] = scale
-                if not is_site and visual_shape_cfg_for_prim.is_visible:
-                    bodies_with_visual_shapes.add(parent_body_id)
-                if verbose:
-                    print(f"Added visual shape {path_name} ({type_name}) with id {shape_id}.")
-
-        if recurse:
-            _load_visual_shape_children(parent_body_id, prim, body_xform, articulation_root_xform, allow_visual_shapes)
 
     def add_body(
         prim: Usd.Prim,
@@ -1657,7 +1052,7 @@ def parse_usd(
         builder.body_qd[b] = body_qd
         path_body_map[label] = b
         if load_sites or load_visual_shapes:
-            _load_visual_shape_children(b, prim, xform, articulation_root_xform, load_visual_shapes)
+            visuals._load_visual_shape_children(b, prim, xform, articulation_root_xform, load_visual_shapes)
         return b
 
     def parse_body(
@@ -2530,6 +1925,7 @@ def parse_usd(
         incoming_world_xform = axis_xform
     else:
         incoming_world_xform = wp.transform(*xform) * axis_xform
+    visuals.incoming_world_xform = incoming_world_xform
 
     if scene_gravity_direction is not None:
         gravity_direction = wp.vec3(*scene_gravity_direction)
@@ -2603,7 +1999,7 @@ def parse_usd(
         root_prim,
         ignore_paths=ignore_paths,
         xform_cache=xform_cache,
-        incoming_world_mat=_xform_to_mat44(incoming_world_xform),
+        incoming_world_mat=visuals._xform_to_mat44(incoming_world_xform),
         linear_unit=linear_unit,
         mass_unit=mass_unit,
         scene_preflight=_preflight_mpm_scene,
@@ -2778,7 +2174,7 @@ def parse_usd(
                     if descendant != prim and descendant.HasAPI(UsdPhysics.RigidBodyAPI):
                         descendants.PruneChildren()
                         continue
-                    if _is_enabled_collider(descendant) and descendant.HasAPI(UsdPhysics.MassAPI):
+                    if visuals._is_enabled_collider(descendant) and descendant.HasAPI(UsdPhysics.MassAPI):
                         bodies_requiring_mass_properties_fallback.add(body_path)
                         break
                 continue
@@ -3549,7 +2945,7 @@ def parse_usd(
             path = str(prim.GetPath())
             if path in deformable_visual_exclude_paths or path in path_shape_map or _is_in_rigid_body_hierarchy(path):
                 continue
-            _load_visual_shapes_impl(-1, prim, recurse=False)
+            visuals._load_visual_shapes_impl(-1, prim, recurse=False)
 
     no_collision_shapes = set()
     collision_group_ids = {}
@@ -3570,7 +2966,7 @@ def parse_usd(
     ):
         """Record collider mass information used by the rigid-body fallback callback."""
         body_path = str(shape_spec.rigidBody)
-        if body_path not in bodies_requiring_mass_properties_fallback or not _is_enabled_collider(prim):
+        if body_path not in bodies_requiring_mass_properties_fallback or not visuals._is_enabled_collider(prim):
             return
 
         shape_geo_type = None
@@ -3595,7 +2991,7 @@ def parse_usd(
         elif shape_type == UsdPhysics.ObjectType.MeshShape:
             shape_geo_type = GeoType.MESH
             shape_scale = wp.vec3(*shape_spec.meshScale)
-            shape_src = _get_mesh_cached(prim)
+            shape_src = visuals._get_mesh_cached(prim)
         if shape_geo_type is None:
             return
 
@@ -3646,7 +3042,7 @@ def parse_usd(
                 if any(re.match(p, path) for p in ignore_paths):
                     continue
                 prim = stage.GetPrimAtPath(xpath)
-                collider_is_enabled = _is_enabled_collider(prim)
+                collider_is_enabled = visuals._is_enabled_collider(prim)
                 # Deformable-owned meshes never reach this loop: the scout excludes them
                 # from the native parse. A sim-API mesh seen here was deliberately left
                 # rigid (e.g. its body API conflicts with RigidBodyAPI), so import it.
@@ -3726,8 +3122,8 @@ def parse_usd(
                         )
                     margin_val = newton_margin
 
-                has_body_visual_shapes = load_visual_shapes and body_id in bodies_with_visual_shapes
-                material_props = _get_material_props_cached(prim)
+                has_body_visual_shapes = load_visual_shapes and body_id in visuals.bodies_with_visual_shapes
+                material_props = visuals._get_material_props_cached(prim)
 
                 # Explicit hide_collision_shapes overrides drawability:
                 # if the body already has visual shapes, hide its colliders unconditionally.
@@ -3738,12 +3134,16 @@ def parse_usd(
                 # scene is visible -- an asset whose geometry is all ``guide`` has no render
                 # geometry, and an empty viewport is the honest result of that. Reach for
                 # ``force_show_colliders`` to inspect such a scene.
-                collider_is_visible = (force_show_colliders or _is_viewport_drawn(prim)) and not hide_collider_for_body
+                collider_is_visible = (
+                    force_show_colliders or visuals._is_viewport_drawn(prim)
+                ) and not hide_collider_for_body
                 # Approximating a viewport-drawn collider splits off its authored topology
                 # as a visual shape (see the approximation pass below). That copy is subject
                 # to ``hide_collision_shapes`` as well, so that the flag does not turn into a
                 # no-op for exactly those colliders that carry ``physics:approximation``.
-                splits_off_visual_copy = load_visual_shapes and _is_viewport_drawn(prim) and not hide_collider_for_body
+                splits_off_visual_copy = (
+                    load_visual_shapes and visuals._is_viewport_drawn(prim) and not hide_collider_for_body
+                )
 
                 # Contact response precedence:
                 #   per-shape mjc:solref (non-legacy) > material > legacy per-shape > default
@@ -4066,13 +3466,13 @@ def parse_usd(
                     if collider_is_visible or splits_off_visual_copy:
                         # Drawn colliders should render with the same visual material metadata
                         # as visual-only mesh imports.
-                        mesh = _get_mesh_with_visual_material(prim, path_name=path)
+                        mesh = visuals._get_mesh_with_visual_material(prim, path_name=path)
                     else:
                         # Not viewport-drawn, but the viewer still draws these under show_collision /
                         # show_static. Mutating the shared cache entry is safe: both caches key on the
                         # prim path, so every consumer resolves the same values.
-                        mesh = _get_mesh_cached(prim)
-                        _apply_visual_material(mesh, material_props)
+                        mesh = visuals._get_mesh_cached(prim)
+                        visuals._apply_visual_material(mesh, material_props)
                     mesh.maxhullvert = R.get_value(
                         prim,
                         prim_type=PrimType.SHAPE,
@@ -4227,7 +3627,7 @@ def parse_usd(
 
     def _get_collision_mass_information(collider_prim: Usd.Prim):
         """MassInformation callback for ``ComputeMassProperties`` with one-time warning on misses."""
-        if not _is_enabled_collider(collider_prim):
+        if not visuals._is_enabled_collider(collider_prim):
             return zero_mass_information
         collider_path = str(collider_prim.GetPath())
         is_expected_missing = (
@@ -4598,7 +3998,7 @@ def parse_usd(
             resolver=R,
             collect_schema_attrs=collect_schema_attrs,
             deformable_read=deformable_read,
-            get_prim_world_mat=_get_prim_world_mat,
+            get_prim_world_mat=visuals._get_prim_world_mat,
             get_rigid_body_ancestor_path=_get_rigid_body_ancestor_path,
             get_first_target=_get_first_target,
             get_tetmesh_cached=_get_tetmesh_cached,

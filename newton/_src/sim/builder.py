@@ -3762,6 +3762,32 @@ class ModelBuilder:
             override_root_xform=override_root_xform,
         )
 
+    def add_usd_visuals(self, source: str | UsdStage, *, body_paths: list[str]) -> dict[str, Any]:
+        """Add USD appearance for replay of externally recorded rigid-body poses.
+
+        This imports no authored joints, mass properties, colliders or deformable
+        simulation. Shapes use the same materials and geometry extraction as
+        :meth:`add_usd`. Each named body becomes an independent kinematic carrier;
+        callers supply its recorded world pose to the resulting model state.
+
+        Args:
+            source: File path or composed USD stage. Requires metersPerUnit=1
+                and the same up axis as this builder.
+            body_paths: Unique enabled rigid-body prim paths whose poses will
+                be supplied, in world meters and XYZW quaternion order.
+
+        Returns:
+            Dictionaries ``path_body_map``, ``path_shape_map`` and
+            ``path_shape_scale`` mapping USD prim paths to builder bodies,
+            shapes and geometry scales respectively. Static visual geometry
+            remains in world space. Visibility follows default/proxy viewport
+            purposes. Unsupported affine transforms and time-varying geometry
+            raise an error instead of changing the appearance.
+        """
+        from ..utils.import_usd_visuals import parse_usd_visuals  # noqa: PLC0415
+
+        return parse_usd_visuals(self, source, body_paths=body_paths)
+
     def add_usd(
         self,
         source: str | UsdStage,

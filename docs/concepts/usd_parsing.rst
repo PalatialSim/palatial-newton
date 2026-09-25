@@ -1458,3 +1458,21 @@ cached for the lifetime of the process; after that point,
 
    .. _threadLimits.h: https://openusd.org/dev/api/thread_limits_8h.html
    .. _threadLimits.cpp: https://github.com/PixarAnimationStudios/OpenUSD/blob/release/pxr/base/work/threadLimits.cpp
+
+Rigid pose replay
+-----------------
+
+:meth:`newton.ModelBuilder.add_usd_visuals` imports appearance without parsing
+authored physics joints, collisions, or mass properties. Supply the exact rigid
+body prim paths whose world poses will be assigned to the model state. Each
+path receives an independent kinematic carrier, so reversed or orphan authored
+joints cannot prevent replay of poses measured by another simulator.
+
+The importer shares mesh, material-subset, texture and primitive extraction with
+:meth:`~newton.ModelBuilder.add_usd`. Static viewport geometry retains its world
+placement. The stage must use meters and the builder's up axis. Deformable or
+time-varying local geometry and transforms that cannot be represented faithfully
+raise an error; the importer does not repair or approximate the source.
+
+This model is for visualization only. Its carrier mass, generated free joints
+and disabled collision flags are not physical validation evidence.
