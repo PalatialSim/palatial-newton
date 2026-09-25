@@ -996,55 +996,73 @@ def _split_corners_into_vertices(
     return new_points, new_indices, new_normals, new_uvs
 
 
-def _triangulate_face_corners(points: np.ndarray, counts: Sequence[int], indices: np.ndarray) -> np.ndarray:
+def _triangulate_face_corners(
+    points: np.ndarray, counts: Sequence[int], indices: np.ndarray, *, mesh_path: str = ""
+) -> np.ndarray:
     """Tessellate simple polygons while retaining source corner indices for UVs and normals.
 
     Convex faces keep the existing fan order. Concave faces use ear clipping in
     the dominant plane; normalized coordinates make the tolerance scale independent.
     """
-    corners = fan_triangulate_faces(np.asarray(counts), np.arange(len(indices), dtype=np.int32))
-    corner_offset = triangle_offset = 0
-    for count in counts:
-        if count > 3:
-            polygon = points[indices[corner_offset : corner_offset + count]].astype(np.float64)
-            polygon -= polygon.mean(axis=0)
-            normal = np.cross(polygon, np.roll(polygon, -1, axis=0)).sum(axis=0)
-            projected = np.delete(polygon, np.argmax(np.abs(normal)), axis=1)
-            scale = np.ptp(projected, axis=0).max()
-            if scale > 0:
-                projected /= scale
-                edges = np.roll(projected, -1, axis=0) - projected
-                turns = edges[:, 0] * np.roll(edges[:, 1], -1) - edges[:, 1] * np.roll(edges[:, 0], -1)
-                tolerance = 1e-12
-                if np.any(turns < -tolerance) and np.any(turns > tolerance):
-                    area = np.sum(
-                        projected[:, 0] * np.roll(projected[:, 1], -1) - projected[:, 1] * np.roll(projected[:, 0], -1)
-                    )
-                    orientation = np.sign(area)
-                    remaining = list(range(count))
-                    triangles = []
-                    while len(remaining) > 3:
-                        for index, current in enumerate(remaining):
-                            previous, following = remaining[index - 1], remaining[(index + 1) % len(remaining)]
-                            triangle = projected[[previous, current, following]]
-                            sides = np.roll(triangle, -1, axis=0) - triangle
-                            turn = sides[0, 0] * sides[1, 1] - sides[0, 1] * sides[1, 0]
-                            if orientation * turn <= tolerance:
-                                continue
-                            others = [corner for corner in remaining if corner not in (previous, current, following)]
-                            delta = projected[others, None, :] - triangle
-                            cross = sides[:, 0] * delta[:, :, 1] - sides[:, 1] * delta[:, :, 0]
-                            if np.any(np.all(orientation * cross >= -tolerance, axis=1)):
-                                continue
-                            triangles.append([previous, current, following])
-                            remaining.pop(index)
-                            break
-                        else:
-                            raise ValueError("Cannot tessellate USD polygon: degenerate or self-intersecting boundary")
-                    triangles.append(remaining)
-                    corners[triangle_offset : triangle_offset + count - 2] = np.asarray(triangles) + corner_offset
-        corner_offset += count
-        triangle_offset += count - 2
+    counts = np.asarray(counts, dtype=np.int32)
+    corners = fan_triangulate_faces(counts, np.arange(len(indices), dtype=np.int32))
+    offsets = np.concatenate(([0], np.cumsum(counts[:-1])))
+    triangle_offsets = offsets - 2 * np.arange(len(counts))
+    tolerance = 1e-12
+    degenerate_faces = []
+    # Batch the common convex case; only concave faces need a Python clipping loop.
+    for count in np.unique(counts[counts > 3]):
+        face_ids = np.flatnonzero(counts == count)
+        polygon = points[indices[offsets[face_ids, None] + np.arange(count)]].astype(np.float64)
+        polygon -= polygon.mean(axis=1, keepdims=True)
+        normal = np.cross(polygon, np.roll(polygon, -1, axis=1)).sum(axis=1)
+        axes = np.array([[1, 2], [0, 2], [0, 1]])[np.argmax(np.abs(normal), axis=1)]
+        projected = np.take_along_axis(polygon, axes[:, None, :], axis=2)
+        scale = np.ptp(projected, axis=1).max(axis=1)
+        projected /= np.where(scale > 0, scale, 1)[:, None, None]
+        edges = np.roll(projected, -1, axis=1) - projected
+        turns = edges[:, :, 0] * np.roll(edges[:, :, 1], -1, axis=1) - edges[:, :, 1] * np.roll(
+            edges[:, :, 0], -1, axis=1
+        )
+        concave = np.any(turns < -tolerance, axis=1) & np.any(turns > tolerance, axis=1)
+        for face_id, face in zip(face_ids[concave], projected[concave], strict=True):
+            area = np.sum(face[:, 0] * np.roll(face[:, 1], -1) - face[:, 1] * np.roll(face[:, 0], -1))
+            # Repeated corners and zero-area boundaries are not simple polygons.
+            # Preserve their legacy geometry rather than guessing an authored surface.
+            if abs(area) <= tolerance or len(np.unique(face, axis=0)) < count:
+                degenerate_faces.append(int(face_id))
+                continue
+            orientation = np.sign(area)
+            remaining = list(range(count))
+            triangles = []
+            while len(remaining) > 3:
+                for index, current in enumerate(remaining):
+                    previous, following = remaining[index - 1], remaining[(index + 1) % len(remaining)]
+                    triangle = face[[previous, current, following]]
+                    sides = np.roll(triangle, -1, axis=0) - triangle
+                    turn = sides[0, 0] * sides[1, 1] - sides[0, 1] * sides[1, 0]
+                    if orientation * turn <= tolerance:
+                        continue
+                    others = [corner for corner in remaining if corner not in (previous, current, following)]
+                    delta = face[others, None, :] - triangle
+                    cross = sides[:, 0] * delta[:, :, 1] - sides[:, 1] * delta[:, :, 0]
+                    if np.any(np.all(orientation * cross >= -tolerance, axis=1)):
+                        continue
+                    triangles.append([previous, current, following])
+                    remaining.pop(index)
+                    break
+                else:
+                    raise ValueError("Cannot tessellate USD polygon: degenerate or self-intersecting boundary")
+            triangles.append(remaining)
+            start = triangle_offsets[face_id]
+            corners[start : start + count - 2] = np.asarray(triangles) + offsets[face_id]
+    if degenerate_faces:
+        logger.warning(
+            "USD mesh %s: retained fan tessellation for %d degenerate projected boundaries (first faces: %s).",
+            mesh_path,
+            len(degenerate_faces),
+            degenerate_faces[:10],
+        )
     return corners
 
 
@@ -1747,7 +1765,7 @@ def get_mesh(
             else:
                 raise ValueError(f"Invalid face_varying_normal_conversion: {face_varying_normal_conversion}")
 
-    corner_faces = _triangulate_face_corners(points, counts, indices)
+    corner_faces = _triangulate_face_corners(points, counts, indices, mesh_path=str(prim.GetPath()))
     faces = indices[corner_faces]
 
     flip_winding = False

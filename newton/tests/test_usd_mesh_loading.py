@@ -84,7 +84,9 @@ class TestUsdMeshHelpers(unittest.TestCase):
                             if left_handed:
                                 shape.CreateOrientationAttr("leftHanded")
                             if face_normals:
-                                shape.CreateNormalsAttr([Gf.Vec3f(0, 0, 1)] * len(outline))
+                                shape.CreateNormalsAttr(
+                                    [Gf.Vec3f(float(p[0]) / 10, float(p[1]) / 10, 1) for p in outline]
+                                )
                                 shape.SetNormalsInterpolation("faceVarying")
                             uv = UsdGeom.PrimvarsAPI(shape).CreatePrimvar(
                                 "st", Sdf.ValueTypeNames.TexCoord2fArray, "faceVarying"
@@ -94,12 +96,35 @@ class TestUsdMeshHelpers(unittest.TestCase):
                             convex.CreatePointsAttr([(0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)])
                             convex.CreateFaceVertexCountsAttr([4])
                             convex.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+                            degenerate_outlines = {
+                                "RepeatedCorner": [
+                                    (0, 0, 2),
+                                    (1, 0, 2),
+                                    (1, 0, 2),
+                                    (1, 1, 2),
+                                    (0.4, 0.4, 2),
+                                    (0, 1, 2),
+                                ],
+                                "ZeroArea": [(0, 0, 3), (0, 0, 4), (0.01, 1, 3), (0.01, 1, 4)],
+                            }
+                            for name, boundary in degenerate_outlines.items():
+                                degenerate = UsdGeom.Mesh.Define(stage, f"/{name}")
+                                degenerate.CreatePointsAttr(boundary)
+                                degenerate.CreateFaceVertexCountsAttr([len(boundary)])
+                                degenerate.CreateFaceVertexIndicesAttr(list(range(len(boundary))))
                             stage.GetRootLayer().Save()
                             imported_stage = Usd.Stage.Open(str(path))
                             convex_mesh = newton.usd.get_mesh(
                                 imported_stage.GetPrimAtPath("/Convex"), compute_inertia=False
                             )
                             assert_np_equal(convex_mesh.indices, np.array([0, 1, 2, 0, 2, 3]))
+                            for name, boundary in degenerate_outlines.items():
+                                with self.assertLogs("newton", level="WARNING"):
+                                    degenerate_mesh = newton.usd.get_mesh(
+                                        imported_stage.GetPrimAtPath(f"/{name}"), compute_inertia=False
+                                    )
+                                expected_fan = [[0, corner, corner + 1] for corner in range(1, len(boundary) - 1)]
+                                assert_np_equal(degenerate_mesh.indices, np.asarray(expected_fan).reshape(-1))
                             mesh, corners = newton.usd.get_mesh(
                                 imported_stage.GetPrimAtPath("/Mesh"),
                                 load_uvs=True,
@@ -122,11 +147,13 @@ class TestUsdMeshHelpers(unittest.TestCase):
                                 vertices[indices.reshape(-1), :2] / np.array([3, 2], dtype=np.float32),
                             )
                             if face_normals:
-                                assert_np_equal(np.asarray(mesh.normals), np.tile([0, 0, 1], (len(vertices), 1)))
+                                expected_normals = np.column_stack((vertices[:, :2] / 10, np.ones(len(vertices))))
+                                expected_normals /= np.linalg.norm(expected_normals, axis=1, keepdims=True)
+                                assert_np_equal(np.asarray(mesh.normals), expected_normals, tol=1e-6)
                             builder = newton.ModelBuilder()
                             builder.add_usd(str(path))
                             model = builder.finalize(device="cpu")
-                            self.assertEqual(model.shape_count, 2)
+                            self.assertEqual(model.shape_count, 4)
                             stage = None
                             path.unlink()
 
