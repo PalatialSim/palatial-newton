@@ -22,14 +22,15 @@ def _build_solver(name: str, model: Any, params: dict) -> Any:
     """Construct a solver, forwarding only kwargs the solver accepts."""
     import inspect as _ins
     classes = {
-        "mujoco":        getattr(newton.solvers, "SolverMuJoCo",       None),
-        "xpbd":          getattr(newton.solvers, "SolverXPBD",         None),
-        "featherstone":  getattr(newton.solvers, "SolverFeatherstone", None),
-        "vbd":           getattr(newton.solvers, "SolverVBD",          None),
-        "semi_implicit": getattr(newton.solvers, "SolverSemiImplicit", None),
-        "style3d":       getattr(newton.solvers, "SolverStyle3D",      None),
+        "mujoco": "SolverMuJoCo",
+        "xpbd": "SolverXPBD",
+        "featherstone": "SolverFeatherstone",
+        "vbd": "SolverVBD",
+        "semi_implicit": "SolverSemiImplicit",
+        "style3d": "SolverStyle3D",
     }
-    cls = classes.get(name)
+    class_name = classes.get(name)
+    cls = getattr(newton.solvers, class_name, None) if class_name else None
     if cls is None:
         raise RuntimeError(f"Solver '{name}' not available in this Newton build")
 
